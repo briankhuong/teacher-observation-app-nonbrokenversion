@@ -6,8 +6,8 @@ import express from "express";
 import cors from "cors";
 
 import ocrAzureRoute from "./ocrAzureRoute.js";
-// (for now we can keep emailTeacherRoute wired if you want,
-// but it's optional while we pivot to delegated-email design)
+import mergeRoutes from "./mergeRoutes.js"; // 👈
+// If you keep teacher email route later:
 // import emailTeacherRoute from "./emailTeacherRoute.js";
 
 const app = express();
@@ -19,16 +19,16 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 // OCR endpoint
 app.use(ocrAzureRoute);
 
-// If you still want the /api/email stub mounted, uncomment:
-// app.use("/api/email", emailTeacherRoute);
+// 🔗 Merge endpoints mounted under /api
+app.use("/api", mergeRoutes);
 
 const PORT = process.env.OCR_SERVER_PORT || 4000;
 
 app.listen(PORT, () => {
-  console.log(`OCR server running at http://localhost:${PORT}`);
+  console.log(`OCR / merge server running at http://localhost:${PORT}`);
 });
