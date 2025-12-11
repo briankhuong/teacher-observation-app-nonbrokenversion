@@ -3,6 +3,14 @@ import React, { useState } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
 import { ObservationCard } from "./components/ObservationCard";
+import {
+  buildTeacherExportModel,
+  type ObservationMetaForExport,
+  type IndicatorStateForExport,
+} from "./exportTeacherModel";
+
+const MERGE_SERVER_BASE =
+  import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
 
 const STORAGE_PREFIX = "obs-v1-";
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
@@ -199,7 +207,21 @@ function groupBy<T>(
   }));
 }
 
+// ------------------------------
+// SHEET NAME HELPERS
+// ------------------------------
+function buildTeacherSheetName(meta: { date?: string }): string {
+  if (!meta?.date) return "Teacher Report";
 
+  const d = new Date(meta.date);
+  if (Number.isNaN(d.getTime())) return "Teacher Report";
+
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+
+  // Teacher naming convention you said is already working: "MM.YYYY"
+  return `${month}.${year}`;
+}
 /* ------------------------------
    COMPONENT
 --------------------------------- */
@@ -677,15 +699,217 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     // TODO: plug real post-call email logic here
   };
 
-  const handleMergeTeacherWorkbook = (obs: DashboardObservationRow) => {
-    console.log("[Merge TEACHER workbook] for obs", obs.id);
-    // TODO: merge into teacher workbook
+// Helper: quick & dirty sheet name for this test.
+// Later we’ll replace with your real naming rules.
+function getTeacherSheetNameForTest(obs: DashboardObservationRow): string {
+  // If you already have meta.date as "YYYY-MM-DD", we can turn it into "Jan.2025"
+  const rawDate = (obs as any).meta?.date;
+  if (rawDate) {
+    const d = new Date(rawDate);
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const label = `${monthNames[d.getMonth()]}.${d.getFullYear()}`;
+    return label; // e.g. "Jan.2025"
+  }
+
+  // fallback – you can type manually in the prompt
+  return window.prompt("Sheet name for TEACHER workbook (e.g. Jan.2025)?", "Jan.2025") || "Jan.2025";
+}
+
+function getAdminSheetNameForTest(obs: DashboardObservationRow): string {
+  const meta: any = (obs as any).meta || {};
+  const teacherName = meta.teacherName || "Teacher";
+  const rawDate = meta.date;
+
+  let base = "Jan.2025 Visit";
+
+  if (rawDate) {
+    const d = new Date(rawDate);
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const label = `${monthNames[d.getMonth()]}.${d.getFullYear()}`;
+    const supportType = meta.supportType || "Visit";
+    // Your later rule: `${teacherName} - ${month.year} SupportType`
+    base = `${teacherName} - ${label} ${supportType}`;
+  }
+
+  return window.prompt("Sheet name for ADMIN workbook?", base) || base;
+}
+
+const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+  // 🧪 DEBUG LOGGING — helps us see what data the observation has
+  console.log("=====================================================");
+  console.log("[MERGE teacher] obs:", obs);
+
+  const meta: any = (obs as any).meta || {};
+  console.log("[MERGE teacher] meta:", meta);
+  console.log("[MERGE teacher] meta.teacherWorksheetUrl:", meta.teacherWorksheetUrl);
+  console.log("[MERGE teacher] meta.teacherWorkbookUrl:", meta.teacherWorkbookUrl);
+
+  console.log("[MERGE teacher] (No teacher table lookup yet at meta level)");
+
+  // 1️⃣ Start with any URL stored on the observation itself
+  let workbookUrl: string | null =
+    (obs as any).teacherWorksheetUrl ||
+    (obs as any).teacherWorkbookUrl ||
+    null;
+
+  console.log("[MERGE teacher] workbookUrl from obs:", workbookUrl);
+
+  // 2️⃣ If still missing, try to find the teacher row in Supabase
+  if (!workbookUrl) {
+    try {
+      const teacherName = (obs as any).teacherName;
+      const schoolName = (obs as any).schoolName;
+      const campus = (obs as any).campus;
+
+      console.log("[MERGE teacher] Falling back to teachers table lookup with:", {
+        teacherName,
+        schoolName,
+        campus,
+      });
+
+      const { data, error } = await supabase
+        .from("teachers")
+        .select("worksheet_url")
+        .eq("name", teacherName)
+        .eq("school_name", schoolName)
+        .eq("campus", campus)
+        .limit(1);
+
+      if (error) {
+        console.error("[MERGE teacher] teachers lookup error", error);
+      } else if (data && data.length > 0 && data[0].worksheet_url) {
+        workbookUrl = data[0].worksheet_url;
+        console.log("[MERGE teacher] Found workbookUrl on teachers table:", workbookUrl);
+      } else {
+        console.log("[MERGE teacher] No matching teacher row with worksheet_url found.");
+      }
+    } catch (lookupErr) {
+      console.error("[MERGE teacher] Unexpected error during teacher lookup", lookupErr);
+    }
+  }
+
+  console.log("[MERGE teacher] Final workbookUrl:", workbookUrl);
+
+  // 3️⃣ Still nothing? Show the same alert as before.
+  if (!workbookUrl) {
+    alert("This observation/teacher does not have a teacher workbook URL set yet.");
+    return;
+
+    // OPTIONAL: if you want a testing fallback, uncomment this block:
+    /*
+    const fromPrompt = window.prompt(
+      "No workbook URL found.\nPaste editable TEACHER workbook URL:",
+      ""
+    );
+    if (!fromPrompt || !fromPrompt.trim()) {
+      alert("Still missing workbook URL — stopping.");
+      return;
+    }
+    workbookUrl = fromPrompt.trim();
+    console.log("[MERGE teacher] Fallback workbookUrl:", workbookUrl);
+    */
+  }
+
+  // 4️⃣ Sheet name for testing
+  const sheetName = getTeacherSheetNameForTest(obs);
+  console.log("[MERGE teacher] Using sheetName:", sheetName);
+
+  // 5️⃣ Build request body
+  const body = {
+    workbookUrl,
+    sheetName,
+    model: { demo: true, observationId: obs.id },
+    observationId: obs.id,
   };
 
-  const handleMergeAdminWorkbook = (obs: DashboardObservationRow) => {
-    console.log("[Merge ADMIN workbook] for obs", obs.id);
-    // TODO: merge into admin workbook
+  console.log("[Dashboard] Calling /api/merge-teacher with", body);
+
+  // 6️⃣ Call merge server
+  try {
+    const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const json = await resp.json();
+    console.log("[Dashboard] merge-teacher response", json);
+
+    if (!resp.ok || !json.ok) {
+      throw new Error(json.error || `HTTP ${resp.status}`);
+    }
+
+    const pretty =
+      typeof json.sheetUrl === "string"
+        ? json.sheetUrl
+        : JSON.stringify(json.sheetUrl, null, 2);
+
+    alert(`Teacher merge (stub) succeeded.\nSheet URL from server:\n\n${pretty}`);
+  } catch (err) {
+    console.error("[Dashboard] merge-teacher error", err);
+    alert("Teacher merge failed – check the console for details.");
+  }
+};
+
+const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+  // 1️⃣ Admin workbook URL comes from school.admin_workbook_url
+  const adminWorkbookUrl =
+    (obs as any).adminWorkbookUrl ||
+    (obs as any).schoolAdminWorkbookUrl ||
+    null;
+
+  if (!adminWorkbookUrl) {
+    alert("This observation's school does not have an admin workbook URL set yet.");
+    return;
+  }
+
+  const sheetName = getAdminSheetNameForTest(obs);
+
+  // You’ll have a real schoolId on your dashboard rows;
+  // for now we fall back to meta.schoolId if needed.
+  const schoolId =
+    (obs as any).school_id ||
+    (obs as any).schoolId ||
+    (obs as any).meta?.schoolId ||
+    "test-school-1";
+
+  const body = {
+    workbookUrl: adminWorkbookUrl,
+    sheetName,
+    model: { demo: true, observationId: obs.id },
+    observationId: obs.id,
+    schoolId,
   };
+
+  try {
+    console.log("[Dashboard] Calling /api/merge-admin with", body);
+
+    const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const json = await resp.json();
+    console.log("[Dashboard] merge-admin response", json);
+
+    if (!resp.ok || !json.ok) {
+      throw new Error(json.error || `HTTP ${resp.status}`);
+    }
+
+    const teacherSheetUrl = json.sheetUrl;
+    const viewOnlyWorkbookUrl = json.viewOnlyWorkbookUrl;
+
+    alert(
+      `Admin merge (stub) succeeded.\n` +
+      `Admin sheet URL:\n${teacherSheetUrl}\n\n` +
+      `View-only workbook URL (for later emails):\n${viewOnlyWorkbookUrl}`
+    );
+  } catch (err) {
+    console.error("[Dashboard] merge-admin error", err);
+    alert("Admin merge failed – check the console for details.");
+  }
+};
 
   const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
     console.log("[Admin update email] for obs", obs.id);
@@ -722,167 +946,175 @@ const renderRow = (
     });
   };
 
-  const openTeacherModal = (
-    e: React.MouseEvent<HTMLButtonElement>
-  ) => {
-    e.stopPropagation();
-    setActionModal({ obsId: obs.id, role: "teacher" });
-  };
+// No-argument version — clean and safe
+const openTeacherModal = () => {
+  setActionModal({ obsId: obs.id, role: "teacher" });
+};
 
-  const openAdminModal = (
-    e: React.MouseEvent<HTMLButtonElement>
-  ) => {
-    e.stopPropagation();
-    setActionModal({ obsId: obs.id, role: "admin" });
-  };
+const openAdminModal = () => {
+  setActionModal({ obsId: obs.id, role: "admin" });
+};
 
   const canShowMergeLinks =
     !options?.hideMergeLinks &&
     (!!obs.teacherWorkbookUrl || !!obs.adminWorkbookUrl);
 
   return (
-    <button
-      key={obs.id}
-      type="button"
-      className="obs-row"
-      onClick={handleOpenWorkspace}
-    >
-      <div
-        className={`obs-status-strip ${
-          obs.statusColor === "good"
-            ? "obs-status-good"
-            : obs.statusColor === "growth"
-            ? "obs-status-growth"
-            : "obs-status-mixed"
-        }`}
-      />
+  <div
+    key={obs.id}
+    role="button"
+    tabIndex={0}
+    className="obs-row"
+    onClick={handleOpenWorkspace}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleOpenWorkspace();
+      }
+    }}
+  >
+    <div
+      className={`obs-status-strip ${
+        obs.statusColor === "good"
+          ? "obs-status-good"
+          : obs.statusColor === "growth"
+          ? "obs-status-growth"
+          : "obs-status-mixed"
+      }`}
+    />
 
-      <div className="obs-row-left">
-        <div className="obs-row-header">
-          <div className="obs-teacher">{obs.teacherName}</div>
-        </div>
-
-        <div className="obs-meta">
-          {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
-          {obs.lesson} • {obs.supportType}
-        </div>
-
-        {/* tags row + Teacher/Admin pills under it */}
-        <div className="obs-tags-row">
-          <div className="obs-tags">
-            <span
-              className={
-                obs.status === "saved"
-                  ? "obs-tag obs-tag-completed"
-                  : "obs-tag obs-tag-draft"
-              }
-            >
-              {obs.status === "saved" ? "Completed" : "Draft"}
-            </span>
-            <span className="obs-progress">
-              {obs.progress} / {obs.totalIndicators} indicators
-            </span>
-          </div>
-
-          <div className="obs-pill-row">
-            <button
-              type="button"
-              className="obs-pill-button"
-              onClick={openTeacherModal}
-            >
-              Teacher…
-            </button>
-            <button
-              type="button"
-              className="obs-pill-button"
-              onClick={openAdminModal}
-            >
-              Admin…
-            </button>
-          </div>
-        </div>
-
-        {/* Merge workbook links strip */}
-        {canShowMergeLinks && (
-          <div className="obs-merge-links">
-            {obs.teacherWorkbookUrl && (
-              <div className="obs-merge-row">
-                <span className="obs-merge-label">Teacher workbook</span>
-                <div className="obs-merge-actions">
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(
-                        obs.teacherWorkbookUrl as string,
-                        "_blank",
-                        "noopener,noreferrer"
-                      );
-                    }}
-                  >
-                    Open ⧉
-                  </button>
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (navigator.clipboard?.writeText) {
-                        navigator.clipboard.writeText(
-                          obs.teacherWorkbookUrl as string
-                        );
-                      }
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {obs.adminWorkbookUrl && (
-              <div className="obs-merge-row">
-                <span className="obs-merge-label">Admin workbook</span>
-                <div className="obs-merge-actions">
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(
-                        obs.adminWorkbookUrl as string,
-                        "_blank",
-                        "noopener,noreferrer"
-                      );
-                    }}
-                  >
-                    Open ⧉
-                  </button>
-                  <button
-                    type="button"
-                    className="obs-merge-pill"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (navigator.clipboard?.writeText) {
-                        navigator.clipboard.writeText(
-                          obs.adminWorkbookUrl as string
-                        );
-                      }
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+    <div className="obs-row-left">
+      <div className="obs-row-header">
+        <div className="obs-teacher">{obs.teacherName}</div>
       </div>
 
-      <div className="obs-date">{obs.dateLabel}</div>
-    </button>
-  );
+      <div className="obs-meta">
+        {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
+        {obs.lesson} • {obs.supportType}
+      </div>
+
+      {/* tags row + Teacher/Admin pills under it */}
+      <div className="obs-tags-row">
+        <div className="obs-tags">
+          <span
+            className={
+              obs.status === "saved"
+                ? "obs-tag obs-tag-completed"
+                : "obs-tag obs-tag-draft"
+            }
+          >
+            {obs.status === "saved" ? "Completed" : "Draft"}
+          </span>
+          <span className="obs-progress">
+            {obs.progress} / {obs.totalIndicators} indicators
+          </span>
+        </div>
+
+        <div className="obs-pill-row">
+          <button
+            type="button"
+            className="obs-pill-button"
+            onClick={(e) => {
+              e.stopPropagation();
+              openTeacherModal();
+            }}
+          >
+            Teacher…
+          </button>
+          <button
+            type="button"
+            className="obs-pill-button"
+            onClick={(e) => {
+              e.stopPropagation();
+              openAdminModal();
+            }}
+          >
+            Admin…
+          </button>
+        </div>
+      </div>
+
+      {/* Merge workbook links strip */}
+      {canShowMergeLinks && (
+        <div className="obs-merge-links">
+          {obs.teacherWorkbookUrl && (
+            <div className="obs-merge-row">
+              <span className="obs-merge-label">Teacher workbook</span>
+              <div className="obs-merge-actions">
+                <button
+                  type="button"
+                  className="obs-merge-pill"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(
+                      obs.teacherWorkbookUrl as string,
+                      "_blank",
+                      "noopener,noreferrer"
+                    );
+                  }}
+                >
+                  Open ⧉
+                </button>
+                <button
+                  type="button"
+                  className="obs-merge-pill"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (navigator.clipboard?.writeText) {
+                      navigator.clipboard.writeText(
+                        obs.teacherWorkbookUrl as string
+                      );
+                    }
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+
+          {obs.adminWorkbookUrl && (
+            <div className="obs-merge-row">
+              <span className="obs-merge-label">Admin workbook</span>
+              <div className="obs-merge-actions">
+                <button
+                  type="button"
+                  className="obs-merge-pill"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(
+                      obs.adminWorkbookUrl as string,
+                      "_blank",
+                      "noopener,noreferrer"
+                    );
+                  }}
+                >
+                  Open ⧉
+                </button>
+                <button
+                  type="button"
+                  className="obs-merge-pill"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (navigator.clipboard?.writeText) {
+                      navigator.clipboard.writeText(
+                        obs.adminWorkbookUrl as string
+                      );
+                    }
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+
+    <div className="obs-date">{obs.dateLabel}</div>
+  </div>
+);
 };
   // NEW: grouped renderer with collapsed stack
   const renderGroup = (group: {

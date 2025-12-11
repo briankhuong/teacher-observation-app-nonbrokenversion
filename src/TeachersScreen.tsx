@@ -504,19 +504,44 @@ export const TeachersScreen: React.FC = () => {
                             {row.email || "—"}
                           </div>
                         </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="link-button"
-                            disabled={!row.worksheet_url}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenWorksheet(row);
-                            }}
-                          >
-                            {row.worksheet_url ? "Open" : "Not set"}
-                          </button>
-                        </td>
+                          <td>
+                              {row.worksheet_url ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  {/* Open button */}
+                                  <button
+                                    type="button"
+                                    className="link-button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenWorksheet(row);
+                                    }}
+                                  >
+                                    Open
+                                  </button>
+
+                                  {/* Copy button */}
+                                  <button
+                                    type="button"
+                                    className="icon-button"
+                                    title="Copy workbook link"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const url = row.worksheet_url;
+                                      if (!url) return; // TS: now narrowed to string
+
+                                      navigator.clipboard
+                                        .writeText(url)
+                                        .catch((err) => console.error("Copy failed", err));
+                                    }}
+                                  >
+                                    📋
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="entity-cell-sub">Not set</span>
+                              )}
+                            </td>
+                                                  
                         <td>
                           <div
                             className="table-actions"

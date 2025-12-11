@@ -53,6 +53,7 @@ async function getGraphToken() {
   return result.accessToken;
 }
 
+
 /**
  * Send an HTML email through Microsoft Graph with optional attachments.
  *

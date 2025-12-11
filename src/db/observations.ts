@@ -79,3 +79,43 @@ export async function saveObservationToDb(args: {
     throw error;
   }
 }
+
+export async function updateObservationMetaLinks(opts: {
+  id: string;
+  teacherSheetUrl?: string;
+  adminSheetUrl?: string;
+}) {
+  const { id, teacherSheetUrl, adminSheetUrl } = opts;
+
+  // Fetch current meta
+  const { data: row, error: fetchError } = await supabase
+    .from("observations")
+    .select("meta")
+    .eq("id", id)
+    .single();
+
+  if (fetchError) {
+    console.error("[DB] updateObservationMetaLinks fetch error", fetchError);
+    throw fetchError;
+  }
+
+  const meta = (row?.meta ?? {}) as any;
+  if (teacherSheetUrl !== undefined) {
+    meta.teacherSheetUrl = teacherSheetUrl;
+  }
+  if (adminSheetUrl !== undefined) {
+    meta.adminSheetUrl = adminSheetUrl;
+  }
+
+  const { error: updateError } = await supabase
+    .from("observations")
+    .update({ meta })
+    .eq("id", id);
+
+  if (updateError) {
+    console.error("[DB] updateObservationMetaLinks update error", updateError);
+    throw updateError;
+  }
+
+  return meta as typeof meta;
+}
