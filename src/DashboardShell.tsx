@@ -8,6 +8,7 @@ import {
   type ObservationMetaForExport,
   type IndicatorStateForExport,
 } from "./exportTeacherModel";
+import { buildAdminExportModel } from "./exportAdminModel";
 
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
@@ -734,18 +735,50 @@ function getAdminSheetNameForTest(obs: DashboardObservationRow): string {
   return window.prompt("Sheet name for ADMIN workbook?", base) || base;
 }
 
+async function loadObservationDetailsForExport(observationId: string): Promise<{
+  meta: any;
+  indicators: any[];
+}> {
+  // 1) Prefer localStorage (workspace is source-of-truth for latest edits)
+  const storageKey = `${STORAGE_PREFIX}${observationId}`;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        meta: parsed?.meta ?? {},
+        indicators: Array.isArray(parsed?.indicators) ? parsed.indicators : [],
+      };
+    }
+  } catch (err) {
+    console.error("[export] failed to parse localStorage observation", err);
+  }
+
+  // 2) Fallback to Supabase row
+  const { data, error } = await supabase
+    .from("observations")
+    .select("meta, indicators, observation_date")
+    .eq("id", observationId)
+    .single();
+
+  if (error) {
+    console.error("[export] failed to load observation from DB", error);
+    return { meta: {}, indicators: [] };
+  }
+
+  const meta = data?.meta ?? {};
+  // ensure meta.date exists if DB stores it separately
+  if (!meta?.date && data?.observation_date) {
+    meta.date = data.observation_date;
+  }
+
+  return {
+    meta,
+    indicators: Array.isArray(data?.indicators) ? data.indicators : [],
+  };
+}
+
 const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
-  // 🧪 DEBUG LOGGING — helps us see what data the observation has
-  console.log("=====================================================");
-  console.log("[MERGE teacher] obs:", obs);
-
-  const meta: any = (obs as any).meta || {};
-  console.log("[MERGE teacher] meta:", meta);
-  console.log("[MERGE teacher] meta.teacherWorksheetUrl:", meta.teacherWorksheetUrl);
-  console.log("[MERGE teacher] meta.teacherWorkbookUrl:", meta.teacherWorkbookUrl);
-
-  console.log("[MERGE teacher] (No teacher table lookup yet at meta level)");
-
   // 1️⃣ Start with any URL stored on the observation itself
   let workbookUrl: string | null =
     (obs as any).teacherWorksheetUrl ||
@@ -754,18 +787,12 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 
   console.log("[MERGE teacher] workbookUrl from obs:", workbookUrl);
 
-  // 2️⃣ If still missing, try to find the teacher row in Supabase
+  // 2️⃣ If still missing, try teachers table
   if (!workbookUrl) {
     try {
       const teacherName = (obs as any).teacherName;
       const schoolName = (obs as any).schoolName;
       const campus = (obs as any).campus;
-
-      console.log("[MERGE teacher] Falling back to teachers table lookup with:", {
-        teacherName,
-        schoolName,
-        campus,
-      });
 
       const { data, error } = await supabase
         .from("teachers")
@@ -775,56 +802,48 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
         .eq("campus", campus)
         .limit(1);
 
-      if (error) {
-        console.error("[MERGE teacher] teachers lookup error", error);
-      } else if (data && data.length > 0 && data[0].worksheet_url) {
+      if (!error && data?.[0]?.worksheet_url) {
         workbookUrl = data[0].worksheet_url;
-        console.log("[MERGE teacher] Found workbookUrl on teachers table:", workbookUrl);
-      } else {
-        console.log("[MERGE teacher] No matching teacher row with worksheet_url found.");
+        console.log("[MERGE teacher] Found workbookUrl:", workbookUrl);
       }
-    } catch (lookupErr) {
-      console.error("[MERGE teacher] Unexpected error during teacher lookup", lookupErr);
+    } catch (err) {
+      console.error("[MERGE teacher] lookup error", err);
     }
   }
 
-  console.log("[MERGE teacher] Final workbookUrl:", workbookUrl);
-
-  // 3️⃣ Still nothing? Show the same alert as before.
   if (!workbookUrl) {
     alert("This observation/teacher does not have a teacher workbook URL set yet.");
     return;
-
-    // OPTIONAL: if you want a testing fallback, uncomment this block:
-    /*
-    const fromPrompt = window.prompt(
-      "No workbook URL found.\nPaste editable TEACHER workbook URL:",
-      ""
-    );
-    if (!fromPrompt || !fromPrompt.trim()) {
-      alert("Still missing workbook URL — stopping.");
-      return;
-    }
-    workbookUrl = fromPrompt.trim();
-    console.log("[MERGE teacher] Fallback workbookUrl:", workbookUrl);
-    */
   }
 
-  // 4️⃣ Sheet name for testing
+  // 3️⃣ Sheet name (month.year collision-safe logic already exists)
   const sheetName = getTeacherSheetNameForTest(obs);
-  console.log("[MERGE teacher] Using sheetName:", sheetName);
 
-  // 5️⃣ Build request body
+  // 4️⃣ Load REAL observation data
+  const { meta, indicators } = await loadObservationDetailsForExport(obs.id);
+
+  const exportMeta: ObservationMetaForExport = {
+    teacherName: meta.teacherName ?? obs.teacherName,
+    schoolName: meta.schoolName ?? obs.schoolName,
+    campus: meta.campus ?? obs.campus,
+    unit: meta.unit ?? obs.unit,
+    lesson: meta.lesson ?? obs.lesson,
+    supportType: meta.supportType ?? obs.supportType,
+    date: meta.date ?? obs.isoDate ?? "",
+  };
+
+  const exportIndicators = (indicators ?? []) as IndicatorStateForExport[];
+
+  // ✅ REAL model
+  const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
+
   const body = {
     workbookUrl,
     sheetName,
-    model: { demo: true, observationId: obs.id },
+    model: teacherModel,
     observationId: obs.id,
   };
 
-  console.log("[Dashboard] Calling /api/merge-teacher with", body);
-
-  // 6️⃣ Call merge server
   try {
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
       method: "POST",
@@ -833,57 +852,121 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     });
 
     const json = await resp.json();
-    console.log("[Dashboard] merge-teacher response", json);
 
     if (!resp.ok || !json.ok) {
       throw new Error(json.error || `HTTP ${resp.status}`);
     }
 
-    const pretty =
-      typeof json.sheetUrl === "string"
-        ? json.sheetUrl
-        : JSON.stringify(json.sheetUrl, null, 2);
+    const sheetUrl =
+  typeof json.sheetUrl === "string"
+    ? json.sheetUrl
+    : json.sheetUrl?.sheetUrl;
 
-    alert(`Teacher merge (stub) succeeded.\nSheet URL from server:\n\n${pretty}`);
+    if (!sheetUrl) {
+      console.error("[MERGE teacher] Unexpected response shape:", json);
+      alert("Teacher merge succeeded, but no sheet URL was returned.");
+      return;
+    }
+
+    alert(
+      `Teacher merge succeeded.\n\n` +
+      `Sheet URL:\n${sheetUrl}`
+    );
+
   } catch (err) {
     console.error("[Dashboard] merge-teacher error", err);
-    alert("Teacher merge failed – check the console for details.");
+    alert("Teacher merge failed – check console.");
   }
 };
 
 const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
-  // 1️⃣ Admin workbook URL comes from school.admin_workbook_url
-  const adminWorkbookUrl =
+  // 1) Try to get the admin workbook edit URL from the observation row first
+  let adminWorkbookUrl: string | null =
     (obs as any).adminWorkbookUrl ||
     (obs as any).schoolAdminWorkbookUrl ||
     null;
 
-  if (!adminWorkbookUrl) {
-    alert("This observation's school does not have an admin workbook URL set yet.");
-    return;
-  }
-
-  const sheetName = getAdminSheetNameForTest(obs);
-
-  // You’ll have a real schoolId on your dashboard rows;
-  // for now we fall back to meta.schoolId if needed.
-  const schoolId =
+  // We also want schoolId for server persistence (view-only URL -> schools table)
+  let schoolId: string | null =
     (obs as any).school_id ||
     (obs as any).schoolId ||
     (obs as any).meta?.schoolId ||
-    "test-school-1";
+    null;
 
+  // 2) If missing, fallback lookup in schools table by (school_name + campus_name)
+  if (!adminWorkbookUrl || !schoolId) {
+    try {
+      const schoolName = (obs as any).schoolName;
+      const campus = (obs as any).campus;
+
+      console.log("[MERGE admin] fallback schools lookup with:", {
+        schoolName,
+        campus,
+      });
+
+      const { data, error } = await supabase
+        .from("schools")
+        .select("id, admin_workbook_url")
+        .eq("school_name", schoolName)
+        .eq("campus_name", campus)
+        .limit(1);
+
+      if (error) {
+        console.error("[MERGE admin] schools lookup error", error);
+      } else if (data && data.length > 0) {
+        if (!schoolId && data[0].id) schoolId = data[0].id;
+        if (!adminWorkbookUrl && data[0].admin_workbook_url) {
+          adminWorkbookUrl = data[0].admin_workbook_url;
+        }
+      }
+    } catch (err) {
+      console.error("[MERGE admin] unexpected error during schools lookup", err);
+    }
+  }
+
+  // 3) Still missing? Stop.
+  if (!adminWorkbookUrl) {
+    alert("This school's admin workbook URL is not set yet.");
+    return;
+  }
+  if (!schoolId) {
+    alert("Cannot merge admin workbook because schoolId is missing.");
+    return;
+  }
+
+  // 4) Sheet name prompt (use your existing helper)
+  const sheetName = getAdminSheetNameForTest(obs);
+
+  // 5) Load REAL observation data for export model
+  const { meta, indicators } = await loadObservationDetailsForExport(obs.id);
+
+  const exportMeta: ObservationMetaForExport = {
+    teacherName: meta?.teacherName ?? obs.teacherName,
+    schoolName: meta?.schoolName ?? obs.schoolName,
+    campus: meta?.campus ?? obs.campus,
+    unit: meta?.unit ?? obs.unit,
+    lesson: meta?.lesson ?? obs.lesson,
+    supportType: meta?.supportType ?? obs.supportType,
+    date: meta?.date ?? obs.isoDate ?? "",
+  };
+
+  const exportIndicators = (indicators ?? []) as IndicatorStateForExport[];
+
+  // ✅ REAL admin model (correct signature: (meta, indicators))
+  const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
+
+  // 6) Call merge server
   const body = {
     workbookUrl: adminWorkbookUrl,
     sheetName,
-    model: { demo: true, observationId: obs.id },
+    model: adminModel,
     observationId: obs.id,
     schoolId,
   };
 
-  try {
-    console.log("[Dashboard] Calling /api/merge-admin with", body);
+  console.log("[Dashboard] Calling /api/merge-admin with", body);
 
+  try {
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -897,17 +980,29 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
       throw new Error(json.error || `HTTP ${resp.status}`);
     }
 
-    const teacherSheetUrl = json.sheetUrl;
-    const viewOnlyWorkbookUrl = json.viewOnlyWorkbookUrl;
+    // Normalize response (avoid [object Object])
+    const sheetUrl =
+      typeof json.sheetUrl === "string" ? json.sheetUrl : json.sheetUrl?.sheetUrl;
+
+    const viewOnlyWorkbookUrl =
+      typeof json.viewOnlyWorkbookUrl === "string"
+        ? json.viewOnlyWorkbookUrl
+        : json.viewOnlyWorkbookUrl?.viewOnlyWorkbookUrl;
+
+    if (!sheetUrl) {
+      console.error("[MERGE admin] Unexpected response shape:", json);
+      alert("Admin merge succeeded, but no sheet URL was returned.");
+      return;
+    }
 
     alert(
-      `Admin merge (stub) succeeded.\n` +
-      `Admin sheet URL:\n${teacherSheetUrl}\n\n` +
-      `View-only workbook URL (for later emails):\n${viewOnlyWorkbookUrl}`
+      `Admin merge succeeded.\n\n` +
+        `Admin sheet URL:\n${sheetUrl}\n\n` +
+        `View-only workbook URL (for admin email later):\n${viewOnlyWorkbookUrl || "(none returned)"}`
     );
   } catch (err) {
     console.error("[Dashboard] merge-admin error", err);
-    alert("Admin merge failed – check the console for details.");
+    alert("Admin merge failed – check console.");
   }
 };
 

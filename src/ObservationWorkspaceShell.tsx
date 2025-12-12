@@ -34,7 +34,7 @@ interface ObservationWorkspaceProps {
   onBack: () => void;
 }
 
-// OCR result from handwriting conversion
+// OCR result from handwriting conversionfv
 interface OcrResult {
   text: string;
   confidence: number;
@@ -562,6 +562,7 @@ export const ObservationWorkspaceShell: React.FC<
     // 2️⃣ Nothing in localStorage → load from Supabase
       try {
         const row = await loadObservationFromDb(observationMeta.id);
+    
 
         if (cancelled) return;
 
