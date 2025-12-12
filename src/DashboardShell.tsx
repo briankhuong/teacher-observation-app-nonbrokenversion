@@ -8,7 +8,7 @@ import {
   type ObservationMetaForExport,
   type IndicatorStateForExport,
 } from "./exportTeacherModel";
-import { ensureGraphLogin, getGraphAccessToken } from "./graph/msalGraph";
+import { getGraphAccessToken } from "./msal/getGraphToken";
 
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
@@ -820,11 +820,12 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
   console.log("[Dashboard] Calling /api/merge-teacher with", body);
 
   try {
+    const token = await getGraphAccessToken();
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${graphToken}`, // ✅ pass token to server
+        Authorization: `Bearer ${token}`, // ✅ delegated token
       },
       body: JSON.stringify(body),
     });
@@ -851,26 +852,80 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 };
 
 const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
-  // 1️⃣ Admin workbook URL comes from school.admin_workbook_url
-  const adminWorkbookUrl =
+  console.log("=====================================================");
+  console.log("[MERGE admin] obs:", obs);
+
+  // 1) Try from observation row first (in case you add it later)
+  let adminWorkbookUrl: string | null =
     (obs as any).adminWorkbookUrl ||
     (obs as any).schoolAdminWorkbookUrl ||
     null;
 
+  console.log("[MERGE admin] adminWorkbookUrl from obs:", adminWorkbookUrl);
+
+  // 2) Fallback: look up from schools table using (school_name, campus_name)
+  if (!adminWorkbookUrl) {
+    try {
+      const schoolName = (obs as any).schoolName;
+      const campus = (obs as any).campus;
+
+      console.log("[MERGE admin] Falling back to schools lookup with:", {
+        schoolName,
+        campus,
+      });
+
+      const { data, error } = await supabase
+        .from("schools")
+        .select("id, admin_workbook_url")
+        .eq("school_name", schoolName)
+        .eq("campus_name", campus)
+        .limit(1);
+
+      if (error) {
+        console.error("[MERGE admin] schools lookup error", error);
+      } else if (data && data.length > 0 && data[0].admin_workbook_url) {
+        adminWorkbookUrl = data[0].admin_workbook_url;
+        console.log(
+          "[MERGE admin] Found adminWorkbookUrl on schools table:",
+          adminWorkbookUrl
+        );
+      } else {
+        console.log("[MERGE admin] No matching school row with admin_workbook_url found.");
+      }
+    } catch (e) {
+      console.error("[MERGE admin] Unexpected error during school lookup", e);
+    }
+  }
+
+  // 3) Still missing -> stop
   if (!adminWorkbookUrl) {
     alert("This observation's school does not have an admin workbook URL set yet.");
     return;
   }
 
+  // 4) Sheet name
   const sheetName = getAdminSheetNameForTest(obs);
 
-  // You’ll have a real schoolId on your dashboard rows;
-  // for now we fall back to meta.schoolId if needed.
-  const schoolId =
+  // 5) schoolId (optional for now; your server expects it)
+  // We can look it up again quickly to get id.
+  let schoolId =
     (obs as any).school_id ||
     (obs as any).schoolId ||
     (obs as any).meta?.schoolId ||
-    "test-school-1";
+    null;
+
+  if (!schoolId) {
+    const { data } = await supabase
+      .from("schools")
+      .select("id")
+      .eq("school_name", obs.schoolName)
+      .eq("campus_name", obs.campus)
+      .limit(1);
+
+    if (data?.[0]?.id) schoolId = data[0].id;
+  }
+
+  if (!schoolId) schoolId = "missing-school-id"; // dev fallback
 
   const body = {
     workbookUrl: adminWorkbookUrl,
@@ -883,9 +938,13 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   try {
     console.log("[Dashboard] Calling /api/merge-admin with", body);
 
+    const token = await getGraphAccessToken();
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify(body),
     });
 
@@ -896,13 +955,8 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
       throw new Error(json.error || `HTTP ${resp.status}`);
     }
 
-    const teacherSheetUrl = json.sheetUrl;
-    const viewOnlyWorkbookUrl = json.viewOnlyWorkbookUrl;
-
     alert(
-      `Admin merge (stub) succeeded.\n` +
-      `Admin sheet URL:\n${teacherSheetUrl}\n\n` +
-      `View-only workbook URL (for later emails):\n${viewOnlyWorkbookUrl}`
+      `Admin merge succeeded.\n\nAdmin sheet URL:\n${json.sheetUrl}\n\nView-only workbook URL:\n${json.viewOnlyWorkbookUrl || "(none returned)"}`
     );
   } catch (err) {
     console.error("[Dashboard] merge-admin error", err);
@@ -1248,18 +1302,6 @@ const openAdminModal = () => {
               >
                 AM Summary…
               </button>
-              <button
-                  onClick={async () => {
-                    try {
-                      await ensureGraphLogin();
-                      alert("Microsoft connected ✅");
-                    } catch (e: any) {
-                      alert(e?.message || "Microsoft connect failed");
-                    }
-                  }}
-                >
-                  Connect Microsoft
-                </button>
             </div>
           </div>
         </div>
