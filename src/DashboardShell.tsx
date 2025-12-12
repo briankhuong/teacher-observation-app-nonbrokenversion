@@ -8,6 +8,7 @@ import {
   type ObservationMetaForExport,
   type IndicatorStateForExport,
 } from "./exportTeacherModel";
+import { ensureGraphLogin, getGraphAccessToken } from "./graph/msalGraph";
 
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
@@ -744,8 +745,6 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
   console.log("[MERGE teacher] meta.teacherWorksheetUrl:", meta.teacherWorksheetUrl);
   console.log("[MERGE teacher] meta.teacherWorkbookUrl:", meta.teacherWorkbookUrl);
 
-  console.log("[MERGE teacher] (No teacher table lookup yet at meta level)");
-
   // 1️⃣ Start with any URL stored on the observation itself
   let workbookUrl: string | null =
     (obs as any).teacherWorksheetUrl ||
@@ -790,31 +789,27 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 
   console.log("[MERGE teacher] Final workbookUrl:", workbookUrl);
 
-  // 3️⃣ Still nothing? Show the same alert as before.
+  // 3️⃣ Still nothing? stop
   if (!workbookUrl) {
     alert("This observation/teacher does not have a teacher workbook URL set yet.");
     return;
-
-    // OPTIONAL: if you want a testing fallback, uncomment this block:
-    /*
-    const fromPrompt = window.prompt(
-      "No workbook URL found.\nPaste editable TEACHER workbook URL:",
-      ""
-    );
-    if (!fromPrompt || !fromPrompt.trim()) {
-      alert("Still missing workbook URL — stopping.");
-      return;
-    }
-    workbookUrl = fromPrompt.trim();
-    console.log("[MERGE teacher] Fallback workbookUrl:", workbookUrl);
-    */
   }
 
-  // 4️⃣ Sheet name for testing
+  // 4️⃣ Sheet name
   const sheetName = getTeacherSheetNameForTest(obs);
   console.log("[MERGE teacher] Using sheetName:", sheetName);
 
-  // 5️⃣ Build request body
+  // ✅ 5️⃣ Acquire Graph delegated access token (MSAL optional layer)
+  let graphToken = "";
+  try {
+    graphToken = await getGraphAccessToken();
+  } catch (e: any) {
+    console.error("[MERGE teacher] getGraphAccessToken failed", e);
+    alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
+    return;
+  }
+
+  // 6️⃣ Build request body (still your stub model for now)
   const body = {
     workbookUrl,
     sheetName,
@@ -824,11 +819,13 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 
   console.log("[Dashboard] Calling /api/merge-teacher with", body);
 
-  // 6️⃣ Call merge server
   try {
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${graphToken}`, // ✅ pass token to server
+      },
       body: JSON.stringify(body),
     });
 
@@ -839,12 +836,14 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       throw new Error(json.error || `HTTP ${resp.status}`);
     }
 
-    const pretty =
+    const sheetUrl =
       typeof json.sheetUrl === "string"
         ? json.sheetUrl
-        : JSON.stringify(json.sheetUrl, null, 2);
+        : json.sheetUrl?.sheetUrl;
 
-    alert(`Teacher merge (stub) succeeded.\nSheet URL from server:\n\n${pretty}`);
+    alert(
+      `Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl || "(none returned)"}`
+    );
   } catch (err) {
     console.error("[Dashboard] merge-teacher error", err);
     alert("Teacher merge failed – check the console for details.");
@@ -1249,6 +1248,18 @@ const openAdminModal = () => {
               >
                 AM Summary…
               </button>
+              <button
+                  onClick={async () => {
+                    try {
+                      await ensureGraphLogin();
+                      alert("Microsoft connected ✅");
+                    } catch (e: any) {
+                      alert(e?.message || "Microsoft connect failed");
+                    }
+                  }}
+                >
+                  Connect Microsoft
+                </button>
             </div>
           </div>
         </div>
