@@ -1,105 +1,84 @@
 // server/mergeRoutes.js
+
 import express from "express";
 import { mergeTeacherSheet, mergeAdminSheet } from "./msGraphWorkbook.js";
-import {
-  updateObservationMetaLinks,
-  updateSchoolViewOnlyUrl,
-} from "./supabaseHelpers.js";
+import { updateSchoolViewOnlyUrl } from "./supabaseHelpers.js";
 
 const router = express.Router();
 
-// Simple debug route to confirm mounting
-router.get("/ping", (req, res) => {
-  res.json({ ok: true, from: "mergeRoutes" });
-});
-
-// POST /api/merge-teacher  (mounted later at /api)
 router.post("/merge-teacher", async (req, res) => {
   try {
-    const { workbookUrl, sheetName, model, observationId } = req.body || {};
+    const { workbookUrl, sheetName, model } = req.body || {};
 
-    if (!workbookUrl || !sheetName || !model || !observationId) {
+    if (!workbookUrl || !sheetName || !model) {
       return res.status(400).json({
         ok: false,
-        error: "Missing workbookUrl, sheetName, model or observationId",
+        error: "Missing workbookUrl, sheetName, or model",
       });
     }
 
-    console.log("[/api/merge-teacher] body:", {
-      workbookUrl,
-      sheetName,
-      hasModel: !!model,
-      observationId,
-    });
-
-    // 1) merge into teacher workbook (Graph)
     const sheetUrl = await mergeTeacherSheet({
       workbookUrl,
       sheetName,
       model,
     });
 
-    // 2) store sheetUrl into observation.meta.teacherSheetUrl
-    await updateObservationMetaLinks({
-      id: observationId,
-      teacherSheetUrl: sheetUrl,
-    });
+    // ✅ DO NOT persist anywhere
+    // Teacher workbook URL lives in TEACHERS table only
 
     return res.json({ ok: true, sheetUrl });
   } catch (err) {
-    console.error("[route] /api/merge-teacher error", err);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
+  console.error("[route] /api/merge-teacher error", err);
+  return res.status(500).json({
+    ok: false,
+    error: err?.message || "Server error",
+    stack: err?.stack, // DEV only (remove later)
+  });
+}
 });
 
-// POST /api/merge-admin  (mounted later at /api)
+
+
 router.post("/merge-admin", async (req, res) => {
   try {
-    const { workbookUrl, sheetName, model, observationId, schoolId } =
-      req.body || {};
+    const { workbookUrl, sheetName, model, schoolId } = req.body || {};
 
-    if (!workbookUrl || !sheetName || !model || !observationId || !schoolId) {
+    if (!workbookUrl || !sheetName || !model || !schoolId) {
       return res.status(400).json({
         ok: false,
-        error:
-          "Missing workbookUrl, sheetName, model, observationId or schoolId",
+        error: "Missing workbookUrl, sheetName, model, or schoolId",
       });
     }
 
-    console.log("[/api/merge-admin] body:", {
-      workbookUrl,
-      sheetName,
-      hasModel: !!model,
-      observationId,
-      schoolId,
-    });
-
-    // 1) merge into admin workbook (Graph)
-    const { sheetUrl, viewOnlyWorkbookUrl } = await mergeAdminSheet({
+    const sheetUrl = await mergeAdminSheet({
       workbookUrl,
       sheetName,
       model,
     });
 
-    // 2) update observation.meta.adminSheetUrl
-    await updateObservationMetaLinks({
-      id: observationId,
-      adminSheetUrl: sheetUrl,
-    });
+    // ⚠️ View-only link not implemented yet
+    // Will be added later via Graph createLink(type=view)
+    const viewOnlyWorkbookUrl = null;
 
-    // 3) update schools.admin_view_only_workbook_url
     if (viewOnlyWorkbookUrl) {
       await updateSchoolViewOnlyUrl({
         id: schoolId,
-        viewOnlyWorkbookUrl,
+        viewOnlyUrl: viewOnlyWorkbookUrl,
       });
     }
 
-    return res.json({ ok: true, sheetUrl, viewOnlyWorkbookUrl });
+    return res.json({
+      ok: true,
+      sheetUrl,
+      viewOnlyWorkbookUrl,
+    });
   } catch (err) {
-    console.error("[route] /api/merge-admin error", err);
-    return res.status(500).json({ ok: false, error: "Server error" });
-  }
+  console.error("[route] /api/merge-admin error", err);
+  return res.status(500).json({
+    ok: false,
+    error: err?.message || "Server error",
+    stack: err?.stack, // DEV only (remove later)
+  });
+}
 });
-
 export default router;
