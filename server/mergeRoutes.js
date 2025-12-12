@@ -5,25 +5,23 @@ import { updateSchoolViewOnlyUrl } from "./supabaseHelpers.js";
 
 const router = express.Router();
 
-function getBearerToken(req) {
-  const h = req.headers?.authorization || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] || null;
-}
-
-// Simple debug route to confirm mounting
 router.get("/ping", (req, res) => {
   res.json({ ok: true, from: "mergeRoutes" });
 });
 
-// POST /api/merge-teacher
+function extractBearerToken(req) {
+  const auth = req.headers.authorization || "";
+  if (!auth.startsWith("Bearer ")) return null;
+  return auth.slice("Bearer ".length).trim();
+}
+
 router.post("/merge-teacher", async (req, res) => {
   try {
-    const token = getBearerToken(req);
-    const { workbookUrl, sheetName, model } = req.body || {};
+    const token = extractBearerToken(req);
 
+    const { workbookUrl, sheetName, model } = req.body || {};
     if (!token) {
-      return res.status(401).json({ ok: false, error: "Missing Graph access token" });
+      return res.status(401).json({ ok: false, error: "Missing Authorization Bearer token" });
     }
     if (!workbookUrl || !sheetName || !model) {
       return res.status(400).json({
@@ -32,40 +30,32 @@ router.post("/merge-teacher", async (req, res) => {
       });
     }
 
-    console.log("[/api/merge-teacher] body:", {
-      workbookUrl,
-      sheetName,
-      hasModel: !!model,
-      hasToken: !!token,
-    });
-
     const sheetUrl = await mergeTeacherSheet({
+      token,
       workbookUrl,
       sheetName,
       model,
-      token, // ✅ pass delegated token
     });
 
-    // ✅ DO NOT persist anywhere (you said URLs live in teachers/schools only)
+    // ✅ DO NOT persist anywhere (teacher workbook URL lives in TEACHERS table only)
     return res.json({ ok: true, sheetUrl });
   } catch (err) {
     console.error("[route] /api/merge-teacher error", err);
     return res.status(500).json({
       ok: false,
       error: err?.message || "Server error",
-      stack: err?.stack, // dev only
+      stack: err?.stack, // DEV only
     });
   }
 });
 
-// POST /api/merge-admin
 router.post("/merge-admin", async (req, res) => {
   try {
-    const token = getBearerToken(req);
-    const { workbookUrl, sheetName, model, schoolId } = req.body || {};
+    const token = extractBearerToken(req);
 
+    const { workbookUrl, sheetName, model, schoolId } = req.body || {};
     if (!token) {
-      return res.status(401).json({ ok: false, error: "Missing Graph access token" });
+      return res.status(401).json({ ok: false, error: "Missing Authorization Bearer token" });
     }
     if (!workbookUrl || !sheetName || !model || !schoolId) {
       return res.status(400).json({
@@ -74,23 +64,14 @@ router.post("/merge-admin", async (req, res) => {
       });
     }
 
-    console.log("[/api/merge-admin] body:", {
-      workbookUrl,
-      sheetName,
-      hasModel: !!model,
-      schoolId,
-      hasToken: !!token,
-    });
-
-    // ✅ returns { sheetUrl, viewOnlyWorkbookUrl }
     const { sheetUrl, viewOnlyWorkbookUrl } = await mergeAdminSheet({
+      token,
       workbookUrl,
       sheetName,
       model,
-      token, // ✅ pass delegated token
     });
 
-    // persist view-only URL on school (optional)
+    // ✅ Store view-only url on school (for admin email later)
     if (viewOnlyWorkbookUrl) {
       await updateSchoolViewOnlyUrl({
         id: schoolId,
@@ -98,13 +79,17 @@ router.post("/merge-admin", async (req, res) => {
       });
     }
 
-    return res.json({ ok: true, sheetUrl, viewOnlyWorkbookUrl });
+    return res.json({
+      ok: true,
+      sheetUrl,
+      viewOnlyWorkbookUrl,
+    });
   } catch (err) {
     console.error("[route] /api/merge-admin error", err);
     return res.status(500).json({
       ok: false,
       error: err?.message || "Server error",
-      stack: err?.stack, // dev only
+      stack: err?.stack, // DEV only
     });
   }
 });

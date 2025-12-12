@@ -1,6 +1,4 @@
 // server/msGraphWorkbook.js
-// Node 18+ has global fetch. If not:
-// import fetch from "node-fetch";
 
 function toBase64Url(str) {
   return Buffer.from(str, "utf8")
@@ -34,6 +32,7 @@ async function graphJson(url, { method = "GET", token, body } = {}) {
   }
 
   if (!resp.ok) {
+    // Bubble the real Graph message
     const msg =
       json?.error?.message ||
       json?.message ||
@@ -46,7 +45,6 @@ async function graphJson(url, { method = "GET", token, body } = {}) {
 async function resolveWorkbookFromSharingUrl(workbookUrl, token) {
   const shareId = shareIdFromUrl(workbookUrl);
 
-  // IMPORTANT: sharing URL must be the full sharing link.
   const driveItem = await graphJson(
     `https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem`,
     { token }
@@ -79,23 +77,14 @@ async function ensureWorksheet({ driveId, itemId, token, sheetName }) {
     { token, method: "POST", body: { name: sheetName } }
   );
 
-  // sometimes returns { worksheet: {...} }
   return created?.worksheet || created;
 }
 
-async function writeRangeValues({
-  driveId,
-  itemId,
-  token,
-  sheetName,
-  address,
-  values,
-}) {
-  // values must be 2D array
+async function writeRangeValues({ driveId, itemId, token, sheetName, address, values }) {
   return await graphJson(
-    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodeURIComponent(
-      sheetName
-    )}/range(address='${address}')`,
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}` +
+      `/workbook/worksheets/${encodeURIComponent(sheetName)}` +
+      `/range(address='${address}')`,
     {
       token,
       method: "PATCH",
@@ -104,43 +93,29 @@ async function writeRangeValues({
   );
 }
 
-async function createViewOnlyLink({ driveId, itemId, token }) {
-  // Many tenants allow either:
-  // - scope: "anonymous" (best for sharing outside org)
-  // - scope: "organization" (requires login)
-  // We'll try anonymous first, then fall back.
-  try {
-    const resp = await graphJson(
-      `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/createLink`,
-      {
-        token,
-        method: "POST",
-        body: { type: "view", scope: "anonymous" },
-      }
-    );
-    return resp?.link?.webUrl || null;
-  } catch (e) {
-    const resp = await graphJson(
-      `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/createLink`,
-      {
-        token,
-        method: "POST",
-        body: { type: "view", scope: "organization" },
-      }
-    );
-    return resp?.link?.webUrl || null;
-  }
+async function createViewOnlyWorkbookLink({ driveId, itemId, token }) {
+  // Safer default: organization-scoped view link (not public)
+  // If you truly need anonymous links, switch scope to "anonymous".
+  const body = { type: "view", scope: "organization" };
+
+  const result = await graphJson(
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/createLink`,
+    { token, method: "POST", body }
+  );
+
+  const webUrl = result?.link?.webUrl;
+  if (!webUrl) return null;
+  return webUrl;
 }
 
 // ------------------------------------------------------------
-// TEACHER MERGE (REAL WRITES - minimal proof)
+// TEACHER MERGE (REAL WRITES with delegated token)
 // ------------------------------------------------------------
-export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }) {
+export async function mergeTeacherSheet({ token, workbookUrl, sheetName, model }) {
   const { driveId, itemId } = await resolveWorkbookFromSharingUrl(workbookUrl, token);
-
   await ensureWorksheet({ driveId, itemId, token, sheetName });
 
-  // Minimal proof writes (safe)
+  // ✅ Proof writes — change these addresses to match your template mapping
   await writeRangeValues({
     driveId,
     itemId,
@@ -177,7 +152,7 @@ export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }
     values: [[`Date: ${model?.date || ""}`]],
   });
 
-  // Optional rows table
+  // Optional table write
   if (Array.isArray(model?.rows) && model.rows.length > 0) {
     const startRow = 6;
     const values = model.rows.map((r) => [
@@ -199,19 +174,17 @@ export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }
     });
   }
 
-  // Return sheet deep link
   return `${workbookUrl}#sheet=${encodeURIComponent(sheetName)}`;
 }
 
 // ------------------------------------------------------------
-// ADMIN MERGE (REAL WRITES + view-only link)
+// ADMIN MERGE (REAL WRITES + view-only workbook link)
 // ------------------------------------------------------------
-export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) {
+export async function mergeAdminSheet({ token, workbookUrl, sheetName, model }) {
   const { driveId, itemId } = await resolveWorkbookFromSharingUrl(workbookUrl, token);
-
   await ensureWorksheet({ driveId, itemId, token, sheetName });
 
-  // Header blocks (adjust to your template later)
+  // Headers (adjust to your admin template mapping)
   await writeRangeValues({
     driveId,
     itemId,
@@ -230,7 +203,7 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
     values: [[model?.headerRight || ""]],
   });
 
-  // Table rows
+  // Table rows: A5:E18 default mapping
   const TABLE_START_ROW = 5;
   if (Array.isArray(model?.rows) && model.rows.length > 0) {
     const values = model.rows.map((r) => [
@@ -252,7 +225,7 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
     });
   }
 
-  // Trainer summary (write into F5; your template can merge cells)
+  // Trainer summary (put into F5 by default; you can remap later)
   if (model?.trainerSummary) {
     await writeRangeValues({
       driveId,
@@ -264,8 +237,8 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
     });
   }
 
+  const viewOnlyWorkbookUrl = await createViewOnlyWorkbookLink({ driveId, itemId, token });
   const sheetUrl = `${workbookUrl}#sheet=${encodeURIComponent(sheetName)}`;
-  const viewOnlyWorkbookUrl = await createViewOnlyLink({ driveId, itemId, token });
 
   return { sheetUrl, viewOnlyWorkbookUrl };
 }
