@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
-import { ObservationCard } from "./components/ObservationCard";
+// import { ObservationCard } from "./components/ObservationCard"; // Unused in this file, commenting out
 import {
   buildTeacherExportModel,
   type ObservationMetaForExport,
@@ -15,6 +15,7 @@ const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
 
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
+const STORAGE_PREFIX = "obs-v1-";
 
 type StatusColor = "good" | "mixed" | "growth";
 type GroupMode = "none" | "month" | "school" | "campus";
@@ -36,9 +37,10 @@ interface DashboardObservationRow {
   totalIndicators: number;
   statusColor: StatusColor;
 
-  // workbook URLs (can be cached on row OR resolved from tables)
+  // workbook URLs (resolved from tables or meta)
   teacherWorkbookUrl?: string | null;
   adminWorkbookUrl?: string | null;
+  adminViewOnlyUrl?: string | null; // ✅ Added to interface
 
   // IMPORTANT: keep meta available on dashboard rows
   meta?: any;
@@ -54,7 +56,6 @@ type RecentMergePanel =
       mergedAt: string; // ISO
     };
 
-
 interface DashboardProps {
   onOpenObservation: (obs: {
     id: string;
@@ -64,14 +65,12 @@ interface DashboardProps {
     unit: string;
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
-    /** Actual observation date from meta ("YYYY-MM-DD") */
     date: string;
   }) => void;
 }
 
 /* ------------------------------
    SCHOOL → AM MAPPING
-   TODO: replace with your real school list.
 --------------------------------- */
 
 interface SchoolInfo {
@@ -81,11 +80,6 @@ interface SchoolInfo {
   amEmail: string;
 }
 
-/**
- * TEMP PLACEHOLDER:
- * Fill this from your real school list (same names/campus strings
- * that appear in observation meta).
- */
 const SCHOOL_DIRECTORY: SchoolInfo[] = [
   { schoolName: "19/5", campus: "Tứ Hiệp", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
   { schoolName: "Ánh Trăng", campus: "Yên Xá", amName: "Emma", amEmail: "emma.swanepoel@grapeseed.com" },
@@ -202,26 +196,30 @@ function monthKeyFromTs(ts: number | null): string | null {
   return `${String(m).padStart(2, "0")}.${y}`; // e.g. "11.2025"
 }
 
+/* ------------------------------
+   META PERSISTENCE HELPER
+--------------------------------- */
 async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
- // 1) localStorage (immediate + survives reload)
- const key = `${STORAGE_PREFIX}${obsId}`;
- const raw = localStorage.getItem(key);
- if (!raw) throw new Error("No local observation found in localStorage for this obsId.");
- const parsed = JSON.parse(raw);
- parsed.meta = parsed.meta || {};
- parsed.meta = { ...parsed.meta, ...patch };
- localStorage.setItem(key, JSON.stringify(parsed));
- // 2) Supabase (optional but recommended)
- // If your observations table has a 'meta' jsonb column:
- try {
-   await supabase
-     .from("observations")
-     .update({ meta: parsed.meta })
-     .eq("id", obsId);
- } catch (e) {
-   console.warn("[persistMergedLinkToObservationMeta] Supabase update failed (local ok)", e);
- }
- return parsed.meta;
+  // 1) localStorage (immediate + survives reload)
+  const key = `${STORAGE_PREFIX}${obsId}`;
+  const raw = localStorage.getItem(key);
+  if (!raw) throw new Error("No local observation found in localStorage for this obsId.");
+  
+  const parsed = JSON.parse(raw);
+  parsed.meta = parsed.meta || {};
+  parsed.meta = { ...parsed.meta, ...patch };
+  localStorage.setItem(key, JSON.stringify(parsed));
+  
+  // 2) Supabase (optional but recommended)
+  try {
+    await supabase
+      .from("observations")
+      .update({ meta: parsed.meta })
+      .eq("id", obsId);
+  } catch (e) {
+    console.warn("[persistMergedLinkToObservationMeta] Supabase update failed (local ok)", e);
+  }
+  return parsed.meta;
 }
 
 /* ------------------------------
@@ -248,37 +246,211 @@ function groupBy<T>(
 // ------------------------------
 // SHEET NAME HELPERS
 // ------------------------------
-function buildTeacherSheetName(meta: { date?: string }): string {
-  if (!meta?.date) return "Teacher Report";
+function excelSafeSheetName(input: string): string {
+  const cleaned = String(input || "")
+    .replace(/[:\\\/\?\*\[\]]/g, " ") // illegal chars
+    .replace(/\s+/g, " ")
+    .trim();
 
-  const d = new Date(meta.date);
-  if (Number.isNaN(d.getTime())) return "Teacher Report";
+  const nonEmpty = cleaned.length > 0 ? cleaned : "Sheet";
+  return nonEmpty.slice(0, 31);
+}
 
+function monthYearFromDate(dateStr?: string | null): string {
+  if (!dateStr) return "00.0000";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "00.0000";
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const year = d.getFullYear();
-
-  // Teacher naming convention you said is already working: "MM.YYYY"
-  return `${month}.${year}`;
+  return `${month}.${year}`; // "12.2025"
 }
+
+/** TEACHER: "MM.YYYY" */
+function buildTeacherSheetName(obs: DashboardObservationRow): string {
+  const dateStr =
+    (obs as any).meta?.date ||
+    obs.isoDate ||
+    null;
+
+  return excelSafeSheetName(monthYearFromDate(dateStr));
+}
+
+/** ADMIN: "TeacherName MM.YYYY SupportType" */
+function buildAdminSheetName(obs: DashboardObservationRow): string {
+  const teacherName = String((obs as any).meta?.teacherName || obs.teacherName || "Teacher").trim();
+
+  const rawSupport = String((obs as any).meta?.supportType || obs.supportType || "Visit").trim();
+  const supportType =
+    rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
+      ? rawSupport
+      : "Visit";
+
+  const dateStr =
+    (obs as any).meta?.date ||
+    obs.isoDate ||
+    null;
+
+  const base = `${teacherName} ${monthYearFromDate(dateStr)} ${supportType}`;
+  return excelSafeSheetName(base);
+}
+
+/* ------------------------------
+   DATA LOAD HELPERS
+--------------------------------- */
+function readMetaFromLocalStorage(obsId: string): any | null {
+  try {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}${obsId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.meta ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getStableMetaForRow(obs: DashboardObservationRow): any {
+  // prefer row meta, fallback to localStorage meta (survives reload)
+  return (obs as any).meta || readMetaFromLocalStorage(obs.id) || {};
+}
+
+function loadFullObservation(observationId: string): any | null {
+  const key = `obs-v1-${observationId}`;
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeIndicators(full: any): any[] {
+  const ind = full?.indicators;
+  if (Array.isArray(ind)) return ind;
+  if (Array.isArray(ind?.indicators)) return ind.indicators;
+  return [];
+}
+
+function toMetaForExport(
+  full: any,
+  obs: DashboardObservationRow
+): ObservationMetaForExport {
+  const m = full?.meta || {};
+  const rawSupport = (m.supportType || obs.supportType || "Visit") as any;
+  const supportType =
+    rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
+      ? rawSupport
+      : "Visit";
+
+  return {
+    teacherName: m.teacherName || obs.teacherName || "",
+    schoolName: m.schoolName || obs.schoolName || "",
+    campus: m.campus || obs.campus || "",
+    unit: m.unit || obs.unit || "",
+    lesson: m.lesson || obs.lesson || "",
+    supportType,
+    date: m.date || obs.isoDate || undefined,
+  };
+}
+
+function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
+  const list = normalizeIndicators(full);
+
+  return list.map((i: any) => ({
+    id: String(i.id || ""),
+    number: String(i.number || ""),
+    title: String(i.title || ""),
+    description: String(i.description || ""),
+    good: !!i.good,
+    growth: !!i.growth,
+    commentText: String(i.commentText || ""),
+    includeInTrainerSummary: i.includeInTrainerSummary === true,
+  }));
+}
+
+// ✅ NEW: Helper to bulk-fetch defaults for a list of observations
+async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[]) {
+  if (rawObs.length === 0) return rawObs;
+
+  // 1. Collect unique keys to query
+  const schoolNames = [...new Set(rawObs.map(o => o.schoolName).filter(Boolean))];
+  const teacherNames = [...new Set(rawObs.map(o => o.teacherName).filter(Boolean))];
+
+  // 2. Bulk Fetch Schools (for Admin Workbooks)
+  let schoolMap = new Map<string, { adminUrl: string; viewUrl: string }>();
+  if (schoolNames.length > 0) {
+    const { data: schools } = await supabase
+      .from("schools")
+      .select("school_name, admin_workbook_url, admin_workbook_view_url")
+      .in("school_name", schoolNames);
+    
+    schools?.forEach((s: any) => {
+      schoolMap.set(s.school_name, {
+        adminUrl: s.admin_workbook_url,
+        viewUrl: s.admin_workbook_view_url
+      });
+    });
+  }
+
+  // 3. Bulk Fetch Teachers (for Teacher Workbooks)
+  let teacherMap = new Map<string, string>(); 
+  if (teacherNames.length > 0) {
+    const { data: teachers } = await supabase
+      .from("teachers")
+      .select("name, school_name, worksheet_url")
+      .in("name", teacherNames);
+
+    teachers?.forEach((t: any) => {
+      // Create a unique key: "TeacherName|SchoolName" to avoid collisions
+      const key = `${t.name}|${t.school_name}`; 
+      teacherMap.set(key, t.worksheet_url);
+    });
+  }
+
+  // 4. Merge Defaults into Observation Objects
+  return rawObs.map(obs => {
+    const sDefaults = schoolMap.get(obs.schoolName);
+    const tKey = `${obs.teacherName}|${obs.schoolName}`;
+    const tDefaultUrl = teacherMap.get(tKey);
+
+    // Logic: Use existing Meta/Row value -> OR fallback to Default Table value -> OR null
+    const finalTeacherUrl = 
+      (obs as any).teacherWorkbookUrl ||
+      obs.meta?.teacherWorkbookUrl || 
+      tDefaultUrl || 
+      null;
+
+    const finalAdminUrl = 
+      (obs as any).adminWorkbookUrl ||
+      obs.meta?.adminWorkbookUrl || 
+      sDefaults?.adminUrl || 
+      null;
+
+    const finalViewUrl = 
+      (obs as any).adminViewOnlyUrl ||
+      obs.meta?.adminWorkbookViewUrl || 
+      sDefaults?.viewUrl || 
+      null;
+
+    // Return new object with enriched fields attached to top-level and meta
+    return {
+      ...obs,
+      teacherWorkbookUrl: finalTeacherUrl,
+      adminWorkbookUrl: finalAdminUrl,
+      adminViewOnlyUrl: finalViewUrl,
+      meta: {
+        ...obs.meta,
+        teacherWorkbookUrl: finalTeacherUrl,
+        adminWorkbookUrl: finalAdminUrl,
+        adminWorkbookViewUrl: finalViewUrl,
+      }
+    };
+  });
+}
+
 /* ------------------------------
    COMPONENT
 --------------------------------- */
-const STORAGE_PREFIX = "obs-v1-";
-function readMetaFromLocalStorage(obsId: string): any | null {
- try {
-   const raw = localStorage.getItem(`${STORAGE_PREFIX}${obsId}`);
-   if (!raw) return null;
-   const parsed = JSON.parse(raw);
-   return parsed?.meta ?? null;
- } catch {
-   return null;
- }
-}
-function getStableMetaForRow(obs: DashboardObservationRow): any {
- // prefer row meta, fallback to localStorage meta (survives reload)
- return (obs as any).meta || readMetaFromLocalStorage(obs.id) || {};
-}
-
 export const DashboardShell: React.FC<DashboardProps> = ({
   onOpenObservation,
 }) => {
@@ -312,8 +484,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     useState<AmSummarySentMap>({});
 
   /* ------------------------------
-     LOAD OBSERVATIONS + SUMMARY META
-  --------------------------------- */
+      LOAD OBSERVATIONS + SUMMARY META
+   --------------------------------- */
+   
   React.useEffect(() => {
     if (!user) {
       setObservations([]);
@@ -436,14 +609,16 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
           adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
 
-          meta: parsed.meta ?? {}, // ✅ add this
+          meta: parsed.meta ?? {}, 
         });
         });
       } catch (err) {
         console.error("[Dashboard] unexpected error loading observations", err);
       }
 
-      setObservations(rows);
+      // ✅ ENRICH: Bulk fetch defaults for schools/teachers
+      const enrichedRows = await enrichObservationsWithDefaults(rows);
+      setObservations(enrichedRows);
 
       // Load AM summary "sent" markers (unchanged)
       try {
@@ -463,7 +638,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   }, [user]);
 
   /* ------------------------------
-     FILTER + SORT + GROUP
+      FILTER + SORT + GROUP
   --------------------------------- */
 
   const filteredAndSorted = React.useMemo(() => {
@@ -521,7 +696,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   }, [filteredAndSorted, groupMode]);
 
   /* ------------------------------
-     AM SUMMARY HELPERS
+      AM SUMMARY HELPERS
   --------------------------------- */
 
   // All distinct month keys that actually have data, sorted newest→oldest
@@ -745,7 +920,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   }, [actionModal, observations]);
 
   /* ------------------------------
-     HANDLERS
+      HANDLERS
   --------------------------------- */
 
   const handlePreCallEmail = (obs: DashboardObservationRow) => {
@@ -758,486 +933,243 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     // TODO: plug real post-call email logic here
   };
 
-// Helper: quick & dirty sheet name for this test.
-// Later we’ll replace with your real naming rules.
-// ------------------------------
-// Excel-safe worksheet name (Graph/Excel rules)
-// ------------------------------
-function excelSafeSheetName(input: string): string {
-  const cleaned = String(input || "")
-    .replace(/[:\\\/\?\*\[\]]/g, " ") // illegal chars
-    .replace(/\s+/g, " ")
-    .trim();
+  // ✅ MERGE TEACHER HANDLER (Pinning Logic Included)
+  const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+    console.log("=====================================================");
+    console.log("[MERGE teacher] obs:", obs);
 
-  const nonEmpty = cleaned.length > 0 ? cleaned : "Sheet";
-  return nonEmpty.slice(0, 31);
-}
-
-function persistMergedToLocalStorage(observationId: string, patch: any) {
-  try {
-    const key = `obs-v1-${observationId}`;
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    parsed.meta = parsed.meta || {};
-    parsed.meta = { ...parsed.meta, ...patch };
-    localStorage.setItem(key, JSON.stringify(parsed));
-  } catch (e) {
-    console.warn("[persistMergedToLocalStorage] failed", e);
-  }
-}
-
-function monthYearFromDate(dateStr?: string | null): string {
-  if (!dateStr) return "00.0000";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "00.0000";
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  return `${month}.${year}`; // "12.2025"
-}
-
-/** TEACHER: "MM.YYYY" */
-function buildTeacherSheetName(obs: DashboardObservationRow): string {
-  const dateStr =
-    (obs as any).meta?.date ||
-    obs.isoDate ||
-    null;
-
-  return excelSafeSheetName(monthYearFromDate(dateStr));
-}
-
-/** ADMIN: "TeacherName MM.YYYY SupportType" */
-function buildAdminSheetName(obs: DashboardObservationRow): string {
-  const teacherName = String((obs as any).meta?.teacherName || obs.teacherName || "Teacher").trim();
-
-  const rawSupport = String((obs as any).meta?.supportType || obs.supportType || "Visit").trim();
-  const supportType =
-    rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
-      ? rawSupport
-      : "Visit";
-
-  const dateStr =
-    (obs as any).meta?.date ||
-    obs.isoDate ||
-    null;
-
-  const base = `${teacherName} ${monthYearFromDate(dateStr)} ${supportType}`;
-  return excelSafeSheetName(base);
-}
-
-// ------------------------------
-// Load full observation from localStorage
-// (this is REQUIRED to build export models that contain indicator rows)
-// ------------------------------
-function loadFullObservation(observationId: string): any | null {
-  const key = `obs-v1-${observationId}`;
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeIndicators(full: any): any[] {
-  const ind = full?.indicators;
-  if (Array.isArray(ind)) return ind;
-  if (Array.isArray(ind?.indicators)) return ind.indicators;
-  return [];
-}
-
-// Types from your teacher export module
-function toMetaForExport(
-  full: any,
-  obs: DashboardObservationRow
-): ObservationMetaForExport {
-  const m = full?.meta || {};
-  const rawSupport = (m.supportType || obs.supportType || "Visit") as any;
-  const supportType =
-    rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
-      ? rawSupport
-      : "Visit";
-
-  return {
-    teacherName: m.teacherName || obs.teacherName || "",
-    schoolName: m.schoolName || obs.schoolName || "",
-    campus: m.campus || obs.campus || "",
-    unit: m.unit || obs.unit || "",
-    lesson: m.lesson || obs.lesson || "",
-    supportType,
-    date: m.date || obs.isoDate || undefined,
-  };
-}
-
-function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
-  const list = normalizeIndicators(full);
-
-  return list.map((i: any) => ({
-    id: String(i.id || ""),
-    number: String(i.number || ""),
-    title: String(i.title || ""),
-    description: String(i.description || ""),
-    good: !!i.good,
-    growth: !!i.growth,
-    commentText: String(i.commentText || ""),
-    includeInTrainerSummary: i.includeInTrainerSummary === true,
-  }));
-}
-
-
-const hydrateTeacherWorkbookUrlIfMissing = async (obs: DashboardObservationRow) => {
-  const metaAny: any = getStableMetaForRow(obs);
-  const existing =
-    (obs as any).teacherWorkbookUrl ??
-    metaAny?.teacherWorkbookUrl ??
-    metaAny?.teacherWorksheetUrl ??
-    null;
-
-  if (existing) return existing;
-
-  try {
-    const { data, error } = await supabase
-      .from("teachers")
-      .select("worksheet_url")
-      .eq("name", obs.teacherName)
-      .eq("school_name", obs.schoolName)
-      .eq("campus", obs.campus)
-      .limit(1);
-
-    if (error) {
-      console.error("[hydrateTeacherWorkbookUrlIfMissing] teachers lookup error", error);
-      return null;
+    // 0) Load full observation so we can export actual indicator rows
+    const full = loadFullObservation(obs.id);
+    if (!full) {
+      alert(
+        "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
+      );
+      return;
     }
 
-    const url = (data?.[0] as any)?.worksheet_url ?? null;
-    if (!url) return null;
+    // 1) Resolve teacher workbook URL (from enriched row prop)
+    const workbookUrl = obs.teacherWorkbookUrl;
 
-    // ✅ Persist into observation meta so it survives reload
-    const patch = { teacherWorkbookUrl: url };
-    const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
+    if (!workbookUrl) {
+      alert("Teacher workbook URL not found. Please ensure the teacher is set up in the database.");
+      return;
+    }
 
-    // ✅ Update dashboard row immediately
-    setObservations((prev) =>
-      prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, teacherWorkbookUrl: url } : o))
-    );
+    // 2) Sheet name (NO prompt)
+    const sheetName = buildTeacherSheetName(obs);
 
-    return url;
-  } catch (e) {
-    console.error("[hydrateTeacherWorkbookUrlIfMissing] unexpected error", e);
-    return null;
-  }
-};
-
-const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
-  console.log("=====================================================");
-  console.log("[MERGE teacher] obs:", obs);
-
-  // 0) Load full observation so we can export actual indicator rows
-  const full = loadFullObservation(obs.id);
-  if (!full) {
-    alert(
-      "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
-    );
-    return;
-  }
-
-  // 1) Resolve teacher workbook URL (teachers table is source of truth)
-  let workbookUrl: string | null =
-    (obs as any).teacherWorksheetUrl ||
-    (obs as any).teacherWorkbookUrl ||
-    (obs as any).meta?.teacherWorksheetUrl ||
-    (obs as any).meta?.teacherWorkbookUrl ||
-    null;
-
-  if (!workbookUrl) {
+    // 3) Graph token (REQUIRED)
+    let graphToken = "";
     try {
-      const { data, error } = await supabase
-        .from("teachers")
-        .select("worksheet_url")
-        .eq("name", obs.teacherName)
-        .eq("school_name", obs.schoolName)
-        .eq("campus", obs.campus)
-        .limit(1);
-
-      if (error) {
-        console.error("[MERGE teacher] teachers lookup error", error);
-      } else if (data?.[0]?.worksheet_url) {
-        workbookUrl = data[0].worksheet_url;
-      }
-    } catch (e) {
-      console.error("[MERGE teacher] teachers lookup unexpected error", e);
+      graphToken = await getGraphAccessToken();
+    } catch (e: any) {
+      console.error("[MERGE teacher] getGraphAccessToken failed", e);
+      alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
+      return;
     }
-  }
 
-  if (!workbookUrl) {
-    alert("Teacher workbook URL not found. (teachers.worksheet_url is empty)");
-    return;
-  }
+    // 4) Build REAL export model
+    const exportMeta = toMetaForExport(full, obs);
+    const exportIndicators = toIndicatorsForExport(full);
+    const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
 
-  // 2) Sheet name (NO prompt)
-  const sheetName = buildTeacherSheetName(obs);
-
-  // 3) Graph token (REQUIRED)
-  let graphToken = "";
-  try {
-    graphToken = await getGraphAccessToken();
-  } catch (e: any) {
-    console.error("[MERGE teacher] getGraphAccessToken failed", e);
-    alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
-    return;
-  }
-
-  // 4) Build REAL export model
-  const exportMeta = toMetaForExport(full, obs);
-  const exportIndicators = toIndicatorsForExport(full);
-  const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
-
-  const body = {
-    workbookUrl,
-    sheetName,
-    model: teacherModel,
-    observationId: obs.id,
-  };
-
-  try {
-    console.log("[Dashboard] Calling /api/merge-teacher with", body);
-
-    const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${graphToken}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const json = await resp.json();
-    console.log("[Dashboard] merge-teacher response", json);
-
-    // ---------------------------------------------------------
-    // ✅ NEW: Specific Warning for "File Locked"
-    // ---------------------------------------------------------
-    if (!resp.ok || !json.ok) {
-      const errorMsg = String(json.error || json.message || "");
-      
-      // Check for the "Locked" keywords or 423 status code
-      if (
-        errorMsg.includes("Locked") || 
-        errorMsg.includes("LOCKED") || 
-        resp.status === 423
-      ) {
-        alert(
-          "⚠️ FILE IS OPEN\n\n" +
-          "Microsoft cannot save the report because the Excel file is currently open in another tab.\n\n" +
-          "👉 Please CLOSE the Excel tab and try again."
-        );
-        return; // Exit here so we don't trigger the generic error below
-      }
-
-      // If it's some other error, throw it so the catch block handles it
-      throw new Error(errorMsg || `HTTP ${resp.status}`);
-    }
-    // ---------------------------------------------------------
-
-    const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
-
-    const mergedAt = new Date().toISOString();
-    const patch = {
-      mergedTeacher: {
-        url: sheetUrl,
-        sheetName: json.sheetName || sheetName,
-        mergedAt,
-      },
-      teacherWorkbookUrl: workbookUrl, 
+    const body = {
+      workbookUrl,
+      sheetName,
+      model: teacherModel,
+      observationId: obs.id,
     };
 
-    const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
+    try {
+      console.log("[Dashboard] Calling /api/merge-teacher with", body);
 
-    setObservations((prev) =>
-      prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, teacherWorkbookUrl: workbookUrl } : o))
-    );
+      const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${graphToken}`,
+        },
+        body: JSON.stringify(body),
+      });
 
-    setRecentMergePanel({
-      obsId: obs.id,
-      kind: "teacher",
-      sheetUrl,
-      sheetName: json.sheetName || sheetName,
-      mergedAt,
-    });
+      const json = await resp.json();
+      console.log("[Dashboard] merge-teacher response", json);
 
-    alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl}`);
+      // Warning for "File Locked"
+      if (!resp.ok || !json.ok) {
+        const errorMsg = String(json.error || json.message || "");
+        if (
+          errorMsg.includes("Locked") || 
+          errorMsg.includes("LOCKED") || 
+          resp.status === 423
+        ) {
+          alert(
+            "⚠️ FILE IS OPEN\n\n" +
+            "Microsoft cannot save the report because the Excel file is currently open in another tab.\n\n" +
+            "👉 Please CLOSE the Excel tab and try again."
+          );
+          return;
+        }
+        throw new Error(errorMsg || `HTTP ${resp.status}`);
+      }
 
-  } catch (err: any) {
-    console.error("[Dashboard] merge-teacher error", err);
-    // This generic alert only shows if it wasn't the specific "Locked" error handled above
-    alert(`Teacher merge failed: ${err.message}`);
-  }
-};
+      const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
+      const mergedAt = new Date().toISOString();
 
+      // ✅ PIN THE LINK: Persist the specific workbookUrl used
+      const patch = {
+        mergedTeacher: {
+          url: sheetUrl,
+          sheetName: json.sheetName || sheetName,
+          mergedAt,
+        },
+        teacherWorkbookUrl: workbookUrl, // Pins it to this obs forever
+      };
 
-const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
-  console.log("=====================================================");
-  console.log("[MERGE admin] obs:", obs);
+      const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
-  // 0) Load full observation for real export model
-  const full = loadFullObservation(obs.id);
-  if (!full) {
-    alert(
-      "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
-    );
-    return;
-  }
+      setObservations((prev) =>
+        prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, teacherWorkbookUrl: workbookUrl } : o))
+      );
 
-  // 1) Resolve from schools table (source of truth)
-  let adminWorkbookUrl: string | null = null;
-  let schoolId: string | null = null;
-
-  // ✅ IMPORTANT: declare OUTSIDE try so it's visible later
-  let viewOnlyUrlFromSchool: string | null = null;
-
-  try {
-    const { data, error } = await supabase
-      .from("schools")
-      // ✅ MUST match your real column names EXACTLY:
-      // admin_workbook_url
-      // admin_workbook_view_url  (NO hyphens)
-      .select("id, admin_workbook_url, admin_workbook_view_url")
-      .eq("school_name", obs.schoolName)
-      .eq("campus_name", obs.campus)
-      .limit(1);
-
-    console.log("[MERGE admin] schools lookup:", { data, error });
-
-    if (error) {
-      console.error("[MERGE admin] schools lookup error", error);
-    }
-
-    if (!error && data?.[0]) {
-      schoolId = (data[0] as any).id ?? null;
-      adminWorkbookUrl = (data[0] as any).admin_workbook_url ?? null;
-
-      // ✅ this is the view-only URL from schools table
-      viewOnlyUrlFromSchool = (data[0] as any).admin_workbook_view_url ?? null;
-    }
-  } catch (e) {
-    console.error("[MERGE admin] schools lookup unexpected error", e);
-  }
-
-  // 1b) Optional fallback (if you still want it)
-  adminWorkbookUrl =
-    adminWorkbookUrl ||
-    (obs as any).adminWorkbookUrl ||
-    (obs as any).schoolAdminWorkbookUrl ||
-    (obs as any).meta?.adminWorkbookUrl ||
-    (obs as any).meta?.schoolAdminWorkbookUrl ||
-    null;
-
-  schoolId =
-    schoolId ||
-    (obs as any).school_id ||
-    (obs as any).schoolId ||
-    (obs as any).meta?.schoolId ||
-    null;
-
-  if (!adminWorkbookUrl) {
-    alert("This observation's school does not have an admin workbook URL set yet.");
-    return;
-  }
-  if (!schoolId) {
-    alert("Missing schoolId for this observation's school (schools.id not found).");
-    return;
-  }
-
-  // 2) Sheet name (NO prompt)
-  // Make sure buildAdminSheetName exists (we’ll fix that next if needed)
-  const sheetName = buildAdminSheetName(obs);
-
-  // 3) Graph token (REQUIRED)
-  let graphToken = "";
-  try {
-    graphToken = await getGraphAccessToken();
-  } catch (e: any) {
-    console.error("[MERGE admin] getGraphAccessToken failed", e);
-    alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
-    return;
-  }
-
-  // 4) Build REAL admin export model
-  const exportMeta = toMetaForExport(full, obs);
-  const exportIndicators = toIndicatorsForExport(full);
-  const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
-
-  const body = {
-    workbookUrl: adminWorkbookUrl,
-    sheetName,
-    model: adminModel,
-    observationId: obs.id,
-    schoolId,
-  };
-
-  try {
-    console.log("[Dashboard] Calling /api/merge-admin with", body);
-
-    const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${graphToken}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const json = await resp.json();
-    console.log("[Dashboard] merge-admin response", json);
-
-    if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
-
-    const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
-
-    const mergedAt = new Date().toISOString();
-
-    // ✅ Persist merged sheet link + ALSO cache workbook urls for the UI
-    const patch = {
-      mergedAdmin: {
-        url: sheetUrl,
+      setRecentMergePanel({
+        obsId: obs.id,
+        kind: "teacher",
+        sheetUrl,
         sheetName: json.sheetName || sheetName,
         mergedAt,
-      },
-      adminWorkbookUrl,
+      });
+
+      alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl}`);
+
+    } catch (err: any) {
+      console.error("[Dashboard] merge-teacher error", err);
+      alert(`Teacher merge failed: ${err.message}`);
+    }
+  };
+
+
+  // ✅ MERGE ADMIN HANDLER (Pinning Logic Included)
+  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+    console.log("=====================================================");
+    console.log("[MERGE admin] obs:", obs);
+
+    const full = loadFullObservation(obs.id);
+    if (!full) {
+      alert(
+        "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
+      );
+      return;
+    }
+
+    // 1) Use the enriched URL already on the row
+    const adminWorkbookUrl = obs.adminWorkbookUrl;
+
+    if (!adminWorkbookUrl) {
+      alert("This observation's school does not have an admin workbook URL set yet.");
+      return;
+    }
+
+    // We still need schoolId for the backend logic (optional but good)
+    // We can fetch it or trust it's in meta. Let's do a quick lookup to be safe or rely on meta.
+    let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
+
+    if (!schoolId) {
+      // Fallback lookup just to get ID
+      try {
+        const { data } = await supabase
+          .from("schools")
+          .select("id")
+          .eq("school_name", obs.schoolName)
+          .eq("campus_name", obs.campus)
+          .limit(1);
+        if (data?.[0]) schoolId = data[0].id;
+      } catch {}
+    }
+
+    const sheetName = buildAdminSheetName(obs);
+
+    let graphToken = "";
+    try {
+      graphToken = await getGraphAccessToken();
+    } catch (e: any) {
+      console.error("[MERGE admin] getGraphAccessToken failed", e);
+      alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
+      return;
+    }
+
+    const exportMeta = toMetaForExport(full, obs);
+    const exportIndicators = toIndicatorsForExport(full);
+    const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
+
+    const body = {
+      workbookUrl: adminWorkbookUrl,
+      sheetName,
+      model: adminModel,
+      observationId: obs.id,
       schoolId,
-      adminWorkbookViewUrl: viewOnlyUrlFromSchool, // ✅ FIXED: now in scope
     };
 
-    const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
+    try {
+      console.log("[Dashboard] Calling /api/merge-admin with", body);
 
-    // ✅ Update state immediately so UI shows links and doesn’t “disappear”
-    setObservations((prev) =>
-      prev.map((o) =>
-        o.id === obs.id
-          ? { ...o, meta: nextMeta, adminWorkbookUrl: adminWorkbookUrl }
-          : o
-      )
-    );
+      const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${graphToken}`,
+        },
+        body: JSON.stringify(body),
+      });
 
-    setRecentMergePanel({
-      obsId: obs.id,
-      kind: "admin",
-      sheetUrl,
-      sheetName: json.sheetName || sheetName,
-      mergedAt,
-    });
+      const json = await resp.json();
+      console.log("[Dashboard] merge-admin response", json);
 
-    alert(
-      `Admin merge succeeded.\n\nAdmin sheet URL:\n${sheetUrl}\n\nView-only workbook URL:\n${
-        viewOnlyUrlFromSchool || "(missing in schools table)"
-      }`
-    );
-  } catch (err) {
-    console.error("[Dashboard] merge-admin error", err);
-    alert("Admin merge failed – check the console for details.");
-  }
-};
+      if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+
+      const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
+      const mergedAt = new Date().toISOString();
+
+      // ✅ PIN THE LINK: Persist the specific admin url used
+      const patch = {
+        mergedAdmin: {
+          url: sheetUrl,
+          sheetName: json.sheetName || sheetName,
+          mergedAt,
+        },
+        adminWorkbookUrl,
+        adminWorkbookViewUrl: obs.adminViewOnlyUrl, // Persist view url too
+        schoolId,
+      };
+
+      const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
+
+      setObservations((prev) =>
+        prev.map((o) =>
+          o.id === obs.id
+            ? { ...o, meta: nextMeta, adminWorkbookUrl: adminWorkbookUrl }
+            : o
+        )
+      );
+
+      setRecentMergePanel({
+        obsId: obs.id,
+        kind: "admin",
+        sheetUrl,
+        sheetName: json.sheetName || sheetName,
+        mergedAt,
+      });
+
+      alert(
+        `Admin merge succeeded.\n\nAdmin sheet URL:\n${sheetUrl}\n\nView-only workbook URL:\n${
+          obs.adminViewOnlyUrl || "(missing)"
+        }`
+      );
+    } catch (err) {
+      console.error("[Dashboard] merge-admin error", err);
+      alert("Admin merge failed – check the console for details.");
+    }
+  };
 
 
   const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
@@ -1254,319 +1186,252 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   };
 
   /* ------------------------------
-     CARD RENDERER
+      CARD RENDERER
   --------------------------------- */
 
-const renderRow = (
-  obs: DashboardObservationRow,
-  options?: { disableClick?: boolean; hideMergeLinks?: boolean }
-) => {
+  const renderRow = (
+    obs: DashboardObservationRow,
+    options?: { disableClick?: boolean; hideMergeLinks?: boolean }
+  ) => {
 
-  const handleOpenWorkspace = () => {
-    if (options?.disableClick) return; // used by stack preview
-    onOpenObservation({
-      id: obs.id,
-      teacherName: obs.teacherName,
-      schoolName: obs.schoolName,
-      campus: obs.campus,
-      unit: obs.unit,
-      lesson: obs.lesson,
-      supportType: obs.supportType,
-      date: obs.isoDate || "",
-    });
-  };
+    const handleOpenWorkspace = () => {
+      if (options?.disableClick) return; // used by stack preview
+      onOpenObservation({
+        id: obs.id,
+        teacherName: obs.teacherName,
+        schoolName: obs.schoolName,
+        campus: obs.campus,
+        unit: obs.unit,
+        lesson: obs.lesson,
+        supportType: obs.supportType,
+        date: obs.isoDate || "",
+      });
+    };
 
-// No-argument version — clean and safe
-const openTeacherModal = () => {
-  setActionModal({ obsId: obs.id, role: "teacher" });
-};
+    // No-argument version — clean and safe
+    const openTeacherModal = () => {
+      setActionModal({ obsId: obs.id, role: "teacher" });
+    };
 
-const openAdminModal = () => {
-  setActionModal({ obsId: obs.id, role: "admin" });
-};
+    const openAdminModal = () => {
+      setActionModal({ obsId: obs.id, role: "admin" });
+    };
 
-// ---- links derived from meta (persisted) so they don't disappear ----
-const metaAny: any = getStableMetaForRow(obs);
-const mergedTeacherUrl: string | null = metaAny?.mergedTeacher?.url ?? null;
-const mergedAdminUrl: string | null = metaAny?.mergedAdmin?.url ?? null;
-const teacherWorkbookUrl: string | null =
- (obs as any).teacherWorkbookUrl ??
- metaAny?.teacherWorkbookUrl ??
- metaAny?.teacherWorksheetUrl ??
- null;
-const adminWorkbookUrl: string | null =
- (obs as any).adminWorkbookUrl ??
- metaAny?.adminWorkbookUrl ??
- metaAny?.schoolAdminWorkbookUrl ??
- null;
-const adminViewOnlyUrl: string | null =
- metaAny?.adminWorkbookViewUrl ??
- metaAny?.admin_workbook_view_url ??
- null;
-const showLinks =
- !!mergedTeacherUrl ||
- !!teacherWorkbookUrl ||
- !!mergedAdminUrl ||
- !!adminViewOnlyUrl ||
- !!adminWorkbookUrl;
+    // ---- links derived from meta (persisted) or row (enriched defaults) ----
+    const teacherWorkbookUrl = obs.teacherWorkbookUrl;
+    const adminWorkbookUrl = obs.adminWorkbookUrl;
+    const adminViewOnlyUrl = obs.adminViewOnlyUrl;
 
-return (
-  <div
-    key={obs.id}
-    role="button"
-    tabIndex={0}
-    className="obs-row"
-    onClick={handleOpenWorkspace}
-    onKeyDown={(e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        handleOpenWorkspace();
-      }
-    }}
-  >
-    <div
-      className={`obs-status-strip ${
-        obs.statusColor === "good"
-          ? "obs-status-good"
-          : obs.statusColor === "growth"
-          ? "obs-status-growth"
-          : "obs-status-mixed"
-      }`}
-    />
-
-    <div className="obs-row-left">
-      <div className="obs-row-header">
-        <div className="obs-teacher">{obs.teacherName}</div>
-      </div>
-
-      <div className="obs-meta">
-        {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
-        {obs.lesson} • {obs.supportType}
-      </div>
-
-      {/* tags row + Teacher/Admin pills under it */}
-      <div className="obs-tags-row">
-        <div className="obs-tags">
-          <span
-            className={
-              obs.status === "saved"
-                ? "obs-tag obs-tag-completed"
-                : "obs-tag obs-tag-draft"
-            }
-          >
-            {obs.status === "saved" ? "Completed" : "Draft"}
-          </span>
-          <span className="obs-progress">
-            {obs.progress} / {obs.totalIndicators} indicators
-          </span>
-        </div>
-
-        <div className="obs-pill-row">
-          <button
-  type="button"
-  className="obs-pill-button"
-  onClick={async (e) => {
-    e.stopPropagation();
-    await hydrateTeacherWorkbookUrlIfMissing(obs); // ✅ ensures strip will appear
-    openTeacherModal();
-  }}
->
-  Teacher…
-</button>
-          <button
-            type="button"
-            className="obs-pill-button"
-            onClick={(e) => {
-              e.stopPropagation();
-              openAdminModal();
-            }}
-          >
-            Admin…
-          </button>
-        </div>
-      </div>
-
-{/* ✅ ONLY 3 STRIPS (persistent workbook links) */}
-{!options?.hideMergeLinks && (
-  (() => {
-    // ONLY these 3 control rendering
     const showLinks =
       !!teacherWorkbookUrl || !!adminViewOnlyUrl || !!adminWorkbookUrl;
 
-    if (!showLinks) return null;
-
     return (
-      <div className="obs-merge-links" onClick={(e) => e.stopPropagation()}>
-        {/* Teacher workbook */}
-        {teacherWorkbookUrl && (
-          <div className="obs-merge-row">
-            <span className="obs-merge-label">Teacher workbook</span>
-            <div className="obs-merge-actions">
-              <button
-                type="button"
-                className="obs-merge-pill"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(
-                    teacherWorkbookUrl,
-                    "_blank",
-                    "noopener,noreferrer"
-                  );
-                }}
-              >
-                Open ⧉
-              </button>
-              <button
-                type="button"
-                className="obs-merge-pill"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard?.writeText?.(teacherWorkbookUrl);
-                }}
-              >
-                Copy
-              </button>
-            </div>
-          </div>
-        )}
+      <div
+        key={obs.id}
+        role="button"
+        tabIndex={0}
+        className="obs-row"
+        onClick={handleOpenWorkspace}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleOpenWorkspace();
+          }
+        }}
+      >
+        <div
+          className={`obs-status-strip ${
+            obs.statusColor === "good"
+              ? "obs-status-good"
+              : obs.statusColor === "growth"
+              ? "obs-status-growth"
+              : "obs-status-mixed"
+          }`}
+        />
 
-        {/* Admin workbook (view-only) */}
-        {adminViewOnlyUrl && (
-          <div className="obs-merge-row">
-            <span className="obs-merge-label">Admin workbook (view-only)</span>
-            <div className="obs-merge-actions">
-              <button
-                type="button"
-                className="obs-merge-pill"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(adminViewOnlyUrl, "_blank", "noopener,noreferrer");
-                }}
-              >
-                View ⧉
-              </button>
-              <button
-                type="button"
-                className="obs-merge-pill"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard?.writeText?.(adminViewOnlyUrl);
-                }}
-              >
-                Copy
-              </button>
-            </div>
+        <div className="obs-row-left">
+          <div className="obs-row-header">
+            <div className="obs-teacher">{obs.teacherName}</div>
           </div>
-        )}
 
-        {/* Admin workbook (edit) */}
-        {adminWorkbookUrl && (
-          <div className="obs-merge-row">
-            <span className="obs-merge-label">Admin workbook</span>
-            <div className="obs-merge-actions">
+          <div className="obs-meta">
+            {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
+            {obs.lesson} • {obs.supportType}
+          </div>
+
+          {/* tags row + Teacher/Admin pills under it */}
+          <div className="obs-tags-row">
+            <div className="obs-tags">
+              <span
+                className={
+                  obs.status === "saved"
+                    ? "obs-tag obs-tag-completed"
+                    : "obs-tag obs-tag-draft"
+                }
+              >
+                {obs.status === "saved" ? "Completed" : "Draft"}
+              </span>
+              <span className="obs-progress">
+                {obs.progress} / {obs.totalIndicators} indicators
+              </span>
+            </div>
+
+            <div className="obs-pill-row">
               <button
                 type="button"
-                className="obs-merge-pill"
-                onClick={(e) => {
+                className="obs-pill-button"
+                onClick={async (e) => {
                   e.stopPropagation();
-                  window.open(adminWorkbookUrl, "_blank", "noopener,noreferrer");
+                  openTeacherModal();
                 }}
               >
-                Open ⧉
+                Teacher…
               </button>
               <button
                 type="button"
-                className="obs-merge-pill"
+                className="obs-pill-button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigator.clipboard?.writeText?.(adminWorkbookUrl);
+                  openAdminModal();
                 }}
               >
-                Copy
+                Admin…
               </button>
             </div>
           </div>
-        )}
+
+        {/* ✅ ONLY 3 STRIPS (persistent workbook links) */}
+        {!options?.hideMergeLinks && showLinks && (
+            <div className="obs-merge-links" onClick={(e) => e.stopPropagation()}>
+              {/* Teacher workbook */}
+              {teacherWorkbookUrl && (
+                <div className="obs-merge-row">
+                  <span className="obs-merge-label">Teacher workbook</span>
+                  <div className="obs-merge-actions">
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(
+                          teacherWorkbookUrl,
+                          "_blank",
+                          "noopener,noreferrer"
+                        );
+                      }}
+                    >
+                      Open ⧉
+                    </button>
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard?.writeText?.(teacherWorkbookUrl);
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Admin workbook (view-only) */}
+              {adminViewOnlyUrl && (
+                <div className="obs-merge-row">
+                  <span className="obs-merge-label">Admin workbook (view-only)</span>
+                  <div className="obs-merge-actions">
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(adminViewOnlyUrl, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      View ⧉
+                    </button>
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard?.writeText?.(adminViewOnlyUrl);
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Admin workbook (edit) */}
+              {adminWorkbookUrl && (
+                <div className="obs-merge-row">
+                  <span className="obs-merge-label">Admin workbook</span>
+                  <div className="obs-merge-actions">
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(adminWorkbookUrl, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      Open ⧉
+                    </button>
+                    <button
+                      type="button"
+                      className="obs-merge-pill"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard?.writeText?.(adminWorkbookUrl);
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="obs-date">{obs.dateLabel}</div>
       </div>
     );
-  })()
-)}
+  };
 
-
-    
-      {/* {(obs?.meta?.mergedTeacher?.url || obs?.meta?.mergedAdmin?.url) && (
-        <div
-          style={{
-            marginTop: 10,
-            padding: 10,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 10,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>
-            Latest merged sheets
-          </div>
-
-          {obs?.meta?.mergedTeacher?.url && (
-            <MergedLinkRow
-              label="Teacher sheet"
-              url={obs.meta.mergedTeacher.url}
-              sheetName={obs.meta.mergedTeacher.sheetName}
-              mergedAt={obs.meta.mergedTeacher.mergedAt}
-            />
-          )}
-
-          {obs?.meta?.mergedAdmin?.url && (
-            <MergedLinkRow
-              label="Admin sheet"
-              url={obs.meta.mergedAdmin.url}
-              sheetName={obs.meta.mergedAdmin.sheetName}
-              mergedAt={obs.meta.mergedAdmin.mergedAt}
-            />
-          )}
-        </div>
-      )} */}
-
-
-    </div>
-
-    <div className="obs-date">{obs.dateLabel}</div>
-  </div>
-);
-};
-
-  // NEW: grouped renderer with collapsed stack
+  // grouped renderer with collapsed stack
   const renderGroup = (group: {
-  key: string;
-  label: string;
-  items: DashboardObservationRow[];
-  
-}) => {
-  const isExpanded = expandedGroups[group.key] ?? false;
-  const count = group.items.length;
-  const latest = group.items[0];
-  return (
-    <div key={group.key} className="obs-group">
-      {/* Group header row */}
-      <button
-        type="button"
-        className="obs-group-header"
-        onClick={() => toggleGroupExpanded(group.key)}
-      >
-        <div className="obs-group-header-main">
-          <div className="obs-group-title">{group.label}</div>
-          <div className="obs-group-meta">
-            {count} {count === 1 ? "observation" : "observations"}
+    key: string;
+    label: string;
+    items: DashboardObservationRow[];
+  }) => {
+    const isExpanded = expandedGroups[group.key] ?? false;
+    const count = group.items.length;
+    // const latest = group.items[0]; // unused variable
+    return (
+      <div key={group.key} className="obs-group">
+        {/* Group header row */}
+        <button
+          type="button"
+          className="obs-group-header"
+          onClick={() => toggleGroupExpanded(group.key)}
+        >
+          <div className="obs-group-header-main">
+            <div className="obs-group-title">{group.label}</div>
+            <div className="obs-group-meta">
+              {count} {count === 1 ? "observation" : "observations"}
+            </div>
           </div>
-        </div>
-        <div className="obs-group-chevron">
-          {isExpanded ? "▾" : "▸"}
-        </div>
-      </button>
+          <div className="obs-group-chevron">
+            {isExpanded ? "▾" : "▸"}
+          </div>
+        </button>
 
-      {/* Expanded: show full list */}
-      {isExpanded ? (
+        {/* Expanded: show full list */}
+        {isExpanded ? (
           <div className="obs-group-body">
             {group.items.map((obs) => renderRow(obs))}
           </div>
@@ -1593,445 +1458,354 @@ return (
             </div>
           </div>
         )}
-    </div>
-  );
-};
-
-  /* ------------------------------
-     UI
-  --------------------------------- */
-  // ✅ REVISED RETURN BLOCK (drop-in replacement for what you pasted)
-// Notes:
-// - Uses your existing variables/functions: renderRow, renderGroup, grouped, filteredAndSorted,
-//   actionModal, modalObservation, handlers, AM summary state, etc.
-// - No “latest merged” big panel.
-// - Keeps your MergedLinkRow + formatLocalTime at bottom unchanged (safe even if unused).
-
-return (
-  <>
-    <div className="card">
-      <div className="card-header">
-        <div>
-          <div className="card-title">Observations</div>
-          <div className="card-subtitle">
-            Tap an observation to continue, or create a new one.
-          </div>
-        </div>
-
-        <div className="toolbar">
-          <div className="toolbar-group">
-            <span>Search</span>
-            <input
-              className="input search-input"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Teacher, school, campus…"
-            />
-          </div>
-
-          <div className="toolbar-group">
-            <span>Group by</span>
-            <select
-              className="select"
-              value={groupMode}
-              onChange={(e) => setGroupMode(e.target.value as GroupMode)}
-            >
-              <option value="none">None</option>
-              <option value="month">Month</option>
-              <option value="school">School</option>
-              <option value="campus">Campus</option>
-            </select>
-          </div>
-
-          <div className="toolbar-group">
-            <span>Sort</span>
-            <select
-              className="select"
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-            >
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-              <option value="teacher-az">Teacher A–Z</option>
-              <option value="teacher-za">Teacher Z–A</option>
-            </select>
-          </div>
-
-          <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                // default month = newest available
-                if (!summaryMonth && availableMonths[0]) {
-                  setSummaryMonth(availableMonths[0]);
-                }
-                setShowAmSummary(true);
-              }}
-              disabled={observations.length === 0}
-            >
-              AM Summary…
-            </button>
-          </div>
-        </div>
       </div>
+    );
+  };
 
-      <div className="obs-list">
-        {groupMode === "none" || !grouped
-          ? filteredAndSorted.map((obs) => renderRow(obs))
-          : grouped.map(renderGroup)}
-      </div>
-    </div>
-
-    {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
-    {actionModal && modalObservation && (
-      <div
-        className="obs-action-modal-backdrop"
-        onClick={() => setActionModal(null)}
-      >
-        <div className="obs-action-modal" onClick={(e) => e.stopPropagation()}>
-          <div className="obs-action-modal-header">
-            <div className="obs-action-modal-title">
-              {actionModal.role === "teacher"
-                ? "Teacher actions"
-                : "Admin actions"}
-            </div>
-            <div className="obs-action-modal-subtitle">
-              {modalObservation.teacherName} – {modalObservation.schoolName} •{" "}
-              {modalObservation.campus}
+  return (
+    <>
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Observations</div>
+            <div className="card-subtitle">
+              Tap an observation to continue, or create a new one.
             </div>
           </div>
 
-          <div className="obs-action-modal-body">
-            {actionModal.role === "teacher" ? (
-              <>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setActionModal(null);
-                    handlePreCallEmail(modalObservation);
-                  }}
-                >
-                  Pre call email
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setActionModal(null);
-                    handlePostCallEmail(modalObservation);
-                  }}
-                >
-                  Post call email
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setActionModal(null);
-                    handleMergeTeacherWorkbook(modalObservation);
-                  }}
-                >
-                  Merge teacher workbook
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setActionModal(null);
-                    handleMergeAdminWorkbook(modalObservation);
-                  }}
-                >
-                  Merge admin workbook
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setActionModal(null);
-                    handleAdminUpdateEmail(modalObservation);
-                  }}
-                >
-                  Admin update email
-                </button>
-              </>
-            )}
-          </div>
-
-          <div className="obs-action-modal-footer">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setActionModal(null)}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* ---------- AM SUMMARY MODAL ---------- */}
-    {showAmSummary && (
-      <div className="am-summary-backdrop">
-        <div className="am-summary-modal">
-          <div className="am-summary-header">
-            <div>
-              <div className="am-summary-title">Monthly summary for AMs</div>
-              <div className="am-summary-sub">
-                Choose a month and Account Manager, review the table, then copy
-                the email body into Outlook.
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setShowAmSummary(false)}
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="am-summary-controls">
+          <div className="toolbar">
             <div className="toolbar-group">
-              <span>Month</span>
+              <span>Search</span>
+              <input
+                className="input search-input"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="Teacher, school, campus…"
+              />
+            </div>
+
+            <div className="toolbar-group">
+              <span>Group by</span>
               <select
                 className="select"
-                value={summaryMonth}
-                onChange={(e) => {
-                  setSummaryMonth(e.target.value);
-                  setSummaryAmKey(""); // reset AM when month changes
+                value={groupMode}
+                onChange={(e) => setGroupMode(e.target.value as GroupMode)}
+              >
+                <option value="none">None</option>
+                <option value="month">Month</option>
+                <option value="school">School</option>
+                <option value="campus">Campus</option>
+              </select>
+            </div>
+
+            <div className="toolbar-group">
+              <span>Sort</span>
+              <select
+                className="select"
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+              >
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="teacher-az">Teacher A–Z</option>
+                <option value="teacher-za">Teacher Z–A</option>
+              </select>
+            </div>
+
+            <div className="toolbar-group">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  // default month = newest available
+                  if (!summaryMonth && availableMonths[0]) {
+                    setSummaryMonth(availableMonths[0]);
+                  }
+                  setShowAmSummary(true);
                 }}
+                disabled={observations.length === 0}
               >
-                <option value="">Select…</option>
-                {availableMonths.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+                AM Summary…
+              </button>
             </div>
-
-            <div className="toolbar-group">
-              <span>Account Manager</span>
-              <select
-                className="select"
-                value={summaryAmKey}
-                onChange={(e) => setSummaryAmKey(e.target.value)}
-                disabled={!summaryMonth}
-              >
-                <option value="">
-                  {summaryMonth ? "Select…" : "Choose month first"}
-                </option>
-                {amsForSelectedMonth.map((am) => (
-                  <option key={am.key} value={am.key}>
-                    {am.name} ({am.email})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {sentInfo && (
-              <div className="am-summary-sent">Marked as sent on {sentInfo}</div>
-            )}
           </div>
+        </div>
 
-          {summaryRows.length > 0 && (
-            <>
-              <div className="am-summary-table-wrapper">
-                <table className="am-summary-table">
-                  <thead>
-                    <tr>
-                      <th>School</th>
-                      <th>Campus</th>
-                      <th>Teacher</th>
-                      <th>Status</th>
-                      <th>Next steps / key issues</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryRows.map((row, idx) => (
-                      <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
-                        <td>{row.schoolName}</td>
-                        <td>{row.campus}</td>
-                        <td>{row.teacherName}</td>
-                        <td>
-                          <select
-                            className="select select-compact"
-                            value={row.status}
-                            onChange={(e) => {
-                              const value = e.target.value as SummaryStatus;
-                              setSummaryRows((prev) =>
-                                prev.map((r, i) =>
-                                  i === idx ? { ...r, status: value } : r
-                                )
-                              );
-                            }}
-                          >
-                            <option value="none">–</option>
-                            <option value="green">Green</option>
-                            <option value="red">Red</option>
-                          </select>
-                        </td>
-                        <td>
-                          <textarea
-                            value={row.nextSteps}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setSummaryRows((prev) =>
-                                prev.map((r, i) =>
-                                  i === idx ? { ...r, nextSteps: value } : r
-                                )
-                              );
-                            }}
-                            rows={3}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        <div className="obs-list">
+          {groupMode === "none" || !grouped
+            ? filteredAndSorted.map((obs) => renderRow(obs))
+            : grouped.map(renderGroup)}
+        </div>
+      </div>
+
+      {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
+      {actionModal && modalObservation && (
+        <div
+          className="obs-action-modal-backdrop"
+          onClick={() => setActionModal(null)}
+        >
+          <div className="obs-action-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="obs-action-modal-header">
+              <div className="obs-action-modal-title">
+                {actionModal.role === "teacher"
+                  ? "Teacher actions"
+                  : "Admin actions"}
               </div>
+              <div className="obs-action-modal-subtitle">
+                {modalObservation.teacherName} – {modalObservation.schoolName} •{" "}
+                {modalObservation.campus}
+              </div>
+            </div>
 
-              <div className="am-summary-email-section">
-                <div className="am-summary-email-header">
-                  <span>Email body (copy into Outlook)</span>
+            <div className="obs-action-modal-body">
+              {actionModal.role === "teacher" ? (
+                <>
                   <button
                     type="button"
                     className="btn"
                     onClick={() => {
-                      if (!emailBody) return;
-                      navigator.clipboard
-                        ?.writeText(emailBody)
-                        .catch((err) =>
-                          console.error("Clipboard copy failed", err)
-                        );
+                      setActionModal(null);
+                      handlePreCallEmail(modalObservation);
                     }}
-                    disabled={!emailBody}
                   >
-                    Copy to clipboard
+                    Pre call email
                   </button>
-                </div>
-
-                <textarea
-                  className="am-summary-email-textarea"
-                  value={emailBody}
-                  readOnly
-                  rows={10}
-                />
-
-                <div className="am-summary-footer">
                   <button
                     type="button"
                     className="btn"
-                    onClick={markSummarySent}
-                    disabled={!summaryMonth || !summaryAmKey}
+                    onClick={() => {
+                      setActionModal(null);
+                      handlePostCallEmail(modalObservation);
+                    }}
                   >
-                    Mark summary as sent
+                    Post call email
                   </button>
-                  {sentInfo && (
-                    <span className="am-summary-sent-inline">
-                      Already marked as sent on {sentInfo}
-                    </span>
-                  )}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setActionModal(null);
+                      handleMergeTeacherWorkbook(modalObservation);
+                    }}
+                  >
+                    Merge teacher workbook
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setActionModal(null);
+                      handleMergeAdminWorkbook(modalObservation);
+                    }}
+                  >
+                    Merge admin workbook
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setActionModal(null);
+                      handleAdminUpdateEmail(modalObservation);
+                    }}
+                  >
+                    Admin update email
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="obs-action-modal-footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setActionModal(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- AM SUMMARY MODAL ---------- */}
+      {showAmSummary && (
+        <div className="am-summary-backdrop">
+          <div className="am-summary-modal">
+            <div className="am-summary-header">
+              <div>
+                <div className="am-summary-title">Monthly summary for AMs</div>
+                <div className="am-summary-sub">
+                  Choose a month and Account Manager, review the table, then copy
+                  the email body into Outlook.
                 </div>
               </div>
-            </>
-          )}
-
-          {summaryMonth && summaryAmKey && summaryRows.length === 0 && (
-            <div className="am-summary-empty">
-              No observations for this AM in {summaryMonth}.
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowAmSummary(false)}
+              >
+                Close
+              </button>
             </div>
-          )}
+
+            <div className="am-summary-controls">
+              <div className="toolbar-group">
+                <span>Month</span>
+                <select
+                  className="select"
+                  value={summaryMonth}
+                  onChange={(e) => {
+                    setSummaryMonth(e.target.value);
+                    setSummaryAmKey(""); // reset AM when month changes
+                  }}
+                >
+                  <option value="">Select…</option>
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="toolbar-group">
+                <span>Account Manager</span>
+                <select
+                  className="select"
+                  value={summaryAmKey}
+                  onChange={(e) => setSummaryAmKey(e.target.value)}
+                  disabled={!summaryMonth}
+                >
+                  <option value="">
+                    {summaryMonth ? "Select…" : "Choose month first"}
+                  </option>
+                  {amsForSelectedMonth.map((am) => (
+                    <option key={am.key} value={am.key}>
+                      {am.name} ({am.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {sentInfo && (
+                <div className="am-summary-sent">Marked as sent on {sentInfo}</div>
+              )}
+            </div>
+
+            {summaryRows.length > 0 && (
+              <>
+                <div className="am-summary-table-wrapper">
+                  <table className="am-summary-table">
+                    <thead>
+                      <tr>
+                        <th>School</th>
+                        <th>Campus</th>
+                        <th>Teacher</th>
+                        <th>Status</th>
+                        <th>Next steps / key issues</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summaryRows.map((row, idx) => (
+                        <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
+                          <td>{row.schoolName}</td>
+                          <td>{row.campus}</td>
+                          <td>{row.teacherName}</td>
+                          <td>
+                            <select
+                              className="select select-compact"
+                              value={row.status}
+                              onChange={(e) => {
+                                const value = e.target.value as SummaryStatus;
+                                setSummaryRows((prev) =>
+                                  prev.map((r, i) =>
+                                    i === idx ? { ...r, status: value } : r
+                                  )
+                                );
+                              }}
+                            >
+                              <option value="none">–</option>
+                              <option value="green">Green</option>
+                              <option value="red">Red</option>
+                            </select>
+                          </td>
+                          <td>
+                            <textarea
+                              value={row.nextSteps}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setSummaryRows((prev) =>
+                                  prev.map((r, i) =>
+                                    i === idx ? { ...r, nextSteps: value } : r
+                                  )
+                                );
+                              }}
+                              rows={3}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="am-summary-email-section">
+                  <div className="am-summary-email-header">
+                    <span>Email body (copy into Outlook)</span>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        if (!emailBody) return;
+                        navigator.clipboard
+                          ?.writeText(emailBody)
+                          .catch((err) =>
+                            console.error("Clipboard copy failed", err)
+                          );
+                      }}
+                      disabled={!emailBody}
+                    >
+                      Copy to clipboard
+                    </button>
+                  </div>
+
+                  <textarea
+                    className="am-summary-email-textarea"
+                    value={emailBody}
+                    readOnly
+                    rows={10}
+                  />
+
+                  <div className="am-summary-footer">
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={markSummarySent}
+                      disabled={!summaryMonth || !summaryAmKey}
+                    >
+                      Mark summary as sent
+                    </button>
+                    {sentInfo && (
+                      <span className="am-summary-sent-inline">
+                        Already marked as sent on {sentInfo}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {summaryMonth && summaryAmKey && summaryRows.length === 0 && (
+              <div className="am-summary-empty">
+                No observations for this AM in {summaryMonth}.
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    )}
-  </>
-);
-
-// ------------------------------
-// (keep these helpers below as-is; safe even if unused)
-// ------------------------------
-function formatLocalTime(iso?: string) {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-function MergedLinkRow({
-  label,
-  url,
-  sheetName,
-  mergedAt,
-}: {
-  label: string;
-  url: string;
-  sheetName?: string;
-  mergedAt?: string;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ fontWeight: 600, minWidth: 110 }}>{label}</div>
-
-        {sheetName && (
-          <div style={{ fontSize: 12, opacity: 0.75 }}>
-            ({sheetName})
-          </div>
-        )}
-
-        {mergedAt && (
-          <div style={{ marginLeft: "auto", fontSize: 12, opacity: 0.75 }}>
-            {formatLocalTime(mergedAt)}
-          </div>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          value={url}
-          readOnly
-          style={{
-            flex: 1,
-            padding: "8px 10px",
-            borderRadius: 8,
-            border: "1px solid rgba(0,0,0,0.15)",
-            fontSize: 12,
-          }}
-          onFocus={(e) => e.currentTarget.select()}
-        />
-
-        <button
-          type="button"
-          onClick={async () => {
-            if (navigator.clipboard?.writeText) {
-              await navigator.clipboard.writeText(url);
-            }
-          }}
-          style={{ padding: "8px 10px", borderRadius: 8 }}
-          title="Copy link"
-        >
-          Copy
-        </button>
-
-        <button
-          type="button"
-          onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-          style={{ padding: "8px 10px", borderRadius: 8 }}
-          title="Open in new tab"
-        >
-          Open
-        </button>
-      </div>
-    </div>
+      )}
+    </>
   );
-}
 };
