@@ -203,27 +203,58 @@ function monthKeyFromTs(ts: number | null): string | null {
 /* ------------------------------
    META PERSISTENCE HELPER
 --------------------------------- */
+// src/DashboardShell.tsx
+
 async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
-  // 1) localStorage (immediate + survives reload)
+  let nextMeta: any = {};
+
+  // 1. Try to read from LocalStorage first
   const key = `${STORAGE_PREFIX}${obsId}`;
-  const raw = localStorage.getItem(key);
-  if (!raw) throw new Error("No local observation found in localStorage for this obsId.");
-  
-  const parsed = JSON.parse(raw);
-  parsed.meta = parsed.meta || {};
-  parsed.meta = { ...parsed.meta, ...patch };
-  localStorage.setItem(key, JSON.stringify(parsed));
-  
-  // 2) Supabase (optional but recommended)
-  try {
-    await supabase
+  const rawLocal = localStorage.getItem(key);
+
+  if (rawLocal) {
+    // Case A: We have local data. Update it.
+    const parsed = JSON.parse(rawLocal);
+    parsed.meta = { ...(parsed.meta || {}), ...patch };
+    nextMeta = parsed.meta;
+    localStorage.setItem(key, JSON.stringify(parsed));
+  } else {
+    // Case B: No local data? Fetch from DB so we don't crash.
+    // This prevents the "disappearing badge" bug on fresh loads.
+    const { data, error } = await supabase
       .from("observations")
-      .update({ meta: parsed.meta })
-      .eq("id", obsId);
-  } catch (e) {
-    console.warn("[persistMergedLinkToObservationMeta] Supabase update failed (local ok)", e);
+      .select("meta")
+      .eq("id", obsId)
+      .single();
+
+    if (!error && data) {
+      nextMeta = { ...(data.meta || {}), ...patch };
+      // We don't necessarily need to write to localStorage here if the user hasn't opened it,
+      // but we MUST have the 'nextMeta' to save to the DB below.
+    } else {
+      console.error("[persistMerged] Could not find obs to update:", obsId);
+      return {}; // Fail safe
+    }
   }
-  return parsed.meta;
+
+  // 2. Save to Supabase (The Source of Truth)
+  // We use a simplified update here to ensure the patch sticks.
+  // Note: We need to merge the new patch with the EXISTING DB meta to be safe,
+  // but since 'nextMeta' above is built from (Local OR DB) + Patch, we are good.
+  try {
+    const { error } = await supabase
+      .from("observations")
+      .update({ meta: nextMeta })
+      .eq("id", obsId);
+
+    if (error) throw error;
+    console.log("[persistMerged] Saved to DB:", patch);
+  } catch (e) {
+    console.error("[persistMerged] Supabase update failed", e);
+    alert("Warning: Could not save status to database. Check internet connection.");
+  }
+
+  return nextMeta;
 }
 
 /* ------------------------------
@@ -490,23 +521,27 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     
 // --- EMAIL MODAL STATE ---
 // --- EMAIL MODAL STATE ---
+ // --- EMAIL MODAL STATE ---
+// --- EMAIL MODAL STATE ---
   const [emailModalState, setEmailModalState] = useState<{
     isOpen: boolean;
     mode: EmailMode;
-    // 👇 NEW: Track which type of email is being sent
-    emailType: "pre" | "post" | "admin" | "am" | null; 
+    emailType: "pre" | "post" | "admin" | "am" | null;
+    obsId?: string;
     to: string[];
+    cc: string[]; // <--- ADD THIS
     subject: string;
     bodyHtml?: string;
     sandwichData?: { intro: string; tableHtml: string; outro: string };
   }>({
     isOpen: false,
     mode: "simple",
-    emailType: null, // Default
+    emailType: null,
+    obsId: undefined,
     to: [],
+    cc: [], // <--- Initialize Empty
     subject: "",
   });
-
 
   // Fetch helpers for email
   const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
@@ -984,8 +1019,10 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       isOpen: true,
       mode: "simple",
        emailType: "pre", // <--- 1. Set Type
+       obsId: obs.id, // <--- ✅ PASS THE ID HERE
       to: teacherEmail ? [teacherEmail] : [],
       subject: `GrapeSEED Support Pre-call: ${obs.teacherName}`,
+      cc: [],
       bodyHtml: html,
     });
   };
@@ -1005,7 +1042,9 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       isOpen: true,
       mode: "simple",
       emailType: "post", // <--- 1. Set Type
+      obsId: obs.id, // <--- ✅ PASS THE ID HERE
       to: teacherEmail ? [teacherEmail] : [],
+      cc: [],
       subject: `GrapeSEED Support Summary: ${obs.teacherName}`,
       bodyHtml: html,
     });
@@ -1028,7 +1067,9 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       isOpen: true,
       mode: "simple",
       emailType: "admin", // <--- 3. Set Type
+      obsId: obs.id, // <--- ✅ PASS THE ID HERE
       to: adminEmail ? [adminEmail] : [],
+      cc: [],
       subject: `GrapeSEED Support Update: ${obs.schoolName}`,
       bodyHtml: html,
     });
@@ -1283,12 +1324,11 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
   // ✅ NEW: Callback when email is sent successfully
   const handleEmailSuccess = async () => {
-    // We need the ID of the observation we are working on. 
-    // Since we opened the modal via `actionModal` (Teacher/Admin actions), we use that ID.
-    const obsId = actionModal?.obsId;
+    // 1. Get ID from the Email State (Reliable), not the Action Modal (Unreliable)
+    const obsId = emailModalState.obsId; 
     const type = emailModalState.emailType;
 
-    if (!obsId || !type || type === "am") return; // AM Summary doesn't belong to one card
+    if (!obsId || !type || type === "am") return;
 
     const timestamp = new Date().toISOString();
     let metaKey = "";
@@ -1299,7 +1339,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
     if (!metaKey) return;
 
-    // 1. Update UI (Optimistic)
+    // 2. Update UI
     setObservations(prev => prev.map(o => {
       if (o.id === obsId) {
         return {
@@ -1310,7 +1350,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       return o;
     }));
 
-    // 2. Save to DB
+    // 3. Save to DB
     await persistMergedLinkToObservationMeta(obsId, { [metaKey]: timestamp });
   };
   /* ------------------------------
@@ -1955,10 +1995,12 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                         `;
 
                         setEmailModalState({
+                      
                           isOpen: true,
                           mode: "sandwich",
                           emailType: "am",
                           to: email ? [email] : [],
+                          cc: [],
                           subject: `GrapeSEED Support Summary - ${summaryMonth}`,
                           sandwichData: {
                             intro: `Dear ${name},\n\nHere is the GrapeSEED support summary for ${summaryMonth}. Please see the details below.`,
@@ -2003,9 +2045,10 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       <EmailComposeModal 
         isOpen={emailModalState.isOpen}
         onClose={() => setEmailModalState(prev => ({ ...prev, isOpen: false }))}
-        onSuccess={handleEmailSuccess} // <--- Pass the new handler here
+        onSuccess={handleEmailSuccess}
         mode={emailModalState.mode}
         initialTo={emailModalState.to}
+        initialCc={emailModalState.cc} // <--- PASS THIS PROP
         initialSubject={emailModalState.subject}
         initialBodyHtml={emailModalState.bodyHtml}
         sandwichData={emailModalState.sandwichData}
