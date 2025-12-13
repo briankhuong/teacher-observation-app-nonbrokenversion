@@ -489,9 +489,12 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 
     
 // --- EMAIL MODAL STATE ---
+// --- EMAIL MODAL STATE ---
   const [emailModalState, setEmailModalState] = useState<{
     isOpen: boolean;
     mode: EmailMode;
+    // 👇 NEW: Track which type of email is being sent
+    emailType: "pre" | "post" | "admin" | "am" | null; 
     to: string[];
     subject: string;
     bodyHtml?: string;
@@ -499,6 +502,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   }>({
     isOpen: false,
     mode: "simple",
+    emailType: null, // Default
     to: [],
     subject: "",
   });
@@ -979,6 +983,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     setEmailModalState({
       isOpen: true,
       mode: "simple",
+       emailType: "pre", // <--- 1. Set Type
       to: teacherEmail ? [teacherEmail] : [],
       subject: `GrapeSEED Support Pre-call: ${obs.teacherName}`,
       bodyHtml: html,
@@ -999,6 +1004,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     setEmailModalState({
       isOpen: true,
       mode: "simple",
+      emailType: "post", // <--- 1. Set Type
       to: teacherEmail ? [teacherEmail] : [],
       subject: `GrapeSEED Support Summary: ${obs.teacherName}`,
       bodyHtml: html,
@@ -1021,6 +1027,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     setEmailModalState({
       isOpen: true,
       mode: "simple",
+      emailType: "admin", // <--- 3. Set Type
       to: adminEmail ? [adminEmail] : [],
       subject: `GrapeSEED Support Update: ${obs.schoolName}`,
       bodyHtml: html,
@@ -1273,6 +1280,39 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     }));
   };
 
+
+  // ✅ NEW: Callback when email is sent successfully
+  const handleEmailSuccess = async () => {
+    // We need the ID of the observation we are working on. 
+    // Since we opened the modal via `actionModal` (Teacher/Admin actions), we use that ID.
+    const obsId = actionModal?.obsId;
+    const type = emailModalState.emailType;
+
+    if (!obsId || !type || type === "am") return; // AM Summary doesn't belong to one card
+
+    const timestamp = new Date().toISOString();
+    let metaKey = "";
+
+    if (type === "pre") metaKey = "emailSentPre";
+    if (type === "post") metaKey = "emailSentPost";
+    if (type === "admin") metaKey = "emailSentAdmin";
+
+    if (!metaKey) return;
+
+    // 1. Update UI (Optimistic)
+    setObservations(prev => prev.map(o => {
+      if (o.id === obsId) {
+        return {
+          ...o,
+          meta: { ...o.meta, [metaKey]: timestamp }
+        };
+      }
+      return o;
+    }));
+
+    // 2. Save to DB
+    await persistMergedLinkToObservationMeta(obsId, { [metaKey]: timestamp });
+  };
   /* ------------------------------
       CARD RENDERER
   --------------------------------- */
@@ -1295,6 +1335,8 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         date: obs.isoDate || "",
       });
     };
+    // 👇 ADD OR MOVE THIS LINE UP (so it is available for the badges)
+  const metaAny: any = getStableMetaForRow(obs);
 
     // No-argument version — clean and safe
     const openTeacherModal = () => {
@@ -1345,7 +1387,30 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
           <div className="obs-meta">
             {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
             {obs.lesson} • {obs.supportType}
-          </div>
+            
+            {/* 👇 NEW: Email Status Badges 👇 */}
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              {metaAny.emailSentPre && (
+                <span title={`Pre-call sent: ${new Date(metaAny.emailSentPre).toLocaleDateString()}`} 
+                      style={{fontSize:10, padding:"2px 6px", borderRadius:4, background:"#dbeafe", color:"#1e40af", border:"1px solid #bfdbfe", display: "inline-flex", alignItems: "center", gap: 3}}>
+                  <span>✉️</span> Pre
+                </span>
+              )}
+              {metaAny.emailSentPost && (
+                <span title={`Post-call sent: ${new Date(metaAny.emailSentPost).toLocaleDateString()}`} 
+                      style={{fontSize:10, padding:"2px 6px", borderRadius:4, background:"#dcfce7", color:"#166534", border:"1px solid #bbf7d0", display: "inline-flex", alignItems: "center", gap: 3}}>
+                  <span>✉️</span> Post
+                </span>
+              )}
+              {metaAny.emailSentAdmin && (
+                <span title={`Admin update sent: ${new Date(metaAny.emailSentAdmin).toLocaleDateString()}`} 
+                      style={{fontSize:10, padding:"2px 6px", borderRadius:4, background:"#f3e8ff", color:"#6b21a8", border:"1px solid #e9d5ff", display: "inline-flex", alignItems: "center", gap: 3}}>
+                  <span>✉️</span> Admin
+                </span>
+              )}
+            </div>
+             {/* 👆 END BADGES 👆 */}
+        </div>
 
           {/* tags row + Teacher/Admin pills under it */}
           <div className="obs-tags-row">
@@ -1892,6 +1957,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                         setEmailModalState({
                           isOpen: true,
                           mode: "sandwich",
+                          emailType: "am",
                           to: email ? [email] : [],
                           subject: `GrapeSEED Support Summary - ${summaryMonth}`,
                           sandwichData: {
@@ -1937,6 +2003,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       <EmailComposeModal 
         isOpen={emailModalState.isOpen}
         onClose={() => setEmailModalState(prev => ({ ...prev, isOpen: false }))}
+        onSuccess={handleEmailSuccess} // <--- Pass the new handler here
         mode={emailModalState.mode}
         initialTo={emailModalState.to}
         initialSubject={emailModalState.subject}

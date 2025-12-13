@@ -2,15 +2,15 @@ export interface AmSummaryEmailRow {
   schoolName: string;
   campus: string;
   teacherName: string;
-  statusLabel: string; // e.g. "Green", "Red", "-" (already mapped in dashboard)
-  nextStepsOneLine: string; // single-line
-  status?: "green" | "red" | "none"; // Raw status for styling
+  statusLabel: string; 
+  nextStepsOneLine: string; 
+  status?: "green" | "red" | "none"; 
 }
 
 export interface AmSupportSummaryTemplateParams {
   amName: string;
   amEmail?: string | null;
-  summaryMonth: string; // e.g. "11.2025" or "November 2025"
+  summaryMonth: string; 
   trainerName: string;
   rows: AmSummaryEmailRow[];
 }
@@ -22,157 +22,83 @@ export function buildAmSupportSummaryHtml({
   trainerName,
   rows,
 }: AmSupportSummaryTemplateParams): string {
-  const rowsHtml =
-    rows.length === 0
-      ? `
-        <tr>
-          <td colspan="5" style="padding:12px 16px;font-size:14px;color:#9ca3af;text-align:center;">
-            No observations found for this period.
-          </td>
-        </tr>
-      `
-      : rows
-          .map((r) => {
-            // Background Colors
-            let bgStyle = "background-color:#020617;"; // Default Dark
-            let textStyle = "color:#e5e7eb;";
-            
-            // Note: Outlook prefers simple inline styles. 
-            // We use slightly muted backgrounds for readability.
-            if (r.status === "green") {
-              bgStyle = "background-color:#064e3b;"; // Dark Green
-              textStyle = "color:#ecfdf5;";
-            } else if (r.status === "red") {
-              bgStyle = "background-color:#450a0a;"; // Dark Red
-              textStyle = "color:#fef2f2;";
-            }
+  
+  // "GrapeSEED Pro" Theme Styles
+  const container = "max-width: 720px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; border: 1px solid #e5e7eb;";
+  const header = "background-color: #111827; padding: 25px; text-align: center;"; // Dark/Black for Official Report
+  const body = "padding: 30px 25px; color: #374151; line-height: 1.6;";
+  const footer = "background-color: #f9fafb; padding: 15px; text-align: center; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb;";
 
-            return `
-        <tr style="${bgStyle}">
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
-            ${r.schoolName}
-          </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
-            ${r.campus}
-          </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
-            ${r.teacherName}
-          </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;white-space:nowrap;${textStyle}">
-            <strong>${r.statusLabel}</strong>
-          </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
-            ${r.nextStepsOneLine}
-          </td>
-        </tr>
-      `;
-          })
-          .join("");
+  const rowsHtml = rows.length === 0
+    ? `<tr><td colspan="5" style="padding:15px; text-align:center; color:#9ca3af;">No observations found.</td></tr>`
+    : rows.map((r) => {
+        // Status Colors
+        let bg = "#ffffff";
+        let text = "#374151";
+        let badge = `<span>-</span>`;
 
-  const monthLabel = summaryMonth;
+        if (r.status === "green") {
+          bg = "#f0fdf4"; // Very light green row
+          badge = `<span style="display:inline-block; background:#dcfce7; color:#166534; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:700;">GREEN</span>`;
+        } else if (r.status === "red") {
+          bg = "#fef2f2"; // Very light red row
+          badge = `<span style="display:inline-block; background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:700;">RED</span>`;
+        }
+
+        return `
+        <tr style="background-color: ${bg}; border-bottom: 1px solid #e5e7eb;">
+          <td style="padding: 12px; font-size: 13px; color: #111827; font-weight: 500;">${r.schoolName}</td>
+          <td style="padding: 12px; font-size: 13px; color: #4b5563;">${r.campus}</td>
+          <td style="padding: 12px; font-size: 13px; color: #4b5563;">${r.teacherName}</td>
+          <td style="padding: 12px; text-align: center;">${badge}</td>
+          <td style="padding: 12px; font-size: 13px; color: #4b5563; line-height: 1.4;">${r.nextStepsOneLine}</td>
+        </tr>`;
+      }).join("");
 
   return `
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>GrapeSEED Support Summary – ${monthLabel}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  </head>
-  <body style="margin:0;padding:0;background-color:#020617;">
-    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#020617;padding:24px 0;">
-      <tr>
-        <td align="center">
-          <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:720px;background:#020617;border-radius:16px;border:1px solid #1f2937;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-            <tr>
-              <td style="padding:20px 24px 12px 24px;border-bottom:1px solid #1f2937;">
-                <p style="margin:0;color:#64748b;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;">
-                  GrapeSEED • Support Summary
-                </p>
-                <h1 style="margin:6px 0 4px 0;font-size:20px;color:#e5e7eb;font-weight:600;">
-                  Monthly support summary – ${monthLabel}
-                </h1>
-                ${
-                  amEmail
-                    ? `<p style="margin:0;color:#9ca3af;font-size:13px;">For: ${amName} (${amEmail})</p>`
-                    : `<p style="margin:0;color:#9ca3af;font-size:13px;">For: ${amName}</p>`
-                }
-              </td>
-            </tr>
+<html>
+<body style="margin: 0; padding: 20px; background-color: #f3f4f6;">
+  
+  <div style="${container}">
+    <div style="${header}">
+      <h2 style="margin: 0; color: #ffffff; font-size: 18px; letter-spacing: 0.5px; text-transform: uppercase;">Monthly Support Summary</h2>
+      <p style="margin: 5px 0 0; color: #9ca3af; font-size: 13px;">${summaryMonth} • For ${amName}</p>
+    </div>
 
-            <tr>
-              <td style="padding:20px 24px 0 24px;color:#e5e7eb;font-size:14px;line-height:1.6;">
-                <p style="margin:0 0 8px 0;">
-                  Dear ${amName},
-                </p>
-                <p style="margin:8px 0 8px 0;">
-                  Below is a summary of GrapeSEED classroom support for your schools
-                  during <strong>${monthLabel}</strong>. Each row highlights a school,
-                  campus, teacher, overall status, and key next steps or issues.
-                </p>
-              </td>
-            </tr>
+    <div style="${body}">
+      <p style="margin-top: 0;">Dear <strong>${amName}</strong>,</p>
+      
+      <p>Below is the summary of GrapeSEED classroom support for your schools during <strong>${summaryMonth}</strong>.</p>
 
-            <tr>
-              <td style="padding:16px 16px 12px 16px;">
-                <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;border-radius:12px;overflow:hidden;background:#020617;border:1px solid #1f2937;">
-                  <thead>
-                    <tr style="background:#111827;">
-                      <th align="left" style="padding:8px 12px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">
-                        School
-                      </th>
-                      <th align="left" style="padding:8px 12px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">
-                        Campus
-                      </th>
-                      <th align="left" style="padding:8px 12px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">
-                        Teacher
-                      </th>
-                      <th align="left" style="padding:8px 12px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">
-                        Status
-                      </th>
-                      <th align="left" style="padding:8px 12px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">
-                        Next steps / key issues
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${rowsHtml}
-                  </tbody>
-                </table>
-              </td>
+      <div style="overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 6px; margin: 20px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; min-width: 600px;">
+          <thead>
+            <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+              <th align="left" style="padding: 10px 12px; font-size: 11px; color: #6b7280; text-transform: uppercase;">School</th>
+              <th align="left" style="padding: 10px 12px; font-size: 11px; color: #6b7280; text-transform: uppercase;">Campus</th>
+              <th align="left" style="padding: 10px 12px; font-size: 11px; color: #6b7280; text-transform: uppercase;">Teacher</th>
+              <th align="center" style="padding: 10px 12px; font-size: 11px; color: #6b7280; text-transform: uppercase;">Status</th>
+              <th align="left" style="padding: 10px 12px; font-size: 11px; color: #6b7280; text-transform: uppercase; width: 40%;">Next Steps</th>
             </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
 
-            <tr>
-              <td style="padding:20px 24px 16px 24px;color:#e5e7eb;font-size:14px;line-height:1.6;">
-                <p style="margin:0 0 8px 0;">
-                  If you would like to discuss any of these teachers or schools in
-                  more detail, I would be happy to schedule a follow-up call.
-                </p>
-                <p style="margin:0 0 4px 0;">
-                  Best regards,
-                </p>
-                <p style="margin:0;">
-                  ${trainerName}<br />
-                  GrapeSEED Trainer
-                </p>
-              </td>
-            </tr>
+      <p style="margin-top: 25px;">If you would like to discuss any of these teachers in more detail, please let me know.</p>
 
-            <tr>
-              <td style="padding:16px 24px 20px 24px;">
-                <p style="margin:0;font-size:11px;color:#6b7280;">
-                  This summary is based on GrapeSEED classroom observations and support
-                  sessions during the selected month. Please keep this information
-                  internal to your organization.
-                </p>
-              </td>
-            </tr>
+      <p style="margin-bottom: 0;">Best regards,<br><strong>${trainerName}</strong><br><span style="color: #6b7280; font-size: 13px;">GrapeSEED Trainer</span></p>
+    </div>
 
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
+    <div style="${footer}">
+      Internal Use Only • GrapeSEED Support
+    </div>
+  </div>
+
+</body>
 </html>
 `;
 }
