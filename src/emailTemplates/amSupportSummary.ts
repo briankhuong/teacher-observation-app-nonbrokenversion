@@ -1,11 +1,10 @@
-// src/emailTemplates/amSupportSummary.ts
-
 export interface AmSummaryEmailRow {
   schoolName: string;
   campus: string;
   teacherName: string;
-  statusLabel: string; // e.g. "Green", "Red", "-" (already mapped)
-  nextStepsOneLine: string; // single-line, truncated if you want
+  statusLabel: string; // e.g. "Green", "Red", "-" (already mapped in dashboard)
+  nextStepsOneLine: string; // single-line
+  status?: "green" | "red" | "none"; // Raw status for styling
 }
 
 export interface AmSupportSummaryTemplateParams {
@@ -33,27 +32,41 @@ export function buildAmSupportSummaryHtml({
         </tr>
       `
       : rows
-          .map(
-            (r) => `
-        <tr>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;color:#e5e7eb;">
+          .map((r) => {
+            // Background Colors
+            let bgStyle = "background-color:#020617;"; // Default Dark
+            let textStyle = "color:#e5e7eb;";
+            
+            // Note: Outlook prefers simple inline styles. 
+            // We use slightly muted backgrounds for readability.
+            if (r.status === "green") {
+              bgStyle = "background-color:#064e3b;"; // Dark Green
+              textStyle = "color:#ecfdf5;";
+            } else if (r.status === "red") {
+              bgStyle = "background-color:#450a0a;"; // Dark Red
+              textStyle = "color:#fef2f2;";
+            }
+
+            return `
+        <tr style="${bgStyle}">
+          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
             ${r.schoolName}
           </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;color:#e5e7eb;">
+          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
             ${r.campus}
           </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;color:#e5e7eb;">
+          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
             ${r.teacherName}
           </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;color:#e5e7eb;white-space:nowrap;">
-            ${r.statusLabel}
+          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;white-space:nowrap;${textStyle}">
+            <strong>${r.statusLabel}</strong>
           </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;color:#cbd5f5;">
+          <td style="padding:8px 12px;border-bottom:1px solid #1f2937;font-size:13px;${textStyle}">
             ${r.nextStepsOneLine}
           </td>
         </tr>
-      `
-          )
+      `;
+          })
           .join("");
 
   const monthLabel = summaryMonth;

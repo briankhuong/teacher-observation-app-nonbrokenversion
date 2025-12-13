@@ -1,5 +1,3 @@
-// src/emailTemplates/adminUpdate.ts
-
 export interface AdminUpdateTemplateParams {
   adminName: string;
   schoolName: string;
@@ -7,7 +5,8 @@ export interface AdminUpdateTemplateParams {
   trainerName: string;
   teacherName?: string | null;
   adminWorkbookUrl?: string | null;
-  extraNotesVi?: string | null; // optional extra VN notes / context
+  viewOnlyUrl?: string | null; // This is the fixed property
+  extraNotesVi?: string | null;
 }
 
 export function buildAdminUpdateHtml({
@@ -17,6 +16,7 @@ export function buildAdminUpdateHtml({
   trainerName,
   teacherName,
   adminWorkbookUrl,
+  viewOnlyUrl,
   extraNotesVi,
 }: AdminUpdateTemplateParams): string {
   const campusLine = campus
@@ -29,7 +29,10 @@ export function buildAdminUpdateHtml({
        </p>`
     : "";
 
-  const workbookBlock = adminWorkbookUrl
+  // Prefer View Only URL, fallback to edit URL
+  const urlToUse = viewOnlyUrl || adminWorkbookUrl;
+
+  const workbookBlock = urlToUse
     ? `
       <tr>
         <td style="padding:16px 24px 0 24px;">
@@ -37,7 +40,7 @@ export function buildAdminUpdateHtml({
             Anh/chị có thể xem chi tiết ghi chú và kế hoạch hỗ trợ trong file dưới đây:
           </p>
           <p style="margin:0 0 6px 0;">
-            <a href="${adminWorkbookUrl}" style="color:#38bdf8;text-decoration:none;">
+            <a href="${urlToUse}" style="color:#38bdf8;text-decoration:none;">
               Mở file tổng hợp hỗ trợ (Admin workbook)
             </a>
           </p>
