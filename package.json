@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@azure/msal-browser": "^4.27.0",
     "@azure/msal-node": "^3.8.4",
     "@supabase/supabase-js": "^2.86.2",
     "cors": "^2.8.5",
