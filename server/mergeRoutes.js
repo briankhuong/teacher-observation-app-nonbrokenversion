@@ -1,4 +1,5 @@
 // server/mergeRoutes.js
+
 import express from "express";
 import { mergeTeacherSheet, mergeAdminSheet } from "./msGraphWorkbook.js";
 import { updateSchoolViewOnlyUrl } from "./supabaseHelpers.js";
@@ -113,5 +114,4 @@ router.post("/merge-admin", async (req, res) => {
     });
   }
 });
-
 export default router;
