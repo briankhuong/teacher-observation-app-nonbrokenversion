@@ -10,6 +10,10 @@ import {
 } from "./exportTeacherModel";
 import { getGraphAccessToken } from "./msal/getGraphToken";
 import { buildAdminExportModel } from "./exportAdminModel";
+import { EmailComposeModal, type EmailMode } from "./components/EmailComposeModal";
+import { buildTeacherPreCallHtml } from "./emailTemplates/teacherPreCall";
+import { buildTeacherPostCallHtml } from "./emailTemplates/teacherPostCall";
+import { buildAdminUpdateHtml } from "./emailTemplates/adminUpdate";
 
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
@@ -483,6 +487,43 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const [amSummarySentMap, setAmSummarySentMap] =
     useState<AmSummarySentMap>({});
 
+    
+// --- EMAIL MODAL STATE ---
+  const [emailModalState, setEmailModalState] = useState<{
+    isOpen: boolean;
+    mode: EmailMode;
+    to: string[];
+    subject: string;
+    bodyHtml?: string;
+    sandwichData?: { intro: string; tableHtml: string; outro: string };
+  }>({
+    isOpen: false,
+    mode: "simple",
+    to: [],
+    subject: "",
+  });
+
+
+  // Fetch helpers for email
+  const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
+    const { data } = await supabase
+      .from("teachers")
+      .select("email")
+      .eq("name", teacherName)
+      .eq("school_name", schoolName)
+      .limit(1);
+    return data?.[0]?.email || "";
+  };
+
+  const fetchAdminEmail = async (schoolName: string, campus: string) => {
+    const { data } = await supabase
+      .from("schools")
+      .select("admin_email")
+      .eq("school_name", schoolName)
+      .eq("campus_name", campus)
+      .limit(1);
+    return data?.[0]?.admin_email || "";
+  };
   /* ------------------------------
       LOAD OBSERVATIONS + SUMMARY META
    --------------------------------- */
@@ -923,14 +964,67 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       HANDLERS
   --------------------------------- */
 
-  const handlePreCallEmail = (obs: DashboardObservationRow) => {
-    console.log("[Pre-call email] for obs", obs.id);
-    // TODO: plug real pre-call email logic here
+const handlePreCallEmail = async (obs: DashboardObservationRow) => {
+    const teacherEmail = await fetchTeacherEmail(obs.teacherName, obs.schoolName);
+    
+    // Build HTML (Simple Link Version)
+    const html = buildTeacherPreCallHtml({
+      teacherName: obs.teacherName,
+      schoolName: obs.schoolName,
+      campus: obs.campus,
+      trainerName: user?.email || "GrapeSEED Trainer",
+      teacherWorkbookUrl: obs.teacherWorkbookUrl,
+    });
+
+    setEmailModalState({
+      isOpen: true,
+      mode: "simple",
+      to: teacherEmail ? [teacherEmail] : [],
+      subject: `GrapeSEED Support Pre-call: ${obs.teacherName}`,
+      bodyHtml: html,
+    });
   };
 
-  const handlePostCallEmail = (obs: DashboardObservationRow) => {
-    console.log("[Post-call email] for obs", obs.id);
-    // TODO: plug real post-call email logic here
+  const handlePostCallEmail = async (obs: DashboardObservationRow) => {
+    const teacherEmail = await fetchTeacherEmail(obs.teacherName, obs.schoolName);
+    
+    const html = buildTeacherPostCallHtml({
+      teacherName: obs.teacherName,
+      schoolName: obs.schoolName,
+      campus: obs.campus,
+      trainerName: user?.email || "GrapeSEED Trainer",
+      teacherWorkbookUrl: obs.teacherWorkbookUrl,
+    });
+
+    setEmailModalState({
+      isOpen: true,
+      mode: "simple",
+      to: teacherEmail ? [teacherEmail] : [],
+      subject: `GrapeSEED Support Summary: ${obs.teacherName}`,
+      bodyHtml: html,
+    });
+  };
+
+  const handleAdminUpdateEmail = async (obs: DashboardObservationRow) => {
+    const adminEmail = await fetchAdminEmail(obs.schoolName, obs.campus);
+    
+    const html = buildAdminUpdateHtml({
+      adminName: "School Admin",
+      schoolName: obs.schoolName,
+      campus: obs.campus,
+      trainerName: user?.email || "GrapeSEED Trainer",
+      teacherName: obs.teacherName,
+      adminWorkbookUrl: obs.adminWorkbookUrl,
+      viewOnlyUrl: obs.adminViewOnlyUrl
+    });
+
+    setEmailModalState({
+      isOpen: true,
+      mode: "simple",
+      to: adminEmail ? [adminEmail] : [],
+      subject: `GrapeSEED Support Update: ${obs.schoolName}`,
+      bodyHtml: html,
+    });
   };
 
   // ✅ MERGE TEACHER HANDLER (Pinning Logic Included)
@@ -1169,12 +1263,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       console.error("[Dashboard] merge-admin error", err);
       alert("Admin merge failed – check the console for details.");
     }
-  };
-
-
-  const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
-    console.log("[Admin update email] for obs", obs.id);
-    // TODO: build + send admin update email
   };
 
   // NEW: toggle group expanded/collapsed
@@ -1752,34 +1840,73 @@ export const DashboardShell: React.FC<DashboardProps> = ({
                   </table>
                 </div>
 
+                {/* NEW: PREVIEW & SEND SECTION */}
                 <div className="am-summary-email-section">
                   <div className="am-summary-email-header">
-                    <span>Email body (copy into Outlook)</span>
+                    <span>Final Step: Email</span>
+                  </div>
+
+                  <div style={{ padding: 16, background: "#f3f4f6", borderRadius: 8, textAlign: "center" }}>
+                    <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>
+                      Review the table above. Click below to generate the email, add your message, and send via Outlook.
+                    </p>
+                    
                     <button
                       type="button"
-                      className="btn"
+                      className="btn btn-primary"
+                      style={{ backgroundColor: "#2563eb", color: "white" }}
+                      disabled={summaryRows.length === 0}
                       onClick={() => {
-                        if (!emailBody) return;
-                        navigator.clipboard
-                          ?.writeText(emailBody)
-                          .catch((err) =>
-                            console.error("Clipboard copy failed", err)
-                          );
+                        const { email, name } = parseAmKey(summaryAmKey);
+                        
+                        // Generate Table HTML for the "Sandwich"
+                        const tableHtml = `
+                          <table style="border-collapse: collapse; width: 100%; font-size: 14px; border: 1px solid #d1d5db;">
+                            <thead style="background-color: #f3f4f6;">
+                              <tr>
+                                <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">School</th>
+                                <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Campus</th>
+                                <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Teacher</th>
+                                <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Status</th>
+                                <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Next Steps</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              ${summaryRows.map(r => {
+                                const bg = r.status === 'green' ? '#dcfce7' : r.status === 'red' ? '#fee2e2' : '#ffffff';
+                                const text = r.status === 'green' ? '#166534' : r.status === 'red' ? '#991b1b' : '#374151';
+                                const statusLabel = r.status === 'green' ? 'GREEN' : r.status === 'red' ? 'RED' : '-';
+                                return `
+                                  <tr style="background-color: ${bg};">
+                                    <td style="padding:8px; border:1px solid #e5e7eb;">${r.schoolName}</td>
+                                    <td style="padding:8px; border:1px solid #e5e7eb;">${r.campus}</td>
+                                    <td style="padding:8px; border:1px solid #e5e7eb;">${r.teacherName}</td>
+                                    <td style="padding:8px; border:1px solid #e5e7eb; color: ${text}; font-weight: bold;">${statusLabel}</td>
+                                    <td style="padding:8px; border:1px solid #e5e7eb;">${r.nextSteps}</td>
+                                  </tr>`;
+                              }).join('')}
+                            </tbody>
+                          </table>
+                        `;
+
+                        setEmailModalState({
+                          isOpen: true,
+                          mode: "sandwich",
+                          to: email ? [email] : [],
+                          subject: `GrapeSEED Support Summary - ${summaryMonth}`,
+                          sandwichData: {
+                            intro: `Dear ${name},\n\nHere is the GrapeSEED support summary for ${summaryMonth}. Please see the details below.`,
+                            tableHtml: tableHtml,
+                            outro: "If you have any questions, please let me know.\n\nBest regards,\nGrapeSEED Trainer"
+                          }
+                        });
                       }}
-                      disabled={!emailBody}
                     >
-                      Copy to clipboard
+                      Draft & Send Email...
                     </button>
                   </div>
 
-                  <textarea
-                    className="am-summary-email-textarea"
-                    value={emailBody}
-                    readOnly
-                    rows={10}
-                  />
-
-                  <div className="am-summary-footer">
+                  <div className="am-summary-footer" style={{marginTop: 12}}>
                     <button
                       type="button"
                       className="btn"
@@ -1790,7 +1917,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
                     </button>
                     {sentInfo && (
                       <span className="am-summary-sent-inline">
-                        Already marked as sent on {sentInfo}
+                        Marked: {sentInfo}
                       </span>
                     )}
                   </div>
@@ -1806,6 +1933,17 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           </div>
         </div>
       )}
+      {/* 👇 THIS IS THE MISSING PIECE 👇 */}
+      <EmailComposeModal 
+        isOpen={emailModalState.isOpen}
+        onClose={() => setEmailModalState(prev => ({ ...prev, isOpen: false }))}
+        mode={emailModalState.mode}
+        initialTo={emailModalState.to}
+        initialSubject={emailModalState.subject}
+        initialBodyHtml={emailModalState.bodyHtml}
+        sandwichData={emailModalState.sandwichData}
+      />
+      {/* 👆 MAKE SURE THIS IS HERE 👆 */}
     </>
   );
 };

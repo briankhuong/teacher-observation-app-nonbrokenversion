@@ -1,12 +1,10 @@
-// src/emailTemplates/teacherPreCall.ts
-
 export interface TeacherPreCallTemplateParams {
   teacherName: string;
   schoolName?: string | null;
   campus?: string | null;
   trainerName: string;
   bookingUrl?: string;
-  teacherWorkbookUrl?: string | null; // optional for now
+  teacherWorkbookUrl?: string | null;
 }
 
 export function buildTeacherPreCallHtml({

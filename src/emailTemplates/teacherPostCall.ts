@@ -1,5 +1,3 @@
-// src/emailTemplates/teacherPostCall.ts
-
 export interface TeacherPostCallTemplateParams {
   teacherName: string;
   schoolName?: string | null;
@@ -30,11 +28,11 @@ export function buildTeacherPostCallHtml({
     ? `
       <tr>
         <td style="padding:16px 24px 0 24px;">
-          <p style="margin:0 0 6px 0;color:#0f172a;font-size:14px;">
+          <p style="margin:0 0 6px 0;color:#e5e7eb;font-size:14px;">
             Here is the workbook with notes from our recent support:
           </p>
           <p style="margin:0 0 6px 0;">
-            <a href="${teacherWorkbookUrl}" style="color:#2563eb;text-decoration:none;">
+            <a href="${teacherWorkbookUrl}" style="color:#38bdf8;text-decoration:none;">
               Open teacher workbook
             </a>
           </p>
@@ -47,7 +45,7 @@ export function buildTeacherPostCallHtml({
     ? `
       <tr>
         <td style="padding:12px 24px 0 24px;">
-          <p style="margin:0 0 8px 0;color:#0f172a;font-size:14px;">
+          <p style="margin:0 0 8px 0;color:#e5e7eb;font-size:14px;">
             When you have a moment, please take a short survey about your experience:
           </p>
           <table role="presentation" cellpadding="0" cellspacing="0">
