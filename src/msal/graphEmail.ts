@@ -1,17 +1,18 @@
 // src/msal/graphEmail.ts
 import { getGraphAccessToken } from "./getGraphToken";
 
+// ✅ Updated signature to accept ccAddresses
 export async function sendGraphEmail(
   toAddresses: string[], 
+  ccAddresses: string[], // <--- NEW PARAMETER
   subject: string, 
   bodyHtml: string
 ) {
   const token = await getGraphAccessToken();
 
-  // Graph API expects an array of objects for recipients
-  const toRecipients = toAddresses.map((email) => ({
-    emailAddress: { address: email.trim() },
-  }));
+  // Helper to format recipients
+  const formatRecipients = (emails: string[]) => 
+    emails.map((email) => ({ emailAddress: { address: email.trim() } }));
 
   const message = {
     subject: subject,
@@ -19,7 +20,8 @@ export async function sendGraphEmail(
       contentType: "HTML",
       content: bodyHtml,
     },
-    toRecipients: toRecipients,
+    toRecipients: formatRecipients(toAddresses),
+    ccRecipients: formatRecipients(ccAddresses), // <--- NEW FIELD
   };
 
   const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
