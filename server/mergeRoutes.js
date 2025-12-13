@@ -15,14 +15,28 @@ function extractBearerToken(req) {
   return auth.slice("Bearer ".length).trim();
 }
 
+function errPayload(err) {
+  return {
+    message: err?.message || "Server error",
+    status: err?.status,
+    url: err?.url,
+    raw: err?.raw,
+    stack: err?.stack, // DEV only
+  };
+}
+
 router.post("/merge-teacher", async (req, res) => {
   try {
     const token = extractBearerToken(req);
-
     const { workbookUrl, sheetName, model } = req.body || {};
+
     if (!token) {
-      return res.status(401).json({ ok: false, error: "Missing Authorization Bearer token" });
+      return res.status(401).json({
+        ok: false,
+        error: "Missing Authorization Bearer token",
+      });
     }
+
     if (!workbookUrl || !sheetName || !model) {
       return res.status(400).json({
         ok: false,
@@ -30,21 +44,24 @@ router.post("/merge-teacher", async (req, res) => {
       });
     }
 
-    const sheetUrl = await mergeTeacherSheet({
+    const result = await mergeTeacherSheet({
       token,
       workbookUrl,
       sheetName,
       model,
     });
 
-    // ✅ DO NOT persist anywhere (teacher workbook URL lives in TEACHERS table only)
-    return res.json({ ok: true, sheetUrl });
+    // ✅ Teacher merge success even if formattingWarning exists
+    return res.json({
+      ok: true,
+      ...result,
+    });
   } catch (err) {
     console.error("[route] /api/merge-teacher error", err);
     return res.status(500).json({
       ok: false,
       error: err?.message || "Server error",
-      stack: err?.stack, // DEV only
+      ...errPayload(err),
     });
   }
 });
@@ -52,11 +69,15 @@ router.post("/merge-teacher", async (req, res) => {
 router.post("/merge-admin", async (req, res) => {
   try {
     const token = extractBearerToken(req);
-
     const { workbookUrl, sheetName, model, schoolId } = req.body || {};
+
     if (!token) {
-      return res.status(401).json({ ok: false, error: "Missing Authorization Bearer token" });
+      return res.status(401).json({
+        ok: false,
+        error: "Missing Authorization Bearer token",
+      });
     }
+
     if (!workbookUrl || !sheetName || !model || !schoolId) {
       return res.status(400).json({
         ok: false,
@@ -64,32 +85,31 @@ router.post("/merge-admin", async (req, res) => {
       });
     }
 
-    const { sheetUrl, viewOnlyWorkbookUrl } = await mergeAdminSheet({
+    const result = await mergeAdminSheet({
       token,
       workbookUrl,
       sheetName,
       model,
     });
 
-    // ✅ Store view-only url on school (for admin email later)
-    if (viewOnlyWorkbookUrl) {
+    // ✅ Store view-only url on school (optional)
+    if (result?.viewOnlyWorkbookUrl) {
       await updateSchoolViewOnlyUrl({
         id: schoolId,
-        viewOnlyUrl: viewOnlyWorkbookUrl,
+        viewOnlyUrl: result.viewOnlyWorkbookUrl,
       });
     }
 
     return res.json({
       ok: true,
-      sheetUrl,
-      viewOnlyWorkbookUrl,
+      ...result,
     });
   } catch (err) {
     console.error("[route] /api/merge-admin error", err);
     return res.status(500).json({
       ok: false,
       error: err?.message || "Server error",
-      stack: err?.stack, // DEV only
+      ...errPayload(err),
     });
   }
 });
