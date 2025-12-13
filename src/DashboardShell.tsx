@@ -988,7 +988,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     return;
   }
 
-  // 4) Build REAL export model (this is why content was missing before)
+  // 4) Build REAL export model
   const exportMeta = toMetaForExport(full, obs);
   const exportIndicators = toIndicatorsForExport(full);
   const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
@@ -1015,7 +1015,30 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     const json = await resp.json();
     console.log("[Dashboard] merge-teacher response", json);
 
-    if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+    // ---------------------------------------------------------
+    // ✅ NEW: Specific Warning for "File Locked"
+    // ---------------------------------------------------------
+    if (!resp.ok || !json.ok) {
+      const errorMsg = String(json.error || json.message || "");
+      
+      // Check for the "Locked" keywords or 423 status code
+      if (
+        errorMsg.includes("Locked") || 
+        errorMsg.includes("LOCKED") || 
+        resp.status === 423
+      ) {
+        alert(
+          "⚠️ FILE IS OPEN\n\n" +
+          "Microsoft cannot save the report because the Excel file is currently open in another tab.\n\n" +
+          "👉 Please CLOSE the Excel tab and try again."
+        );
+        return; // Exit here so we don't trigger the generic error below
+      }
+
+      // If it's some other error, throw it so the catch block handles it
+      throw new Error(errorMsg || `HTTP ${resp.status}`);
+    }
+    // ---------------------------------------------------------
 
     const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
 
@@ -1026,7 +1049,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
         sheetName: json.sheetName || sheetName,
         mergedAt,
       },
-      teacherWorkbookUrl: workbookUrl, // helps UI keep link visible
+      teacherWorkbookUrl: workbookUrl, 
     };
 
     const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
@@ -1036,19 +1059,23 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     );
 
     setRecentMergePanel({
-  obsId: obs.id,
-  kind: "teacher",
-  sheetUrl,
-  sheetName: json.sheetName || sheetName,
-  mergedAt,
-});
+      obsId: obs.id,
+      kind: "teacher",
+      sheetUrl,
+      sheetName: json.sheetName || sheetName,
+      mergedAt,
+    });
 
     alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl}`);
-  } catch (err) {
+
+  } catch (err: any) {
     console.error("[Dashboard] merge-teacher error", err);
-    alert("Teacher merge failed – check the console for details.");
+    // This generic alert only shows if it wasn't the specific "Locked" error handled above
+    alert(`Teacher merge failed: ${err.message}`);
   }
 };
+
+
 const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   console.log("=====================================================");
   console.log("[MERGE admin] obs:", obs);
