@@ -9,6 +9,8 @@ import {
   type IndicatorStateForExport,
 } from "./exportTeacherModel";
 import { getGraphAccessToken } from "./msal/getGraphToken";
+import { buildAdminExportModel } from "./exportAdminModel";
+
 
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
@@ -702,65 +704,180 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 
 // Helper: quick & dirty sheet name for this test.
 // Later we’ll replace with your real naming rules.
-function getTeacherSheetNameForTest(obs: DashboardObservationRow): string {
-  // If you already have meta.date as "YYYY-MM-DD", we can turn it into "Jan.2025"
-  const rawDate = (obs as any).meta?.date;
-  if (rawDate) {
-    const d = new Date(rawDate);
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const label = `${monthNames[d.getMonth()]}.${d.getFullYear()}`;
-    return label; // e.g. "Jan.2025"
-  }
+// ------------------------------
+// SHEET NAME HELPERS (REAL)
+// ------------------------------
 
-  // fallback – you can type manually in the prompt
-  return window.prompt("Sheet name for TEACHER workbook (e.g. Jan.2025)?", "Jan.2025") || "Jan.2025";
+// Excel worksheet name rules (important):
+// - max length 31
+// - cannot contain: : \ / ? * [ ]
+// - cannot be empty
+// We'll sanitize + trim consistently.
+
+// ------------------------------
+// SHEET NAME HELPERS (keep yours)
+// ------------------------------
+
+function excelSafeSheetName(input: string): string {
+  const cleaned = (input || "")
+    .replace(/[:\\\/\?\*\[\]]/g, " ") // illegal chars -> space
+    .replace(/\s+/g, " ")            // collapse spaces
+    .trim();
+
+  const nonEmpty = cleaned.length > 0 ? cleaned : "Sheet";
+  return nonEmpty.slice(0, 31);
 }
 
-function getAdminSheetNameForTest(obs: DashboardObservationRow): string {
+function monthYearFromDate(dateStr?: string | null): string {
+  if (!dateStr) return "00.0000";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "00.0000";
+
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${month}.${year}`; // e.g. "12.2025"
+}
+
+/**
+ * TEACHER workbook naming convention:
+ *   "MM.YYYY"
+ */
+function buildTeacherSheetName(obs: DashboardObservationRow): string {
   const meta: any = (obs as any).meta || {};
-  const teacherName = meta.teacherName || "Teacher";
-  const rawDate = meta.date;
+  const dateStr =
+    meta.date ||
+    (obs as any).isoDate ||
+    null;
 
-  let base = "Jan.2025 Visit";
-
-  if (rawDate) {
-    const d = new Date(rawDate);
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const label = `${monthNames[d.getMonth()]}.${d.getFullYear()}`;
-    const supportType = meta.supportType || "Visit";
-    // Your later rule: `${teacherName} - ${month.year} SupportType`
-    base = `${teacherName} - ${label} ${supportType}`;
-  }
-
-  return window.prompt("Sheet name for ADMIN workbook?", base) || base;
+  const base = monthYearFromDate(dateStr);
+  return excelSafeSheetName(base);
 }
 
+/**
+ * ADMIN workbook naming convention:
+ *   "TeacherName MM.YYYY SupportType"
+ */
+function buildAdminSheetName(obs: DashboardObservationRow): string {
+  const meta: any = (obs as any).meta || {};
+  const teacherName = (meta.teacherName || (obs as any).teacherName || "Teacher").trim();
+
+  // normalize supportType so we don’t get random values in sheet name
+  const rawSupport = (meta.supportType || (obs as any).supportType || "Visit").trim();
+  const supportType =
+    rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
+      ? rawSupport
+      : "Visit";
+
+  const dateStr =
+    meta.date ||
+    (obs as any).isoDate ||
+    null;
+
+  const monthYear = monthYearFromDate(dateStr);
+
+  const base = `${teacherName} ${monthYear} ${supportType}`;
+  return excelSafeSheetName(base);
+}
+
+// ------------------------------
+// NEW: export-model helpers
+// ------------------------------
+function loadFullObservation(observationId: string): any | null {
+  const key = `obs-v1-${observationId}`;
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeIndicators(full: any): any[] {
+  const ind = full?.indicators;
+  if (Array.isArray(ind)) return ind;
+  if (Array.isArray(ind?.indicators)) return ind.indicators;
+  return [];
+}
+
+/**
+ * Build meta for export.
+ * IMPORTANT: fall back to obs.* because localStorage meta may be missing
+ * pieces if the observation was created before the latest fields existed.
+ */
+function toMetaForExport(full: any, obs: DashboardObservationRow): ObservationMetaForExport {
+  const m = full?.meta || {};
+  const obsAny: any = obs as any;
+
+  const rawSupport = (m.supportType || obsAny.supportType || "Visit") as any;
+  const supportType =
+    rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
+      ? rawSupport
+      : "Visit";
+
+  return {
+    teacherName: m.teacherName || obsAny.teacherName || "",
+    schoolName: m.schoolName || obsAny.schoolName || "",
+    campus: m.campus || obsAny.campus || "",
+    unit: m.unit || "",
+    lesson: m.lesson || "",
+    supportType,
+    date: m.date || obsAny.isoDate || undefined, // "YYYY-MM-DD"
+  };
+}
+
+function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
+  const list = normalizeIndicators(full);
+
+  return list.map((i: any) => ({
+    id: String(i.id || ""),
+    number: String(i.number || ""), // MUST match your layout keys exactly
+    title: String(i.title || ""),
+    description: String(i.description || ""),
+    good: !!i.good,
+    growth: !!i.growth,
+    commentText: String(i.commentText || ""),
+    includeInTrainerSummary: i.includeInTrainerSummary === true,
+  }));
+}
+
+// ------------------------------
+// MERGE TEACHER (REAL MODEL)
+// ------------------------------
 const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
-  // 🧪 DEBUG LOGGING — helps us see what data the observation has
   console.log("=====================================================");
   console.log("[MERGE teacher] obs:", obs);
 
+  // 0) Load full observation from localStorage
+  const full = loadFullObservation(obs.id);
+  if (!full) {
+    alert(
+      "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
+    );
+    return;
+  }
+
   const meta: any = (obs as any).meta || {};
   console.log("[MERGE teacher] meta:", meta);
-  console.log("[MERGE teacher] meta.teacherWorksheetUrl:", meta.teacherWorksheetUrl);
-  console.log("[MERGE teacher] meta.teacherWorkbookUrl:", meta.teacherWorkbookUrl);
 
-  // 1️⃣ Start with any URL stored on the observation itself
+  // 1) Workbook URL from obs/meta
   let workbookUrl: string | null =
     (obs as any).teacherWorksheetUrl ||
     (obs as any).teacherWorkbookUrl ||
+    meta.teacherWorksheetUrl ||
+    meta.teacherWorkbookUrl ||
     null;
 
-  console.log("[MERGE teacher] workbookUrl from obs:", workbookUrl);
+  console.log("[MERGE teacher] workbookUrl from obs/meta:", workbookUrl);
 
-  // 2️⃣ If still missing, try to find the teacher row in Supabase
+  // 2) Fallback: teachers table
   if (!workbookUrl) {
     try {
       const teacherName = (obs as any).teacherName;
       const schoolName = (obs as any).schoolName;
       const campus = (obs as any).campus;
 
-      console.log("[MERGE teacher] Falling back to teachers table lookup with:", {
+      console.log("[MERGE teacher] Falling back to teachers lookup with:", {
         teacherName,
         schoolName,
         campus,
@@ -776,7 +893,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 
       if (error) {
         console.error("[MERGE teacher] teachers lookup error", error);
-      } else if (data && data.length > 0 && data[0].worksheet_url) {
+      } else if (data?.[0]?.worksheet_url) {
         workbookUrl = data[0].worksheet_url;
         console.log("[MERGE teacher] Found workbookUrl on teachers table:", workbookUrl);
       } else {
@@ -789,17 +906,16 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 
   console.log("[MERGE teacher] Final workbookUrl:", workbookUrl);
 
-  // 3️⃣ Still nothing? stop
   if (!workbookUrl) {
     alert("This observation/teacher does not have a teacher workbook URL set yet.");
     return;
   }
 
-  // 4️⃣ Sheet name
-  const sheetName = getTeacherSheetNameForTest(obs);
+  // 3) Sheet name (REAL convention)
+  const sheetName = buildTeacherSheetName(obs);
   console.log("[MERGE teacher] Using sheetName:", sheetName);
 
-  // ✅ 5️⃣ Acquire Graph delegated access token (MSAL optional layer)
+  // 4) Acquire Graph token
   let graphToken = "";
   try {
     graphToken = await getGraphAccessToken();
@@ -809,23 +925,31 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     return;
   }
 
-  // 6️⃣ Build request body (still your stub model for now)
+  // ✅ 5) Build REAL Teacher export model
+  const exportMeta = toMetaForExport(full, obs);
+  const exportIndicators = toIndicatorsForExport(full);
+  const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
+
+  console.log("[MERGE teacher] teacherModel.sheetName:", teacherModel?.sheetName);
+  console.log("[MERGE teacher] teacherModel.rows:", teacherModel?.rows?.length);
+
+  // 6) Request body
   const body = {
     workbookUrl,
-    sheetName,
-    model: { demo: true, observationId: obs.id },
+    sheetName,          // desired name; server will collision-suffix
+    model: teacherModel, // ✅ real model for template mapping
     observationId: obs.id,
   };
 
   console.log("[Dashboard] Calling /api/merge-teacher with", body);
 
+  // 7) Call server
   try {
-    const token = await getGraphAccessToken();
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`, // ✅ delegated token
+        Authorization: `Bearer ${graphToken}`,
       },
       body: JSON.stringify(body),
     });
@@ -833,38 +957,58 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     const json = await resp.json();
     console.log("[Dashboard] merge-teacher response", json);
 
-    if (!resp.ok || !json.ok) {
-      throw new Error(json.error || `HTTP ${resp.status}`);
-    }
+    if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
 
     const sheetUrl =
       typeof json.sheetUrl === "string"
         ? json.sheetUrl
         : json.sheetUrl?.sheetUrl;
 
-    alert(
-      `Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl || "(none returned)"}`
-    );
+    alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl || "(none returned)"}`);
   } catch (err) {
     console.error("[Dashboard] merge-teacher error", err);
     alert("Teacher merge failed – check the console for details.");
   }
 };
 
+// ------------------------------
+// MERGE ADMIN (REAL MODEL)
+// ------------------------------
 const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   console.log("=====================================================");
   console.log("[MERGE admin] obs:", obs);
 
-  // 1) Try from observation row first (in case you add it later)
+  // 0) Load full observation from localStorage
+  const full = loadFullObservation(obs.id);
+  if (!full) {
+    alert(
+      "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
+    );
+    return;
+  }
+
+  const meta: any = (obs as any).meta || {};
+
+  // 1) Admin workbook URL + schoolId from obs/meta
   let adminWorkbookUrl: string | null =
     (obs as any).adminWorkbookUrl ||
     (obs as any).schoolAdminWorkbookUrl ||
+    meta.adminWorkbookUrl ||
+    meta.schoolAdminWorkbookUrl ||
     null;
 
-  console.log("[MERGE admin] adminWorkbookUrl from obs:", adminWorkbookUrl);
+  let schoolId: string | null =
+    (obs as any).school_id ||
+    (obs as any).schoolId ||
+    meta.schoolId ||
+    full?.meta?.schoolId ||
+    null;
 
-  // 2) Fallback: look up from schools table using (school_name, campus_name)
-  if (!adminWorkbookUrl) {
+  console.log("[MERGE admin] adminWorkbookUrl from obs/meta:", adminWorkbookUrl);
+  console.log("[MERGE admin] schoolId from obs/meta:", schoolId);
+
+  // 2) Fallback: schools table
+  if (!adminWorkbookUrl || !schoolId) {
     try {
       const schoolName = (obs as any).schoolName;
       const campus = (obs as any).campus;
@@ -883,67 +1027,73 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
 
       if (error) {
         console.error("[MERGE admin] schools lookup error", error);
-      } else if (data && data.length > 0 && data[0].admin_workbook_url) {
-        adminWorkbookUrl = data[0].admin_workbook_url;
-        console.log(
-          "[MERGE admin] Found adminWorkbookUrl on schools table:",
-          adminWorkbookUrl
-        );
+      } else if (data?.[0]) {
+        if (!schoolId && data[0].id) schoolId = data[0].id;
+        if (!adminWorkbookUrl && data[0].admin_workbook_url) {
+          adminWorkbookUrl = data[0].admin_workbook_url;
+        }
+
+        console.log("[MERGE admin] Resolved from schools table:", {
+          schoolId,
+          adminWorkbookUrl,
+        });
       } else {
-        console.log("[MERGE admin] No matching school row with admin_workbook_url found.");
+        console.log("[MERGE admin] No matching school row found.");
       }
     } catch (e) {
       console.error("[MERGE admin] Unexpected error during school lookup", e);
     }
   }
 
-  // 3) Still missing -> stop
   if (!adminWorkbookUrl) {
     alert("This observation's school does not have an admin workbook URL set yet.");
     return;
   }
-
-  // 4) Sheet name
-  const sheetName = getAdminSheetNameForTest(obs);
-
-  // 5) schoolId (optional for now; your server expects it)
-  // We can look it up again quickly to get id.
-  let schoolId =
-    (obs as any).school_id ||
-    (obs as any).schoolId ||
-    (obs as any).meta?.schoolId ||
-    null;
-
   if (!schoolId) {
-    const { data } = await supabase
-      .from("schools")
-      .select("id")
-      .eq("school_name", obs.schoolName)
-      .eq("campus_name", obs.campus)
-      .limit(1);
-
-    if (data?.[0]?.id) schoolId = data[0].id;
+    alert("Missing schoolId for this observation's school. (Fix: ensure schools lookup returns id)");
+    return;
   }
 
-  if (!schoolId) schoolId = "missing-school-id"; // dev fallback
+  // 3) Sheet name (REAL convention)
+  const sheetName = buildAdminSheetName(obs);
+  console.log("[MERGE admin] Using sheetName:", sheetName);
 
+  // 4) Acquire Graph token
+  let graphToken = "";
+  try {
+    graphToken = await getGraphAccessToken();
+  } catch (e: any) {
+    console.error("[MERGE admin] getGraphAccessToken failed", e);
+    alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
+    return;
+  }
+
+  // ✅ 5) Build REAL Admin export model
+  const exportMeta = toMetaForExport(full, obs);
+  const exportIndicators = toIndicatorsForExport(full);
+  const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
+
+  console.log("[MERGE admin] adminModel.sheetName:", adminModel?.sheetName);
+  console.log("[MERGE admin] adminModel.rows:", adminModel?.rows?.length);
+
+  // 6) Request body
   const body = {
     workbookUrl: adminWorkbookUrl,
     sheetName,
-    model: { demo: true, observationId: obs.id },
+    model: adminModel, // ✅ real model for template mapping
     observationId: obs.id,
     schoolId,
   };
 
-  try {
-    console.log("[Dashboard] Calling /api/merge-admin with", body);
+  console.log("[Dashboard] Calling /api/merge-admin with", body);
 
-    const token = await getGraphAccessToken();
+  // 7) Call server
+  try {
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${graphToken}`,
       },
       body: JSON.stringify(body),
     });
@@ -951,9 +1101,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     const json = await resp.json();
     console.log("[Dashboard] merge-admin response", json);
 
-    if (!resp.ok || !json.ok) {
-      throw new Error(json.error || `HTTP ${resp.status}`);
-    }
+    if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
 
     alert(
       `Admin merge succeeded.\n\nAdmin sheet URL:\n${json.sheetUrl}\n\nView-only workbook URL:\n${json.viewOnlyWorkbookUrl || "(none returned)"}`
@@ -963,6 +1111,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     alert("Admin merge failed – check the console for details.");
   }
 };
+
 
   const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
     console.log("[Admin update email] for obs", obs.id);
