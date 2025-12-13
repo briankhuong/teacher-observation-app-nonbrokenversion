@@ -11,7 +11,6 @@ import {
 import { getGraphAccessToken } from "./msal/getGraphToken";
 import { buildAdminExportModel } from "./exportAdminModel";
 
-
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
 
@@ -38,8 +37,12 @@ interface DashboardObservationRow {
   totalIndicators: number;
   statusColor: StatusColor;
 
+  // workbook URLs (can be cached on row OR resolved from tables)
   teacherWorkbookUrl?: string | null;
   adminWorkbookUrl?: string | null;
+
+  // IMPORTANT: keep meta available on dashboard rows
+  meta?: any;
 }
 
 interface DashboardProps {
@@ -187,6 +190,31 @@ function monthKeyFromTs(ts: number | null): string | null {
   const m = d.getMonth() + 1;
   const y = d.getFullYear();
   return `${String(m).padStart(2, "0")}.${y}`; // e.g. "11.2025"
+}
+
+async function persistMergedLinkToObservationMeta(
+  observationId: string,
+  patch: Record<string, any>
+) {
+  const { data: row, error: fetchErr } = await supabase
+    .from("observations")
+    .select("meta")
+    .eq("id", observationId)
+    .single();
+
+  if (fetchErr) throw fetchErr;
+
+  const meta = (row?.meta ?? {}) as Record<string, any>;
+  const nextMeta = { ...meta, ...patch };
+
+  const { error: updateErr } = await supabase
+    .from("observations")
+    .update({ meta: nextMeta })
+    .eq("id", observationId);
+
+  if (updateErr) throw updateErr;
+
+  return nextMeta;
 }
 
 /* ------------------------------
@@ -365,23 +393,26 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           }
 
           rows.push({
-            id: parsed.id,
-            teacherName: parsed.meta.teacherName,
-            schoolName: parsed.meta.schoolName,
-            campus: parsed.meta.campus,
-            unit: parsed.meta.unit,
-            lesson: parsed.meta.lesson,
-            supportType: parsed.meta.supportType,
-            dateLabel: displayDate,
-            isoDate,
-            rawDate,
-            status: parsed.status ?? "draft",
-            progress,
-            totalIndicators: total,
-            statusColor,
-            teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
-            adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
-          });
+          id: parsed.id,
+          teacherName: parsed.meta.teacherName,
+          schoolName: parsed.meta.schoolName,
+          campus: parsed.meta.campus,
+          unit: parsed.meta.unit,
+          lesson: parsed.meta.lesson,
+          supportType: parsed.meta.supportType,
+          dateLabel: displayDate,
+          isoDate,
+          rawDate,
+          status: parsed.status ?? "draft",
+          progress,
+          totalIndicators: total,
+          statusColor,
+
+          teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
+          adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
+
+          meta: parsed.meta ?? {}, // ✅ add this
+        });
         });
       } catch (err) {
         console.error("[Dashboard] unexpected error loading observations", err);
@@ -705,23 +736,12 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 // Helper: quick & dirty sheet name for this test.
 // Later we’ll replace with your real naming rules.
 // ------------------------------
-// SHEET NAME HELPERS (REAL)
+// Excel-safe worksheet name (Graph/Excel rules)
 // ------------------------------
-
-// Excel worksheet name rules (important):
-// - max length 31
-// - cannot contain: : \ / ? * [ ]
-// - cannot be empty
-// We'll sanitize + trim consistently.
-
-// ------------------------------
-// SHEET NAME HELPERS (keep yours)
-// ------------------------------
-
 function excelSafeSheetName(input: string): string {
-  const cleaned = (input || "")
-    .replace(/[:\\\/\?\*\[\]]/g, " ") // illegal chars -> space
-    .replace(/\s+/g, " ")            // collapse spaces
+  const cleaned = String(input || "")
+    .replace(/[:\\\/\?\*\[\]]/g, " ") // illegal chars
+    .replace(/\s+/g, " ")
     .trim();
 
   const nonEmpty = cleaned.length > 0 ? cleaned : "Sheet";
@@ -732,55 +752,43 @@ function monthYearFromDate(dateStr?: string | null): string {
   if (!dateStr) return "00.0000";
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "00.0000";
-
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const year = d.getFullYear();
-  return `${month}.${year}`; // e.g. "12.2025"
+  return `${month}.${year}`; // "12.2025"
 }
 
-/**
- * TEACHER workbook naming convention:
- *   "MM.YYYY"
- */
+/** TEACHER: "MM.YYYY" */
 function buildTeacherSheetName(obs: DashboardObservationRow): string {
-  const meta: any = (obs as any).meta || {};
   const dateStr =
-    meta.date ||
-    (obs as any).isoDate ||
+    (obs as any).meta?.date ||
+    obs.isoDate ||
     null;
 
-  const base = monthYearFromDate(dateStr);
-  return excelSafeSheetName(base);
+  return excelSafeSheetName(monthYearFromDate(dateStr));
 }
 
-/**
- * ADMIN workbook naming convention:
- *   "TeacherName MM.YYYY SupportType"
- */
+/** ADMIN: "TeacherName MM.YYYY SupportType" */
 function buildAdminSheetName(obs: DashboardObservationRow): string {
-  const meta: any = (obs as any).meta || {};
-  const teacherName = (meta.teacherName || (obs as any).teacherName || "Teacher").trim();
+  const teacherName = String((obs as any).meta?.teacherName || obs.teacherName || "Teacher").trim();
 
-  // normalize supportType so we don’t get random values in sheet name
-  const rawSupport = (meta.supportType || (obs as any).supportType || "Visit").trim();
+  const rawSupport = String((obs as any).meta?.supportType || obs.supportType || "Visit").trim();
   const supportType =
     rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
       ? rawSupport
       : "Visit";
 
   const dateStr =
-    meta.date ||
-    (obs as any).isoDate ||
+    (obs as any).meta?.date ||
+    obs.isoDate ||
     null;
 
-  const monthYear = monthYearFromDate(dateStr);
-
-  const base = `${teacherName} ${monthYear} ${supportType}`;
+  const base = `${teacherName} ${monthYearFromDate(dateStr)} ${supportType}`;
   return excelSafeSheetName(base);
 }
 
 // ------------------------------
-// NEW: export-model helpers
+// Load full observation from localStorage
+// (this is REQUIRED to build export models that contain indicator rows)
 // ------------------------------
 function loadFullObservation(observationId: string): any | null {
   const key = `obs-v1-${observationId}`;
@@ -800,29 +808,26 @@ function normalizeIndicators(full: any): any[] {
   return [];
 }
 
-/**
- * Build meta for export.
- * IMPORTANT: fall back to obs.* because localStorage meta may be missing
- * pieces if the observation was created before the latest fields existed.
- */
-function toMetaForExport(full: any, obs: DashboardObservationRow): ObservationMetaForExport {
+// Types from your teacher export module
+function toMetaForExport(
+  full: any,
+  obs: DashboardObservationRow
+): ObservationMetaForExport {
   const m = full?.meta || {};
-  const obsAny: any = obs as any;
-
-  const rawSupport = (m.supportType || obsAny.supportType || "Visit") as any;
+  const rawSupport = (m.supportType || obs.supportType || "Visit") as any;
   const supportType =
     rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
       ? rawSupport
       : "Visit";
 
   return {
-    teacherName: m.teacherName || obsAny.teacherName || "",
-    schoolName: m.schoolName || obsAny.schoolName || "",
-    campus: m.campus || obsAny.campus || "",
-    unit: m.unit || "",
-    lesson: m.lesson || "",
+    teacherName: m.teacherName || obs.teacherName || "",
+    schoolName: m.schoolName || obs.schoolName || "",
+    campus: m.campus || obs.campus || "",
+    unit: m.unit || obs.unit || "",
+    lesson: m.lesson || obs.lesson || "",
     supportType,
-    date: m.date || obsAny.isoDate || undefined, // "YYYY-MM-DD"
+    date: m.date || obs.isoDate || undefined,
   };
 }
 
@@ -831,7 +836,7 @@ function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
 
   return list.map((i: any) => ({
     id: String(i.id || ""),
-    number: String(i.number || ""), // MUST match your layout keys exactly
+    number: String(i.number || ""),
     title: String(i.title || ""),
     description: String(i.description || ""),
     good: !!i.good,
@@ -841,14 +846,12 @@ function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
   }));
 }
 
-// ------------------------------
-// MERGE TEACHER (REAL MODEL)
-// ------------------------------
+
 const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
   console.log("=====================================================");
   console.log("[MERGE teacher] obs:", obs);
 
-  // 0) Load full observation from localStorage
+  // 0) Load full observation so we can export actual indicator rows
   const full = loadFullObservation(obs.id);
   if (!full) {
     alert(
@@ -857,63 +860,43 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     return;
   }
 
-  const meta: any = (obs as any).meta || {};
-  console.log("[MERGE teacher] meta:", meta);
-
-  // 1) Workbook URL from obs/meta
+  // 1) Resolve teacher workbook URL (teachers table is source of truth)
   let workbookUrl: string | null =
     (obs as any).teacherWorksheetUrl ||
     (obs as any).teacherWorkbookUrl ||
-    meta.teacherWorksheetUrl ||
-    meta.teacherWorkbookUrl ||
+    (obs as any).meta?.teacherWorksheetUrl ||
+    (obs as any).meta?.teacherWorkbookUrl ||
     null;
 
-  console.log("[MERGE teacher] workbookUrl from obs/meta:", workbookUrl);
-
-  // 2) Fallback: teachers table
   if (!workbookUrl) {
     try {
-      const teacherName = (obs as any).teacherName;
-      const schoolName = (obs as any).schoolName;
-      const campus = (obs as any).campus;
-
-      console.log("[MERGE teacher] Falling back to teachers lookup with:", {
-        teacherName,
-        schoolName,
-        campus,
-      });
-
       const { data, error } = await supabase
         .from("teachers")
         .select("worksheet_url")
-        .eq("name", teacherName)
-        .eq("school_name", schoolName)
-        .eq("campus", campus)
+        .eq("name", obs.teacherName)
+        .eq("school_name", obs.schoolName)
+        .eq("campus", obs.campus)
         .limit(1);
 
       if (error) {
         console.error("[MERGE teacher] teachers lookup error", error);
       } else if (data?.[0]?.worksheet_url) {
         workbookUrl = data[0].worksheet_url;
-        console.log("[MERGE teacher] Found workbookUrl:", workbookUrl);
       }
-    } catch (err) {
-      console.error("[MERGE teacher] lookup error", err);
+    } catch (e) {
+      console.error("[MERGE teacher] teachers lookup unexpected error", e);
     }
   }
 
-  console.log("[MERGE teacher] Final workbookUrl:", workbookUrl);
-
   if (!workbookUrl) {
-    alert("This observation/teacher does not have a teacher workbook URL set yet.");
+    alert("Teacher workbook URL not found. (teachers.worksheet_url is empty)");
     return;
   }
 
-  // 3) Sheet name (REAL convention)
+  // 2) Sheet name (NO prompt)
   const sheetName = buildTeacherSheetName(obs);
-  console.log("[MERGE teacher] Using sheetName:", sheetName);
 
-  // 4) Acquire Graph token
+  // 3) Graph token (REQUIRED)
   let graphToken = "";
   try {
     graphToken = await getGraphAccessToken();
@@ -923,26 +906,21 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     return;
   }
 
-  // ✅ 5) Build REAL Teacher export model
+  // 4) Build REAL export model (this is why content was missing before)
   const exportMeta = toMetaForExport(full, obs);
   const exportIndicators = toIndicatorsForExport(full);
   const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
 
-  console.log("[MERGE teacher] teacherModel.sheetName:", teacherModel?.sheetName);
-  console.log("[MERGE teacher] teacherModel.rows:", teacherModel?.rows?.length);
-
-  // 6) Request body
   const body = {
     workbookUrl,
-    sheetName,          // desired name; server will collision-suffix
-    model: teacherModel, // ✅ real model for template mapping
+    sheetName,
+    model: teacherModel,
     observationId: obs.id,
   };
 
-  console.log("[Dashboard] Calling /api/merge-teacher with", body);
-
-  // 7) Call server
   try {
+    console.log("[Dashboard] Calling /api/merge-teacher with", body);
+
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
       method: "POST",
       headers: {
@@ -953,29 +931,39 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     });
 
     const json = await resp.json();
+    console.log("[Dashboard] merge-teacher response", json);
 
     if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
 
-    const sheetUrl =
-      typeof json.sheetUrl === "string"
-        ? json.sheetUrl
-        : json.sheetUrl?.sheetUrl;
+    const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
 
-    alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl || "(none returned)"}`);
+    const mergedAt = new Date().toISOString();
+    const patch = {
+      mergedTeacher: {
+        url: sheetUrl,
+        sheetName: json.sheetName || sheetName,
+        mergedAt,
+      },
+      teacherWorkbookUrl: workbookUrl, // helps UI keep link visible
+    };
+
+    const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
+
+    setObservations((prev) =>
+      prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, teacherWorkbookUrl: workbookUrl } : o))
+    );
+
+    alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl}`);
   } catch (err) {
     console.error("[Dashboard] merge-teacher error", err);
-    alert("Teacher merge failed – check console.");
+    alert("Teacher merge failed – check the console for details.");
   }
 };
-
-// ------------------------------
-// MERGE ADMIN (REAL MODEL)
-// ------------------------------
 const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   console.log("=====================================================");
   console.log("[MERGE admin] obs:", obs);
 
-  // 0) Load full observation from localStorage
+  // 0) Load full observation for real export model
   const full = loadFullObservation(obs.id);
   if (!full) {
     alert(
@@ -984,82 +972,57 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     return;
   }
 
-  const meta: any = (obs as any).meta || {};
+  // 1) Resolve from schools table (source of truth)
+  let adminWorkbookUrl: string | null = null;
+  let schoolId: string | null = null;
 
-  // 1) Admin workbook URL + schoolId from obs/meta
-  let adminWorkbookUrl: string | null =
+  try {
+    const { data, error } = await supabase
+      .from("schools")
+      .select("id, admin_workbook_url")
+      .eq("school_name", obs.schoolName)
+      .eq("campus_name", obs.campus)
+      .limit(1);
+
+    console.log("[MERGE admin] schools lookup:", { data, error });
+
+    if (!error && data?.[0]) {
+      schoolId = data[0].id || null;
+      adminWorkbookUrl = data[0].admin_workbook_url || null;
+    }
+  } catch (e) {
+    console.error("[MERGE admin] schools lookup unexpected error", e);
+  }
+
+  // fallback (optional)
+  adminWorkbookUrl =
+    adminWorkbookUrl ||
     (obs as any).adminWorkbookUrl ||
     (obs as any).schoolAdminWorkbookUrl ||
-    meta.adminWorkbookUrl ||
-    meta.schoolAdminWorkbookUrl ||
+    (obs as any).meta?.adminWorkbookUrl ||
+    (obs as any).meta?.schoolAdminWorkbookUrl ||
     null;
 
-  let schoolId: string | null =
+  schoolId =
+    schoolId ||
     (obs as any).school_id ||
     (obs as any).schoolId ||
-    meta.schoolId ||
-    full?.meta?.schoolId ||
+    (obs as any).meta?.schoolId ||
     null;
 
-  console.log("[MERGE admin] adminWorkbookUrl from obs/meta:", adminWorkbookUrl);
-  console.log("[MERGE admin] schoolId from obs/meta:", schoolId);
-
-  // 2) Fallback: schools table
-  if (!adminWorkbookUrl || !schoolId) {
-    try {
-      const schoolName = (obs as any).schoolName;
-      const campus = (obs as any).campus;
-
-      console.log("[MERGE admin] Falling back to schools lookup with:", {
-        schoolName,
-        campus,
-      });
-
-      const { data, error } = await supabase
-        .from("schools")
-        .select("id, admin_workbook_url")
-        .eq("school_name", schoolName)
-        .eq("campus_name", campus)
-        .limit(1);
-
-      if (error) {
-        console.error("[MERGE admin] schools lookup error", error);
-      } else if (data?.[0]) {
-        if (!schoolId && data[0].id) schoolId = data[0].id;
-        if (!adminWorkbookUrl && data[0].admin_workbook_url) {
-          adminWorkbookUrl = data[0].admin_workbook_url;
-        }
-
-        console.log("[MERGE admin] Resolved from schools table:", {
-          schoolId,
-          adminWorkbookUrl,
-        });
-      } else {
-        console.log("[MERGE admin] No matching school row found.");
-      }
-    } catch (e) {
-      console.error("[MERGE admin] Unexpected error during school lookup", e);
-    }
-  }
-
   if (!adminWorkbookUrl) {
-    alert("This school's admin workbook URL is not set yet.");
+    alert("This observation's school does not have an admin workbook URL set yet.");
     return;
   }
   if (!schoolId) {
-    alert("Cannot merge admin workbook because schoolId is missing.");
-    return;
-  }
-  if (!schoolId) {
-    alert("Missing schoolId for this observation's school. (Fix: ensure schools lookup returns id)");
+    alert("Missing schoolId for this observation's school (schools.id not found).");
     return;
   }
 
-  // 3) Sheet name (REAL convention)
+  // 2) Sheet name (NO prompt)
   const sheetName = buildAdminSheetName(obs);
-  console.log("[MERGE admin] Using sheetName:", sheetName);
 
-  // 4) Acquire Graph token
+  // 3) Graph token (REQUIRED)
   let graphToken = "";
   try {
     graphToken = await getGraphAccessToken();
@@ -1069,27 +1032,22 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     return;
   }
 
-  // ✅ 5) Build REAL Admin export model
+  // 4) Build REAL admin export model
   const exportMeta = toMetaForExport(full, obs);
   const exportIndicators = toIndicatorsForExport(full);
   const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
 
-  console.log("[MERGE admin] adminModel.sheetName:", adminModel?.sheetName);
-  console.log("[MERGE admin] adminModel.rows:", adminModel?.rows?.length);
-
-  // 6) Request body
   const body = {
     workbookUrl: adminWorkbookUrl,
     sheetName,
-    model: adminModel, // ✅ real model for template mapping
+    model: adminModel,
     observationId: obs.id,
     schoolId,
   };
 
-  console.log("[Dashboard] Calling /api/merge-admin with", body);
-
-  // 7) Call server
   try {
+    console.log("[Dashboard] Calling /api/merge-admin with", body);
+
     const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
       method: "POST",
       headers: {
@@ -1104,16 +1062,35 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
 
     if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
 
+    const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
+
+    const mergedAt = new Date().toISOString();
+    const patch = {
+      mergedAdmin: {
+        url: sheetUrl,
+        sheetName: json.sheetName || sheetName,
+        mergedAt,
+      },
+      adminWorkbookUrl,
+      schoolId,
+    };
+
+    const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
+
+    setObservations((prev) =>
+      prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, adminWorkbookUrl } : o))
+    );
+
     alert(
-      `Admin merge succeeded.\n\nAdmin sheet URL:\n${json.sheetUrl}\n\nView-only workbook URL:\n${json.viewOnlyWorkbookUrl || "(none returned)"}`
+      `Admin merge succeeded.\n\nAdmin sheet URL:\n${sheetUrl}\n\nView-only workbook URL:\n${
+        json.viewOnlyWorkbookUrl || "(none returned)"
+      }`
     );
   } catch (err) {
     console.error("[Dashboard] merge-admin error", err);
-    alert("Admin merge failed – check console.");
+    alert("Admin merge failed – check the console for details.");
   }
 };
-
-
   const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
     console.log("[Admin update email] for obs", obs.id);
     // TODO: build + send admin update email
@@ -1158,9 +1135,13 @@ const openAdminModal = () => {
   setActionModal({ obsId: obs.id, role: "admin" });
 };
 
+  const meta: any = (obs as any).meta || {};
+  const teacherMergedUrl: string | null = meta?.mergedTeacher?.url || null;
+  const adminMergedUrl: string | null = meta?.mergedAdmin?.url || null;
+
+  // show strip if either merged link exists (and do NOT tie it to workbookUrl existing)
   const canShowMergeLinks =
-    !options?.hideMergeLinks &&
-    (!!obs.teacherWorkbookUrl || !!obs.adminWorkbookUrl);
+    !options?.hideMergeLinks && (!!teacherMergedUrl || !!adminMergedUrl);
 
   return (
   <div
@@ -1239,86 +1220,108 @@ const openAdminModal = () => {
 
       {/* Merge workbook links strip */}
       {canShowMergeLinks && (
-        <div className="obs-merge-links">
-          {obs.teacherWorkbookUrl && (
-            <div className="obs-merge-row">
-              <span className="obs-merge-label">Teacher workbook</span>
-              <div className="obs-merge-actions">
-                <button
-                  type="button"
-                  className="obs-merge-pill"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    window.open(
-                      obs.teacherWorkbookUrl as string,
-                      "_blank",
-                      "noopener,noreferrer"
-                    );
-                  }}
-                >
-                  Open ⧉
-                </button>
-                <button
-                  type="button"
-                  className="obs-merge-pill"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (navigator.clipboard?.writeText) {
-                      navigator.clipboard.writeText(
-                        obs.teacherWorkbookUrl as string
-                      );
-                    }
-                  }}
-                >
-                  Copy
-                </button>
-              </div>
-            </div>
+  <div className="obs-merge-links">
+    {teacherMergedUrl && (
+      <div className="obs-merge-row">
+        <span className="obs-merge-label">Teacher workbook</span>
+        <div className="obs-merge-actions">
+          <button
+            type="button"
+            className="obs-merge-pill"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(teacherMergedUrl, "_blank", "noopener,noreferrer");
+            }}
+          >
+            Open ⧉
+          </button>
+          <button
+            type="button"
+            className="obs-merge-pill"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard?.writeText?.(teacherMergedUrl);
+            }}
+          >
+            Copy
+          </button>
+        </div>
+      </div>
+    )}
+
+    {adminMergedUrl && (
+      <div className="obs-merge-row">
+        <span className="obs-merge-label">Admin workbook</span>
+        <div className="obs-merge-actions">
+          <button
+            type="button"
+            className="obs-merge-pill"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(adminMergedUrl, "_blank", "noopener,noreferrer");
+            }}
+          >
+            Open ⧉
+          </button>
+          <button
+            type="button"
+            className="obs-merge-pill"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard?.writeText?.(adminMergedUrl);
+            }}
+          >
+            Copy
+          </button>
+        </div>
+      </div>
+    )}
+  </div>
+)}
+      {/* ===== NEW: merged sheet links (result of merge) ===== */}
+      {(obs?.meta?.mergedTeacher?.url || obs?.meta?.mergedAdmin?.url) && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: 10,
+            border: "1px solid rgba(0,0,0,0.12)",
+            borderRadius: 10,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+            Latest merged sheets
+          </div>
+
+          {obs?.meta?.mergedTeacher?.url && (
+            <MergedLinkRow
+              label="Teacher sheet"
+              url={obs.meta.mergedTeacher.url}
+              sheetName={obs.meta.mergedTeacher.sheetName}
+              mergedAt={obs.meta.mergedTeacher.mergedAt}
+            />
           )}
 
-          {obs.adminWorkbookUrl && (
-            <div className="obs-merge-row">
-              <span className="obs-merge-label">Admin workbook</span>
-              <div className="obs-merge-actions">
-                <button
-                  type="button"
-                  className="obs-merge-pill"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    window.open(
-                      obs.adminWorkbookUrl as string,
-                      "_blank",
-                      "noopener,noreferrer"
-                    );
-                  }}
-                >
-                  Open ⧉
-                </button>
-                <button
-                  type="button"
-                  className="obs-merge-pill"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (navigator.clipboard?.writeText) {
-                      navigator.clipboard.writeText(
-                        obs.adminWorkbookUrl as string
-                      );
-                    }
-                  }}
-                >
-                  Copy
-                </button>
-              </div>
-            </div>
+          {obs?.meta?.mergedAdmin?.url && (
+            <MergedLinkRow
+              label="Admin sheet"
+              url={obs.meta.mergedAdmin.url}
+              sheetName={obs.meta.mergedAdmin.sheetName}
+              mergedAt={obs.meta.mergedAdmin.mergedAt}
+            />
           )}
         </div>
       )}
+
     </div>
 
     <div className="obs-date">{obs.dateLabel}</div>
   </div>
 );
 };
+
+
+
   // NEW: grouped renderer with collapsed stack
   const renderGroup = (group: {
   key: string;
@@ -1750,3 +1753,81 @@ const openAdminModal = () => {
     </>
   );
 };
+
+function formatLocalTime(iso?: string) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function MergedLinkRow({
+  label,
+  url,
+  sheetName,
+  mergedAt,
+}: {
+  label: string;
+  url: string;
+  sheetName?: string;
+  mergedAt?: string;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontWeight: 600, minWidth: 110 }}>{label}</div>
+
+        {sheetName && (
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            ({sheetName})
+          </div>
+        )}
+
+        {mergedAt && (
+          <div style={{ marginLeft: "auto", fontSize: 12, opacity: 0.75 }}>
+            {formatLocalTime(mergedAt)}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          value={url}
+          readOnly
+          style={{
+            flex: 1,
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(0,0,0,0.15)",
+            fontSize: 12,
+          }}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+
+        <button
+          type="button"
+          onClick={async () => {
+            if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(url);
+            }
+          }}
+          style={{ padding: "8px 10px", borderRadius: 8 }}
+          title="Copy link"
+        >
+          Copy
+        </button>
+
+        <button
+          type="button"
+          onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+          style={{ padding: "8px 10px", borderRadius: 8 }}
+          title="Open in new tab"
+        >
+          Open
+        </button>
+      </div>
+    </div>
+  );
+}
