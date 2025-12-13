@@ -75,3 +75,63 @@ export default defineConfig([
 =======
 # teacher-observation-app
 >>>>>>> 5b6fd786bcf1c569e926becb99da8f33756bfaad
+
+```
+teacher-observation-app-nonbrokenversion
+├─ README.md
+├─ azure-ocr-test.mjs
+├─ eslint.config.js
+├─ index.html
+├─ ocr-server.mjs
+├─ package-lock.json
+├─ package.json
+├─ public
+│  ├─ TeacherTemplate.xlsx
+│  └─ vite.svg
+├─ sample.png
+├─ server
+│  ├─ emailTeacherRoute.js
+│  ├─ index.js
+│  ├─ mergeRoutes.js
+│  ├─ msGraphEmail.js
+│  ├─ msGraphWorkbook.js
+│  ├─ ocrAzureRoute.js
+│  └─ supabaseHelpers.js
+├─ src
+│  ├─ App.tsx
+│  ├─ AuthGate.tsx
+│  ├─ CanvasPad.tsx
+│  ├─ DashboardShell.tsx
+│  ├─ ObservationWorkspaceShell.tsx
+│  ├─ SchoolsScreen.tsx
+│  ├─ TeachersScreen.tsx
+│  ├─ auth
+│  │  └─ AuthContext.tsx
+│  ├─ components
+│  │  └─ ObservationCard.tsx
+│  ├─ data
+│  │  └─ indicators.ts
+│  ├─ db
+│  │  ├─ observations.ts
+│  │  ├─ schools.ts
+│  │  └─ teachers.ts
+│  ├─ emailTeacherReport.ts
+│  ├─ emailTemplates
+│  │  ├─ adminUpdate.ts
+│  │  ├─ amSupportSummary.ts
+│  │  ├─ teacherPostCall.ts
+│  │  └─ teacherPreCall.ts
+│  ├─ exportAdminExcel.ts
+│  ├─ exportAdminModel.ts
+│  ├─ exportTeacherExcel.ts
+│  ├─ exportTeacherModel.ts
+│  ├─ main.tsx
+│  ├─ schoolMaster.ts
+│  ├─ styles.css
+│  └─ supabaseClient.ts
+├─ tsconfig.app.json
+├─ tsconfig.json
+├─ tsconfig.node.json
+└─ vite.config.ts
+
+```

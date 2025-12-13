@@ -895,12 +895,10 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
         console.error("[MERGE teacher] teachers lookup error", error);
       } else if (data?.[0]?.worksheet_url) {
         workbookUrl = data[0].worksheet_url;
-        console.log("[MERGE teacher] Found workbookUrl on teachers table:", workbookUrl);
-      } else {
-        console.log("[MERGE teacher] No matching teacher row with worksheet_url found.");
+        console.log("[MERGE teacher] Found workbookUrl:", workbookUrl);
       }
-    } catch (lookupErr) {
-      console.error("[MERGE teacher] Unexpected error during teacher lookup", lookupErr);
+    } catch (err) {
+      console.error("[MERGE teacher] lookup error", err);
     }
   }
 
@@ -955,7 +953,6 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     });
 
     const json = await resp.json();
-    console.log("[Dashboard] merge-teacher response", json);
 
     if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
 
@@ -967,7 +964,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl || "(none returned)"}`);
   } catch (err) {
     console.error("[Dashboard] merge-teacher error", err);
-    alert("Teacher merge failed – check the console for details.");
+    alert("Teacher merge failed – check console.");
   }
 };
 
@@ -1046,7 +1043,11 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   }
 
   if (!adminWorkbookUrl) {
-    alert("This observation's school does not have an admin workbook URL set yet.");
+    alert("This school's admin workbook URL is not set yet.");
+    return;
+  }
+  if (!schoolId) {
+    alert("Cannot merge admin workbook because schoolId is missing.");
     return;
   }
   if (!schoolId) {
@@ -1108,7 +1109,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     );
   } catch (err) {
     console.error("[Dashboard] merge-admin error", err);
-    alert("Admin merge failed – check the console for details.");
+    alert("Admin merge failed – check console.");
   }
 };
 
