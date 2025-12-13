@@ -1,52 +1,11 @@
 // server/msGraphWorkbook.js
+// Robust merge that does NOT depend on worksheet copy being supported.
+// If worksheet copy works -> use _TEMPLATE / _ADMIN_TEMPLATE.
+// If not -> create new sheet + write values; formatting is best-effort (non-fatal).
 
-// If you're on Node 18+, global fetch exists.
-// If not, uncomment:
-// import fetch from "node-fetch";
-
-/**
- * IMPORTANT:
- * Replace this with YOUR real token getter (MSAL OBO, client credentials, etc.)
- */
-// server/msGraphWorkbook.js
-
-import dotenv from "dotenv";
-dotenv.config({ path: ".env.azure" }); // safe even if already loaded in index.js
-
-async function getGraphAccessToken() {
-  // ✅ Use the env names you ACTUALLY have in .env.azure
-  const tenantId = process.env.MS_TENANT_ID;
-  const clientId = process.env.MS_CLIENT_ID;
-  const clientSecret = process.env.MS_CLIENT_SECRET;
-
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("Missing MS_TENANT_ID, MS_CLIENT_ID, or MS_CLIENT_SECRET");
-  }
-
-  const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-
-  const params = new URLSearchParams();
-  params.set("client_id", clientId);
-  params.set("client_secret", clientSecret);
-  params.set("grant_type", "client_credentials");
-  // ✅ v2 endpoint uses scope
-  params.set("scope", "https://graph.microsoft.com/.default");
-
-  const resp = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
-  });
-
-  const json = await resp.json();
-  if (!resp.ok) {
-    const msg = json?.error_description || json?.error || JSON.stringify(json);
-    throw new Error(`Token request failed: ${msg}`);
-  }
-
-  return json.access_token;
-}
-
+// ------------------------------
+// Helpers: ShareId + Graph
+// ------------------------------
 function toBase64Url(str) {
   return Buffer.from(str, "utf8")
     .toString("base64")
@@ -56,8 +15,21 @@ function toBase64Url(str) {
 }
 
 function shareIdFromUrl(url) {
-  // Graph expects: u!{base64url(url)}
   return `u!${toBase64Url(url)}`;
+}
+
+// Excel worksheet name rules (important):
+// - max length 31
+// - cannot contain: : \ / ? * [ ]
+// - cannot be empty
+function excelSafeSheetName(input) {
+  const cleaned = String(input || "")
+    .replace(/[:\\\/\?\*\[\]]/g, " ") // illegal chars -> space
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const nonEmpty = cleaned.length > 0 ? cleaned : "Sheet";
+  return nonEmpty.slice(0, 31);
 }
 
 async function graphJson(url, { method = "GET", token, body } = {}) {
@@ -71,7 +43,7 @@ async function graphJson(url, { method = "GET", token, body } = {}) {
   });
 
   const text = await resp.text();
-  let json;
+  let json = {};
   try {
     json = text ? JSON.parse(text) : {};
   } catch {
@@ -82,252 +54,367 @@ async function graphJson(url, { method = "GET", token, body } = {}) {
     const msg =
       json?.error?.message ||
       json?.message ||
-      `Graph HTTP ${resp.status}: ${text?.slice(0, 300)}`;
-    throw new Error(msg);
+      (typeof json?.raw === "string" ? json.raw : "") ||
+      `Graph error ${resp.status}`;
+
+    const err = new Error(msg);
+    err.status = resp.status;
+    err.raw = text;
+    err.url = url;
+    throw err;
   }
+
   return json;
 }
 
 async function resolveWorkbookFromSharingUrl(workbookUrl, token) {
   const shareId = shareIdFromUrl(workbookUrl);
-  const driveItem = await graphJson(
+  const item = await graphJson(
     `https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem`,
     { token }
   );
 
-  const driveId = driveItem?.parentReference?.driveId;
-  const itemId = driveItem?.id;
-
-  if (!driveId || !itemId) {
-    throw new Error("Could not resolve driveId/itemId from sharing URL.");
-  }
-  return { driveId, itemId, driveItem };
+  return {
+    driveId: item?.parentReference?.driveId,
+    itemId: item?.id,
+  };
 }
 
-async function listWorksheets({ driveId, itemId, token }) {
-  const data = await graphJson(
+function wsBase(driveId, itemId, sheetName) {
+  return `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodeURIComponent(
+    sheetName
+  )}`;
+}
+
+async function listSheets({ driveId, itemId, token }) {
+  const res = await graphJson(
     `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/workbook/worksheets`,
     { token }
   );
-  return data?.value || [];
+  return res.value || [];
 }
 
-async function ensureWorksheet({ driveId, itemId, token, sheetName }) {
-  const sheets = await listWorksheets({ driveId, itemId, token });
-  const found = sheets.find((s) => s?.name === sheetName);
-  if (found) return found;
+async function uniqueSheetName({ driveId, itemId, token, base }) {
+  // sanitize BEFORE checking + creating
+  const safeBase = excelSafeSheetName(base);
 
-  // Create
-  const created = await graphJson(
+  const sheets = await listSheets({ driveId, itemId, token });
+  const names = new Set(sheets.map((s) => s.name));
+  if (!names.has(safeBase)) return safeBase;
+
+  let i = 2;
+  while (i < 100) {
+    const n = excelSafeSheetName(`${safeBase} (${i})`);
+    if (!names.has(n)) return n;
+    i++;
+  }
+
+  return excelSafeSheetName(`${safeBase}-${Date.now()}`);
+}
+
+async function ensureSheet({ driveId, itemId, token, name }) {
+  const safeName = excelSafeSheetName(name);
+
+  // POST /workbook/worksheets/add
+  await graphJson(
     `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/workbook/worksheets/add`,
-    { token, method: "POST", body: { name: sheetName } }
+    { token, method: "POST", body: { name: safeName } }
   );
 
-  // Response shape can be { worksheet: {...} } depending on Graph
-  return created?.worksheet || created;
+  return safeName;
 }
 
-async function writeRangeValues({ driveId, itemId, token, sheetName, address, values }) {
-  // address example: "A1:C2" or "A1"
-  // values must be a 2D array
-  return await graphJson(
-    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodeURIComponent(
-      sheetName
-    )}/range(address='${address}')`,
-    {
-      token,
-      method: "PATCH",
-      body: { values },
-    }
+async function write({ driveId, itemId, token, sheetName, addr, values }) {
+  await graphJson(
+    `${wsBase(driveId, itemId, sheetName)}/range(address='${addr}')`,
+    { token, method: "PATCH", body: { values } }
   );
 }
 
-// ------------------------------------------------------------
-// TEACHER MERGE (REAL WRITES)
-// ------------------------------------------------------------
+// NOTE: Graph is picky about some format enums.
+// Keep patches minimal + safe.
+async function patchRangeFormat({
+  driveId,
+  itemId,
+  token,
+  sheetName,
+  addr,
+  formatPatch,
+}) {
+  await graphJson(
+    `${wsBase(driveId, itemId, sheetName)}/range(address='${addr}')/format`,
+    { token, method: "PATCH", body: formatPatch }
+  );
+}
 
-/**
- * You will likely adjust the mapping to match your TeacherTemplate.
- * This writes minimal “proof it works” fields first.
- */
-export async function mergeTeacherSheet({ workbookUrl, sheetName, model }) {
-  // ✅ Step 0: token
-  const token = await getGraphAccessToken();
-  console.log("[Graph] got token:", token ? "YES" : "NO");
+// ------------------------------
+// Try worksheet copy (may fail)
+// ------------------------------
+async function tryCopyWorksheet({ driveId, itemId, token, templateName, newName }) {
+  const safeNewName = excelSafeSheetName(newName);
+
+  // Validate template exists (better error)
+  const sheets = await listSheets({ driveId, itemId, token });
+  const found = sheets.find((s) => s.name === templateName);
+  if (!found) {
+    return {
+      ok: false,
+      error: `Template sheet "${templateName}" not found in workbook.`,
+    };
+  }
 
   try {
-    // ✅ Step 1: resolve drive + item from sharing URL
-    console.log("[Graph] resolveWorkbookFromSharingUrl...");
-    const { driveId, itemId } = await resolveWorkbookFromSharingUrl(
-      workbookUrl,
-      token
+    // POST /workbook/worksheets/{id|name}/copy
+    await graphJson(
+      `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}` +
+        `/workbook/worksheets/${encodeURIComponent(templateName)}/copy`,
+      { token, method: "POST", body: { name: safeNewName } }
     );
-    console.log("[Graph] resolved:", { driveId, itemId });
 
-    // ✅ Step 2: ensure worksheet exists
-    console.log("[Graph] ensureWorksheet...", sheetName);
-    await ensureWorksheet({ driveId, itemId, token, sheetName });
-    console.log("[Graph] worksheet ok");
-
-    // ✅ Step 3: minimal proof writes (same as your existing code, but with logs)
-    console.log("[Graph] write A1...");
-    await writeRangeValues({
-      driveId,
-      itemId,
-      token,
-      sheetName,
-      address: "A1",
-      values: [[model?.headerTitle || "Teacher Observation"]],
-    });
-
-    console.log("[Graph] write A2...");
-    await writeRangeValues({
-      driveId,
-      itemId,
-      token,
-      sheetName,
-      address: "A2",
-      values: [[`Teacher: ${model?.teacherName || ""}`]],
-    });
-
-    console.log("[Graph] write A3...");
-    await writeRangeValues({
-      driveId,
-      itemId,
-      token,
-      sheetName,
-      address: "A3",
-      values: [[`School: ${model?.schoolName || ""}`]],
-    });
-
-    console.log("[Graph] write A4...");
-    await writeRangeValues({
-      driveId,
-      itemId,
-      token,
-      sheetName,
-      address: "A4",
-      values: [[`Date: ${model?.date || ""}`]],
-    });
-
-    // ✅ Step 4: optional rows write (with logs)
-    if (Array.isArray(model?.rows) && model.rows.length > 0) {
-      const startRow = 6; // adjust to match template
-      const values = model.rows.map((r) => [
-        r.number ?? "",
-        r.aspect ?? "",
-        r.good ? "Good" : "",
-        r.growth ? "Growth" : "",
-        r.commentText ?? "",
-      ]);
-
-      const endRow = startRow + values.length - 1;
-
-      console.log("[Graph] write rows...", { startRow, endRow, count: values.length });
-      await writeRangeValues({
-        driveId,
-        itemId,
-        token,
-        sheetName,
-        address: `A${startRow}:E${endRow}`,
-        values,
-      });
-    } else {
-      console.log("[Graph] no rows to write");
-    }
-
-    // ✅ Step 5: return sheet URL as before
-    const sheetUrl = `${workbookUrl}#sheet=${encodeURIComponent(sheetName)}`;
-    console.log("[Graph] mergeTeacherSheet done:", sheetUrl);
-    return sheetUrl;
-  } catch (err) {
-    // ✅ This makes the server terminal show the REAL reason + where it failed
-    console.error("[Graph] mergeTeacherSheet FAILED:", err);
-    throw err;
+    return { ok: true, error: null, newName: safeNewName };
+  } catch (e) {
+    return {
+      ok: false,
+      error: String(e?.message || e),
+    };
   }
 }
 
-// ------------------------------------------------------------
-// ADMIN MERGE (REAL WRITES)
-// ------------------------------------------------------------
+// ------------------------------
+// Fallback formatting (non-fatal)
+// Keep it MINIMAL. Add more later.
+// ------------------------------
+async function applyTeacherTemplateFallback({ driveId, itemId, token, sheetName }) {
+  // Keep these VERY safe to avoid InvalidArgument.
+  // (Graph sometimes rejects alignment enums; avoid fancy patches for now.)
+  await patchRangeFormat({
+    driveId,
+    itemId,
+    token,
+    sheetName,
+    addr: "A1:F3",
+    formatPatch: { font: { bold: true } },
+  });
 
-/**
- * Admin model is known:
- *  - headerLeft (multi-line)
- *  - headerRight (multi-line)
- *  - rows[] (14 items)
- *  - trainerSummary
- *
- * IMPORTANT: cell mapping depends on your Admin template.
- * I set a SAFE DEFAULT:
- *  - headerLeft -> A1
- *  - headerRight -> D1
- *  - rows -> A5:E18
- *  - trainerSummary -> F5:F18  (so it won't overwrite trainerNotes)
- *
- * If your template truly wants summary in E5–E18, change TRAINER_SUMMARY_RANGE.
- */
-export async function mergeAdminSheet({ workbookUrl, sheetName, model }) {
-  const token = await getGraphAccessToken();
+  await patchRangeFormat({
+    driveId,
+    itemId,
+    token,
+    sheetName,
+    addr: "A1:F200",
+    formatPatch: { alignment: { wrapText: true } },
+  });
+}
+
+async function applyAdminTemplateFallback({ driveId, itemId, token, sheetName }) {
+  await patchRangeFormat({
+    driveId,
+    itemId,
+    token,
+    sheetName,
+    addr: "A1:E4",
+    formatPatch: { font: { bold: true } },
+  });
+
+  await patchRangeFormat({
+    driveId,
+    itemId,
+    token,
+    sheetName,
+    addr: "A6:E19",
+    formatPatch: { alignment: { wrapText: true } },
+  });
+}
+
+// ======================================================
+// TEACHER MERGE
+// ======================================================
+export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }) {
+  if (!model) throw new Error("Missing model (teacher export model).");
+
   const { driveId, itemId } = await resolveWorkbookFromSharingUrl(workbookUrl, token);
+  if (!driveId || !itemId) throw new Error("Could not resolve workbook driveId/itemId.");
 
-  await ensureWorksheet({ driveId, itemId, token, sheetName });
+  const finalName = await uniqueSheetName({ driveId, itemId, token, base: sheetName });
 
-  // Header blocks (adjust to template)
-  await writeRangeValues({
+  // 1) Try copy from _TEMPLATE. If not supported, fallback to add+format.
+  const copyAttempt = await tryCopyWorksheet({
     driveId,
     itemId,
     token,
-    sheetName,
-    address: "A1",
-    values: [[model?.headerLeft || ""]],
+    templateName: "_TEMPLATE",
+    newName: finalName,
   });
 
-  await writeRangeValues({
+  let formattingWarning = null;
+
+  if (!copyAttempt.ok) {
+    // Fallback: add sheet
+    const createdName = await ensureSheet({
+      driveId,
+      itemId,
+      token,
+      name: finalName,
+    });
+
+    // Best-effort formatting (never throw)
+    try {
+      await applyTeacherTemplateFallback({
+        driveId,
+        itemId,
+        token,
+        sheetName: createdName,
+      });
+    } catch (e) {
+      formattingWarning = `Teacher formatting failed (non-fatal): ${e?.message || e}`;
+      console.warn("[mergeTeacherSheet] formattingWarning:", formattingWarning);
+    }
+  }
+
+  // 2) Header block (A1)
+  if (typeof model.headerBlock === "string") {
+    await write({
+      driveId,
+      itemId,
+      token,
+      sheetName: finalName,
+      addr: "A1",
+      values: [[model.headerBlock]],
+    });
+  }
+
+  // 3) Body mapping (rows 4–200; columns B..F)
+  if (Array.isArray(model.rows) && model.rows.length > 0) {
+    for (const r of model.rows) {
+      const rowIndex = Number(r.rowIndex);
+      if (!rowIndex || rowIndex < 4 || rowIndex > 200) continue;
+
+      await write({
+        driveId,
+        itemId,
+        token,
+        sheetName: finalName,
+        addr: `B${rowIndex}:F${rowIndex}`,
+        values: [[
+          r.indicatorLabel ?? "",
+          r.description ?? "",
+          r.checklist ?? "",
+          r.strengths ?? "",
+          r.growths ?? "",
+        ]],
+      });
+    }
+  }
+
+  return {
+    sheetUrl: `${workbookUrl}#sheet=${encodeURIComponent(finalName)}`,
+    sheetName: finalName,
+    usedCopy: copyAttempt.ok,
+    copyError: copyAttempt.ok ? null : copyAttempt.error,
+    formattingWarning, // 👈 show as warning in UI
+  };
+}
+
+// ======================================================
+// ADMIN MERGE
+// ======================================================
+export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) {
+  if (!model) throw new Error("Missing model (admin export model).");
+
+  const { driveId, itemId } = await resolveWorkbookFromSharingUrl(workbookUrl, token);
+  if (!driveId || !itemId) throw new Error("Could not resolve workbook driveId/itemId.");
+
+  const finalName = await uniqueSheetName({ driveId, itemId, token, base: sheetName });
+
+  // 1) Try copy from _ADMIN_TEMPLATE. If not supported, fallback.
+  const copyAttempt = await tryCopyWorksheet({
     driveId,
     itemId,
     token,
-    sheetName,
-    address: "D1",
-    values: [[model?.headerRight || ""]],
+    templateName: "_ADMIN_TEMPLATE",
+    newName: finalName,
   });
 
-  // Rows table
-  const TABLE_START_ROW = 5; // rowIndex 1 maps to row 5
-  if (Array.isArray(model?.rows) && model.rows.length > 0) {
-    const values = model.rows.map((r) => [
+  let formattingWarning = null;
+
+  if (!copyAttempt.ok) {
+    const createdName = await ensureSheet({
+      driveId,
+      itemId,
+      token,
+      name: finalName,
+    });
+
+    try {
+      await applyAdminTemplateFallback({
+        driveId,
+        itemId,
+        token,
+        sheetName: createdName,
+      });
+    } catch (e) {
+      formattingWarning = `Admin formatting failed (non-fatal): ${e?.message || e}`;
+      console.warn("[mergeAdminSheet] formattingWarning:", formattingWarning);
+    }
+  }
+
+  // 2) Header writes
+  await write({
+    driveId,
+    itemId,
+    token,
+    sheetName: finalName,
+    addr: "A1",
+    values: [[model.headerLeft ?? ""]],
+  });
+
+  await write({
+    driveId,
+    itemId,
+    token,
+    sheetName: finalName,
+    addr: "D1",
+    values: [[model.headerRight ?? ""]],
+  });
+
+  await write({
+    driveId,
+    itemId,
+    token,
+    sheetName: finalName,
+    addr: "D4",
+    values: [[`GV: ${model.teacherName ?? ""}`]],
+  });
+
+  // 3) Body rows MUST be A6:E19 (14 rows)
+  const rows = Array.isArray(model.rows) ? model.rows : [];
+  const padded = [];
+  for (let i = 0; i < 14; i++) {
+    const r = rows[i] || {};
+    padded.push([
       r.mainCategory ?? "",
       r.aspect ?? "",
       r.classroomSigns ?? "",
       r.trainerRating ?? "",
       r.trainerNotes ?? "",
     ]);
-
-    const endRow = TABLE_START_ROW + values.length - 1;
-    await writeRangeValues({
-      driveId,
-      itemId,
-      token,
-      sheetName,
-      address: `A${TABLE_START_ROW}:E${endRow}`,
-      values,
-    });
   }
 
-  // Trainer summary
-  const TRAINER_SUMMARY_RANGE = "F5:F18"; // change to "E5:E18" ONLY if it matches your template & you don't need trainerNotes column
-  if (model?.trainerSummary) {
-    // Put summary into top cell; Excel merge/formatting can be handled by template
-    await writeRangeValues({
-      driveId,
-      itemId,
-      token,
-      sheetName,
-      address: TRAINER_SUMMARY_RANGE,
-      values: [[model.trainerSummary]],
-    });
-  }
+  await write({
+    driveId,
+    itemId,
+    token,
+    sheetName: finalName,
+    addr: "A6:E19",
+    values: padded,
+  });
 
-  const sheetUrl = `${workbookUrl}#sheet=${encodeURIComponent(sheetName)}`;
-  return sheetUrl;
+  return {
+    sheetUrl: `${workbookUrl}#sheet=${encodeURIComponent(finalName)}`,
+    sheetName: finalName,
+    usedCopy: copyAttempt.ok,
+    copyError: copyAttempt.ok ? null : copyAttempt.error,
+    formattingWarning,
+    viewOnlyWorkbookUrl: null, // keep your later logic if you generate it elsewhere
+  };
 }
