@@ -1689,6 +1689,10 @@ input[type="date"].input {
 /* =========================================================
    OBSERVATION CARD — BOTTOM ROW (TAGS + TEACHER / ADMIN)
    ========================================================= */
+.obs-merge-row { display:flex; align-items:center; gap:12px; }
+.obs-merge-label { flex: 1; opacity: .8; }
+.obs-merge-actions { display:flex; gap:10px; }
+.obs-merge-time { margin-left:auto; opacity:.8; white-space:nowrap; }
 
 /* The row under the observation meta */
 .obs-bottom-row {
