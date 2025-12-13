@@ -91,6 +91,23 @@ interface IndicatorState {
   includeInTrainerSummary?: boolean;  // true = include this indicator in trainer summary
 }
 
+// interface SavedObservationPayload {
+//   id: string;
+//   meta: {
+//     teacherName: string;
+//     schoolName: string;
+//     campus: string;
+//     unit: string;
+//     lesson: string;
+//     supportType: "Training" | "LVA" | "Visit";
+//     date: string; // NEW
+//   };
+//   indicators: IndicatorState[];
+//   status: "draft" | "saved";
+//   updatedAt: number;
+//   scratchpadText?: string; // 🆕 optional for old records
+// }
+
 interface SavedObservationPayload {
   id: string;
   meta: {
@@ -100,12 +117,21 @@ interface SavedObservationPayload {
     unit: string;
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
-    date: string; // NEW
+    date: string;
+
+    // ✅ keep stable links (optional)
+    teacherWorkbookUrl?: string | null;
+    adminWorkbookUrl?: string | null;
+    adminWorkbookViewUrl?: string | null;
+
+    // ✅ keep merge results (optional)
+    mergedTeacher?: { url: string; sheetName?: string; mergedAt?: string } | null;
+    mergedAdmin?: { url: string; sheetName?: string; mergedAt?: string } | null;
   };
   indicators: IndicatorState[];
   status: "draft" | "saved";
   updatedAt: number;
-  scratchpadText?: string; // 🆕 optional for old records
+  scratchpadText?: string;
 }
 
 const STORAGE_PREFIX = "obs-v1-";
