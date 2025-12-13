@@ -14,7 +14,6 @@ import { buildAdminExportModel } from "./exportAdminModel";
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
 
-const STORAGE_PREFIX = "obs-v1-";
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
 
 type StatusColor = "good" | "mixed" | "growth";
@@ -44,6 +43,17 @@ interface DashboardObservationRow {
   // IMPORTANT: keep meta available on dashboard rows
   meta?: any;
 }
+
+type RecentMergePanel =
+  | null
+  | {
+      obsId: string;
+      kind: "teacher" | "admin";
+      sheetUrl: string;
+      sheetName: string;
+      mergedAt: string; // ISO
+    };
+
 
 interface DashboardProps {
   onOpenObservation: (obs: {
@@ -192,29 +202,26 @@ function monthKeyFromTs(ts: number | null): string | null {
   return `${String(m).padStart(2, "0")}.${y}`; // e.g. "11.2025"
 }
 
-async function persistMergedLinkToObservationMeta(
-  observationId: string,
-  patch: Record<string, any>
-) {
-  const { data: row, error: fetchErr } = await supabase
-    .from("observations")
-    .select("meta")
-    .eq("id", observationId)
-    .single();
-
-  if (fetchErr) throw fetchErr;
-
-  const meta = (row?.meta ?? {}) as Record<string, any>;
-  const nextMeta = { ...meta, ...patch };
-
-  const { error: updateErr } = await supabase
-    .from("observations")
-    .update({ meta: nextMeta })
-    .eq("id", observationId);
-
-  if (updateErr) throw updateErr;
-
-  return nextMeta;
+async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
+ // 1) localStorage (immediate + survives reload)
+ const key = `${STORAGE_PREFIX}${obsId}`;
+ const raw = localStorage.getItem(key);
+ if (!raw) throw new Error("No local observation found in localStorage for this obsId.");
+ const parsed = JSON.parse(raw);
+ parsed.meta = parsed.meta || {};
+ parsed.meta = { ...parsed.meta, ...patch };
+ localStorage.setItem(key, JSON.stringify(parsed));
+ // 2) Supabase (optional but recommended)
+ // If your observations table has a 'meta' jsonb column:
+ try {
+   await supabase
+     .from("observations")
+     .update({ meta: parsed.meta })
+     .eq("id", obsId);
+ } catch (e) {
+   console.warn("[persistMergedLinkToObservationMeta] Supabase update failed (local ok)", e);
+ }
+ return parsed.meta;
 }
 
 /* ------------------------------
@@ -256,6 +263,22 @@ function buildTeacherSheetName(meta: { date?: string }): string {
 /* ------------------------------
    COMPONENT
 --------------------------------- */
+const STORAGE_PREFIX = "obs-v1-";
+function readMetaFromLocalStorage(obsId: string): any | null {
+ try {
+   const raw = localStorage.getItem(`${STORAGE_PREFIX}${obsId}`);
+   if (!raw) return null;
+   const parsed = JSON.parse(raw);
+   return parsed?.meta ?? null;
+ } catch {
+   return null;
+ }
+}
+function getStableMetaForRow(obs: DashboardObservationRow): any {
+ // prefer row meta, fallback to localStorage meta (survives reload)
+ return (obs as any).meta || readMetaFromLocalStorage(obs.id) || {};
+}
+
 export const DashboardShell: React.FC<DashboardProps> = ({
   onOpenObservation,
 }) => {
@@ -266,6 +289,8 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const [groupMode, setGroupMode] = useState<GroupMode>("month");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [searchText, setSearchText] = useState("");
+  const [recentMergePanel, setRecentMergePanel] =
+   useState<RecentMergePanel>(null);
 
   // NEW: central modal state for Teacher/Admin actions
   const [actionModal, setActionModal] = useState<{
@@ -748,6 +773,20 @@ function excelSafeSheetName(input: string): string {
   return nonEmpty.slice(0, 31);
 }
 
+function persistMergedToLocalStorage(observationId: string, patch: any) {
+  try {
+    const key = `obs-v1-${observationId}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    parsed.meta = parsed.meta || {};
+    parsed.meta = { ...parsed.meta, ...patch };
+    localStorage.setItem(key, JSON.stringify(parsed));
+  } catch (e) {
+    console.warn("[persistMergedToLocalStorage] failed", e);
+  }
+}
+
 function monthYearFromDate(dateStr?: string | null): string {
   if (!dateStr) return "00.0000";
   const d = new Date(dateStr);
@@ -846,6 +885,49 @@ function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
   }));
 }
 
+
+const hydrateTeacherWorkbookUrlIfMissing = async (obs: DashboardObservationRow) => {
+  const metaAny: any = getStableMetaForRow(obs);
+  const existing =
+    (obs as any).teacherWorkbookUrl ??
+    metaAny?.teacherWorkbookUrl ??
+    metaAny?.teacherWorksheetUrl ??
+    null;
+
+  if (existing) return existing;
+
+  try {
+    const { data, error } = await supabase
+      .from("teachers")
+      .select("worksheet_url")
+      .eq("name", obs.teacherName)
+      .eq("school_name", obs.schoolName)
+      .eq("campus", obs.campus)
+      .limit(1);
+
+    if (error) {
+      console.error("[hydrateTeacherWorkbookUrlIfMissing] teachers lookup error", error);
+      return null;
+    }
+
+    const url = (data?.[0] as any)?.worksheet_url ?? null;
+    if (!url) return null;
+
+    // ✅ Persist into observation meta so it survives reload
+    const patch = { teacherWorkbookUrl: url };
+    const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
+
+    // ✅ Update dashboard row immediately
+    setObservations((prev) =>
+      prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, teacherWorkbookUrl: url } : o))
+    );
+
+    return url;
+  } catch (e) {
+    console.error("[hydrateTeacherWorkbookUrlIfMissing] unexpected error", e);
+    return null;
+  }
+};
 
 const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
   console.log("=====================================================");
@@ -953,6 +1035,14 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, teacherWorkbookUrl: workbookUrl } : o))
     );
 
+    setRecentMergePanel({
+  obsId: obs.id,
+  kind: "teacher",
+  sheetUrl,
+  sheetName: json.sheetName || sheetName,
+  mergedAt,
+});
+
     alert(`Teacher merge succeeded.\n\nSheet URL:\n${sheetUrl}`);
   } catch (err) {
     console.error("[Dashboard] merge-teacher error", err);
@@ -976,25 +1066,38 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   let adminWorkbookUrl: string | null = null;
   let schoolId: string | null = null;
 
+  // ✅ IMPORTANT: declare OUTSIDE try so it's visible later
+  let viewOnlyUrlFromSchool: string | null = null;
+
   try {
     const { data, error } = await supabase
       .from("schools")
-      .select("id, admin_workbook_url")
+      // ✅ MUST match your real column names EXACTLY:
+      // admin_workbook_url
+      // admin_workbook_view_url  (NO hyphens)
+      .select("id, admin_workbook_url, admin_workbook_view_url")
       .eq("school_name", obs.schoolName)
       .eq("campus_name", obs.campus)
       .limit(1);
 
     console.log("[MERGE admin] schools lookup:", { data, error });
 
+    if (error) {
+      console.error("[MERGE admin] schools lookup error", error);
+    }
+
     if (!error && data?.[0]) {
-      schoolId = data[0].id || null;
-      adminWorkbookUrl = data[0].admin_workbook_url || null;
+      schoolId = (data[0] as any).id ?? null;
+      adminWorkbookUrl = (data[0] as any).admin_workbook_url ?? null;
+
+      // ✅ this is the view-only URL from schools table
+      viewOnlyUrlFromSchool = (data[0] as any).admin_workbook_view_url ?? null;
     }
   } catch (e) {
     console.error("[MERGE admin] schools lookup unexpected error", e);
   }
 
-  // fallback (optional)
+  // 1b) Optional fallback (if you still want it)
   adminWorkbookUrl =
     adminWorkbookUrl ||
     (obs as any).adminWorkbookUrl ||
@@ -1020,6 +1123,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
   }
 
   // 2) Sheet name (NO prompt)
+  // Make sure buildAdminSheetName exists (we’ll fix that next if needed)
   const sheetName = buildAdminSheetName(obs);
 
   // 3) Graph token (REQUIRED)
@@ -1065,6 +1169,8 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
 
     const mergedAt = new Date().toISOString();
+
+    // ✅ Persist merged sheet link + ALSO cache workbook urls for the UI
     const patch = {
       mergedAdmin: {
         url: sheetUrl,
@@ -1073,17 +1179,31 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
       },
       adminWorkbookUrl,
       schoolId,
+      adminWorkbookViewUrl: viewOnlyUrlFromSchool, // ✅ FIXED: now in scope
     };
 
     const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
+    // ✅ Update state immediately so UI shows links and doesn’t “disappear”
     setObservations((prev) =>
-      prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, adminWorkbookUrl } : o))
+      prev.map((o) =>
+        o.id === obs.id
+          ? { ...o, meta: nextMeta, adminWorkbookUrl: adminWorkbookUrl }
+          : o
+      )
     );
+
+    setRecentMergePanel({
+      obsId: obs.id,
+      kind: "admin",
+      sheetUrl,
+      sheetName: json.sheetName || sheetName,
+      mergedAt,
+    });
 
     alert(
       `Admin merge succeeded.\n\nAdmin sheet URL:\n${sheetUrl}\n\nView-only workbook URL:\n${
-        json.viewOnlyWorkbookUrl || "(none returned)"
+        viewOnlyUrlFromSchool || "(missing in schools table)"
       }`
     );
   } catch (err) {
@@ -1091,6 +1211,8 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     alert("Admin merge failed – check the console for details.");
   }
 };
+
+
   const handleAdminUpdateEmail = (obs: DashboardObservationRow) => {
     console.log("[Admin update email] for obs", obs.id);
     // TODO: build + send admin update email
@@ -1112,6 +1234,7 @@ const renderRow = (
   obs: DashboardObservationRow,
   options?: { disableClick?: boolean; hideMergeLinks?: boolean }
 ) => {
+
   const handleOpenWorkspace = () => {
     if (options?.disableClick) return; // used by stack preview
     onOpenObservation({
@@ -1135,15 +1258,32 @@ const openAdminModal = () => {
   setActionModal({ obsId: obs.id, role: "admin" });
 };
 
-  const meta: any = (obs as any).meta || {};
-  const teacherMergedUrl: string | null = meta?.mergedTeacher?.url || null;
-  const adminMergedUrl: string | null = meta?.mergedAdmin?.url || null;
+// ---- links derived from meta (persisted) so they don't disappear ----
+const metaAny: any = getStableMetaForRow(obs);
+const mergedTeacherUrl: string | null = metaAny?.mergedTeacher?.url ?? null;
+const mergedAdminUrl: string | null = metaAny?.mergedAdmin?.url ?? null;
+const teacherWorkbookUrl: string | null =
+ (obs as any).teacherWorkbookUrl ??
+ metaAny?.teacherWorkbookUrl ??
+ metaAny?.teacherWorksheetUrl ??
+ null;
+const adminWorkbookUrl: string | null =
+ (obs as any).adminWorkbookUrl ??
+ metaAny?.adminWorkbookUrl ??
+ metaAny?.schoolAdminWorkbookUrl ??
+ null;
+const adminViewOnlyUrl: string | null =
+ metaAny?.adminWorkbookViewUrl ??
+ metaAny?.admin_workbook_view_url ??
+ null;
+const showLinks =
+ !!mergedTeacherUrl ||
+ !!teacherWorkbookUrl ||
+ !!mergedAdminUrl ||
+ !!adminViewOnlyUrl ||
+ !!adminWorkbookUrl;
 
-  // show strip if either merged link exists (and do NOT tie it to workbookUrl existing)
-  const canShowMergeLinks =
-    !options?.hideMergeLinks && (!!teacherMergedUrl || !!adminMergedUrl);
-
-  return (
+return (
   <div
     key={obs.id}
     role="button"
@@ -1196,15 +1336,16 @@ const openAdminModal = () => {
 
         <div className="obs-pill-row">
           <button
-            type="button"
-            className="obs-pill-button"
-            onClick={(e) => {
-              e.stopPropagation();
-              openTeacherModal();
-            }}
-          >
-            Teacher…
-          </button>
+  type="button"
+  className="obs-pill-button"
+  onClick={async (e) => {
+    e.stopPropagation();
+    await hydrateTeacherWorkbookUrlIfMissing(obs); // ✅ ensures strip will appear
+    openTeacherModal();
+  }}
+>
+  Teacher…
+</button>
           <button
             type="button"
             className="obs-pill-button"
@@ -1218,68 +1359,115 @@ const openAdminModal = () => {
         </div>
       </div>
 
-      {/* Merge workbook links strip */}
-      {canShowMergeLinks && (
-  <div className="obs-merge-links">
-    {teacherMergedUrl && (
-      <div className="obs-merge-row">
-        <span className="obs-merge-label">Teacher workbook</span>
-        <div className="obs-merge-actions">
-          <button
-            type="button"
-            className="obs-merge-pill"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(teacherMergedUrl, "_blank", "noopener,noreferrer");
-            }}
-          >
-            Open ⧉
-          </button>
-          <button
-            type="button"
-            className="obs-merge-pill"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard?.writeText?.(teacherMergedUrl);
-            }}
-          >
-            Copy
-          </button>
-        </div>
-      </div>
-    )}
+{/* ✅ ONLY 3 STRIPS (persistent workbook links) */}
+{!options?.hideMergeLinks && (
+  (() => {
+    // ONLY these 3 control rendering
+    const showLinks =
+      !!teacherWorkbookUrl || !!adminViewOnlyUrl || !!adminWorkbookUrl;
 
-    {adminMergedUrl && (
-      <div className="obs-merge-row">
-        <span className="obs-merge-label">Admin workbook</span>
-        <div className="obs-merge-actions">
-          <button
-            type="button"
-            className="obs-merge-pill"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(adminMergedUrl, "_blank", "noopener,noreferrer");
-            }}
-          >
-            Open ⧉
-          </button>
-          <button
-            type="button"
-            className="obs-merge-pill"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard?.writeText?.(adminMergedUrl);
-            }}
-          >
-            Copy
-          </button>
-        </div>
+    if (!showLinks) return null;
+
+    return (
+      <div className="obs-merge-links" onClick={(e) => e.stopPropagation()}>
+        {/* Teacher workbook */}
+        {teacherWorkbookUrl && (
+          <div className="obs-merge-row">
+            <span className="obs-merge-label">Teacher workbook</span>
+            <div className="obs-merge-actions">
+              <button
+                type="button"
+                className="obs-merge-pill"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(
+                    teacherWorkbookUrl,
+                    "_blank",
+                    "noopener,noreferrer"
+                  );
+                }}
+              >
+                Open ⧉
+              </button>
+              <button
+                type="button"
+                className="obs-merge-pill"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard?.writeText?.(teacherWorkbookUrl);
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Admin workbook (view-only) */}
+        {adminViewOnlyUrl && (
+          <div className="obs-merge-row">
+            <span className="obs-merge-label">Admin workbook (view-only)</span>
+            <div className="obs-merge-actions">
+              <button
+                type="button"
+                className="obs-merge-pill"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(adminViewOnlyUrl, "_blank", "noopener,noreferrer");
+                }}
+              >
+                View ⧉
+              </button>
+              <button
+                type="button"
+                className="obs-merge-pill"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard?.writeText?.(adminViewOnlyUrl);
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Admin workbook (edit) */}
+        {adminWorkbookUrl && (
+          <div className="obs-merge-row">
+            <span className="obs-merge-label">Admin workbook</span>
+            <div className="obs-merge-actions">
+              <button
+                type="button"
+                className="obs-merge-pill"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(adminWorkbookUrl, "_blank", "noopener,noreferrer");
+                }}
+              >
+                Open ⧉
+              </button>
+              <button
+                type="button"
+                className="obs-merge-pill"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard?.writeText?.(adminWorkbookUrl);
+                }}
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
       </div>
-    )}
-  </div>
+    );
+  })()
 )}
-      {/* ===== NEW: merged sheet links (result of merge) ===== */}
-      {(obs?.meta?.mergedTeacher?.url || obs?.meta?.mergedAdmin?.url) && (
+
+
+    
+      {/* {(obs?.meta?.mergedTeacher?.url || obs?.meta?.mergedAdmin?.url) && (
         <div
           style={{
             marginTop: 10,
@@ -1311,7 +1499,8 @@ const openAdminModal = () => {
             />
           )}
         </div>
-      )}
+      )} */}
+
 
     </div>
 
@@ -1319,8 +1508,6 @@ const openAdminModal = () => {
   </div>
 );
 };
-
-
 
   // NEW: grouped renderer with collapsed stack
   const renderGroup = (group: {
@@ -1386,374 +1573,363 @@ const openAdminModal = () => {
   /* ------------------------------
      UI
   --------------------------------- */
-  return (
-    <>
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Observations</div>
-            <div className="card-subtitle">
-              Tap an observation to continue, or create a new one.
-            </div>
-          </div>
+  // ✅ REVISED RETURN BLOCK (drop-in replacement for what you pasted)
+// Notes:
+// - Uses your existing variables/functions: renderRow, renderGroup, grouped, filteredAndSorted,
+//   actionModal, modalObservation, handlers, AM summary state, etc.
+// - No “latest merged” big panel.
+// - Keeps your MergedLinkRow + formatLocalTime at bottom unchanged (safe even if unused).
 
-          <div className="toolbar">
-            <div className="toolbar-group">
-              <span>Search</span>
-              <input
-                className="input search-input"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder="Teacher, school, campus…"
-              />
-            </div>
-
-            <div className="toolbar-group">
-              <span>Group by</span>
-              <select
-                className="select"
-                value={groupMode}
-                onChange={(e) =>
-                  setGroupMode(e.target.value as GroupMode)
-                }
-              >
-                <option value="none">None</option>
-                <option value="month">Month</option>
-                <option value="school">School</option>
-                <option value="campus">Campus</option>
-              </select>
-            </div>
-
-            <div className="toolbar-group">
-              <span>Sort</span>
-              <select
-                className="select"
-                value={sortMode}
-                onChange={(e) =>
-                  setSortMode(e.target.value as SortMode)
-                }
-              >
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-                <option value="teacher-az">Teacher A–Z</option>
-                <option value="teacher-za">Teacher Z–A</option>
-              </select>
-            </div>
-
-            <div className="toolbar-group">
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  // default month = newest available
-                  if (!summaryMonth && availableMonths[0]) {
-                    setSummaryMonth(availableMonths[0]);
-                  }
-                  setShowAmSummary(true);
-                }}
-                disabled={observations.length === 0}
-              >
-                AM Summary…
-              </button>
-            </div>
+return (
+  <>
+    <div className="card">
+      <div className="card-header">
+        <div>
+          <div className="card-title">Observations</div>
+          <div className="card-subtitle">
+            Tap an observation to continue, or create a new one.
           </div>
         </div>
 
-        <div className="obs-list">
-          {groupMode === "none" || !grouped
-            ? filteredAndSorted.map((obs) => renderRow(obs))
-            : grouped.map(renderGroup)}
+        <div className="toolbar">
+          <div className="toolbar-group">
+            <span>Search</span>
+            <input
+              className="input search-input"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Teacher, school, campus…"
+            />
+          </div>
+
+          <div className="toolbar-group">
+            <span>Group by</span>
+            <select
+              className="select"
+              value={groupMode}
+              onChange={(e) => setGroupMode(e.target.value as GroupMode)}
+            >
+              <option value="none">None</option>
+              <option value="month">Month</option>
+              <option value="school">School</option>
+              <option value="campus">Campus</option>
+            </select>
+          </div>
+
+          <div className="toolbar-group">
+            <span>Sort</span>
+            <select
+              className="select"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+            >
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="teacher-az">Teacher A–Z</option>
+              <option value="teacher-za">Teacher Z–A</option>
+            </select>
+          </div>
+
+          <div className="toolbar-group">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                // default month = newest available
+                if (!summaryMonth && availableMonths[0]) {
+                  setSummaryMonth(availableMonths[0]);
+                }
+                setShowAmSummary(true);
+              }}
+              disabled={observations.length === 0}
+            >
+              AM Summary…
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
-      {actionModal && modalObservation && (
-        <div
-          className="obs-action-modal-backdrop"
-          onClick={() => setActionModal(null)}
-        >
-          <div
-            className="obs-action-modal"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="obs-action-modal-header">
-              <div className="obs-action-modal-title">
-                {actionModal.role === "teacher"
-                  ? "Teacher actions"
-                  : "Admin actions"}
-              </div>
-              <div className="obs-action-modal-subtitle">
-                {modalObservation.teacherName} –{" "}
-                {modalObservation.schoolName} • {modalObservation.campus}
-              </div>
+      <div className="obs-list">
+        {groupMode === "none" || !grouped
+          ? filteredAndSorted.map((obs) => renderRow(obs))
+          : grouped.map(renderGroup)}
+      </div>
+    </div>
+
+    {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
+    {actionModal && modalObservation && (
+      <div
+        className="obs-action-modal-backdrop"
+        onClick={() => setActionModal(null)}
+      >
+        <div className="obs-action-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="obs-action-modal-header">
+            <div className="obs-action-modal-title">
+              {actionModal.role === "teacher"
+                ? "Teacher actions"
+                : "Admin actions"}
             </div>
-            <div className="obs-action-modal-body">
-              {actionModal.role === "teacher" ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setActionModal(null);
-                      handlePreCallEmail(modalObservation);
-                    }}
-                  >
-                    Pre call email
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setActionModal(null);
-                      handlePostCallEmail(modalObservation);
-                    }}
-                  >
-                    Post call email
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setActionModal(null);
-                      handleMergeTeacherWorkbook(modalObservation);
-                    }}
-                  >
-                    Merge teacher workbook
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setActionModal(null);
-                      handleMergeAdminWorkbook(modalObservation);
-                    }}
-                  >
-                    Merge admin workbook
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => {
-                      setActionModal(null);
-                      handleAdminUpdateEmail(modalObservation);
-                    }}
-                  >
-                    Admin update email
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="obs-action-modal-footer">
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setActionModal(null)}
-              >
-                Cancel
-              </button>
+            <div className="obs-action-modal-subtitle">
+              {modalObservation.teacherName} – {modalObservation.schoolName} •{" "}
+              {modalObservation.campus}
             </div>
           </div>
-        </div>
-      )}
 
-      {/* ---------- AM SUMMARY MODAL ---------- */}
-      {showAmSummary && (
-        <div className="am-summary-backdrop">
-          <div className="am-summary-modal">
-            <div className="am-summary-header">
-              <div>
-                <div className="am-summary-title">
-                  Monthly summary for AMs
-                </div>
-                <div className="am-summary-sub">
-                  Choose a month and Account Manager, review the table,
-                  then copy the email body into Outlook.
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setShowAmSummary(false)}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="am-summary-controls">
-              <div className="toolbar-group">
-                <span>Month</span>
-                <select
-                  className="select"
-                  value={summaryMonth}
-                  onChange={(e) => {
-                    setSummaryMonth(e.target.value);
-                    setSummaryAmKey(""); // reset AM when month changes
+          <div className="obs-action-modal-body">
+            {actionModal.role === "teacher" ? (
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setActionModal(null);
+                    handlePreCallEmail(modalObservation);
                   }}
                 >
-                  <option value="">Select…</option>
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="toolbar-group">
-                <span>Account Manager</span>
-                <select
-                  className="select"
-                  value={summaryAmKey}
-                  onChange={(e) => setSummaryAmKey(e.target.value)}
-                  disabled={!summaryMonth}
+                  Pre call email
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setActionModal(null);
+                    handlePostCallEmail(modalObservation);
+                  }}
                 >
-                  <option value="">
-                    {summaryMonth
-                      ? "Select…"
-                      : "Choose month first"}
-                  </option>
-                  {amsForSelectedMonth.map((am) => (
-                    <option key={am.key} value={am.key}>
-                      {am.name} ({am.email})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {sentInfo && (
-                <div className="am-summary-sent">
-                  Marked as sent on {sentInfo}
-                </div>
-              )}
-            </div>
-
-            {summaryRows.length > 0 && (
+                  Post call email
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setActionModal(null);
+                    handleMergeTeacherWorkbook(modalObservation);
+                  }}
+                >
+                  Merge teacher workbook
+                </button>
+              </>
+            ) : (
               <>
-                <div className="am-summary-table-wrapper">
-                  <table className="am-summary-table">
-                    <thead>
-                      <tr>
-                        <th>School</th>
-                        <th>Campus</th>
-                        <th>Teacher</th>
-                        <th>Status</th>
-                        <th>Next steps / key issues</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summaryRows.map((row, idx) => (
-                        <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
-                          <td>{row.schoolName}</td>
-                          <td>{row.campus}</td>
-                          <td>{row.teacherName}</td>
-                          <td>
-                            <select
-                              className="select select-compact"
-                              value={row.status}
-                              onChange={(e) => {
-                                const value =
-                                  e.target.value as SummaryStatus;
-                                setSummaryRows((prev) =>
-                                  prev.map((r, i) =>
-                                    i === idx
-                                      ? { ...r, status: value }
-                                      : r
-                                  )
-                                );
-                              }}
-                            >
-                              <option value="none">–</option>
-                              <option value="green">Green</option>
-                              <option value="red">Red</option>
-                            </select>
-                          </td>
-                          <td>
-                            <textarea
-                              value={row.nextSteps}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setSummaryRows((prev) =>
-                                  prev.map((r, i) =>
-                                    i === idx
-                                      ? { ...r, nextSteps: value }
-                                      : r
-                                  )
-                                );
-                              }}
-                              rows={3}
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="am-summary-email-section">
-                  <div className="am-summary-email-header">
-                    <span>Email body (copy into Outlook)</span>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => {
-                        if (!emailBody) return;
-                        navigator.clipboard
-                          ?.writeText(emailBody)
-                          .catch((err) =>
-                            console.error(
-                              "Clipboard copy failed",
-                              err
-                            )
-                          );
-                      }}
-                      disabled={!emailBody}
-                    >
-                      Copy to clipboard
-                    </button>
-                  </div>
-                  <textarea
-                    className="am-summary-email-textarea"
-                    value={emailBody}
-                    readOnly
-                    rows={10}
-                  />
-
-                  <div className="am-summary-footer">
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={markSummarySent}
-                      disabled={!summaryMonth || !summaryAmKey}
-                    >
-                      Mark summary as sent
-                    </button>
-                    {sentInfo && (
-                      <span className="am-summary-sent-inline">
-                        Already marked as sent on {sentInfo}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setActionModal(null);
+                    handleMergeAdminWorkbook(modalObservation);
+                  }}
+                >
+                  Merge admin workbook
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setActionModal(null);
+                    handleAdminUpdateEmail(modalObservation);
+                  }}
+                >
+                  Admin update email
+                </button>
               </>
             )}
+          </div>
 
-            {summaryMonth &&
-              summaryAmKey &&
-              summaryRows.length === 0 && (
-                <div className="am-summary-empty">
-                  No observations for this AM in {summaryMonth}.
-                </div>
-              )}
+          <div className="obs-action-modal-footer">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setActionModal(null)}
+            >
+              Cancel
+            </button>
           </div>
         </div>
-      )}
-    </>
-  );
-};
+      </div>
+    )}
 
+    {/* ---------- AM SUMMARY MODAL ---------- */}
+    {showAmSummary && (
+      <div className="am-summary-backdrop">
+        <div className="am-summary-modal">
+          <div className="am-summary-header">
+            <div>
+              <div className="am-summary-title">Monthly summary for AMs</div>
+              <div className="am-summary-sub">
+                Choose a month and Account Manager, review the table, then copy
+                the email body into Outlook.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setShowAmSummary(false)}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="am-summary-controls">
+            <div className="toolbar-group">
+              <span>Month</span>
+              <select
+                className="select"
+                value={summaryMonth}
+                onChange={(e) => {
+                  setSummaryMonth(e.target.value);
+                  setSummaryAmKey(""); // reset AM when month changes
+                }}
+              >
+                <option value="">Select…</option>
+                {availableMonths.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="toolbar-group">
+              <span>Account Manager</span>
+              <select
+                className="select"
+                value={summaryAmKey}
+                onChange={(e) => setSummaryAmKey(e.target.value)}
+                disabled={!summaryMonth}
+              >
+                <option value="">
+                  {summaryMonth ? "Select…" : "Choose month first"}
+                </option>
+                {amsForSelectedMonth.map((am) => (
+                  <option key={am.key} value={am.key}>
+                    {am.name} ({am.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {sentInfo && (
+              <div className="am-summary-sent">Marked as sent on {sentInfo}</div>
+            )}
+          </div>
+
+          {summaryRows.length > 0 && (
+            <>
+              <div className="am-summary-table-wrapper">
+                <table className="am-summary-table">
+                  <thead>
+                    <tr>
+                      <th>School</th>
+                      <th>Campus</th>
+                      <th>Teacher</th>
+                      <th>Status</th>
+                      <th>Next steps / key issues</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summaryRows.map((row, idx) => (
+                      <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
+                        <td>{row.schoolName}</td>
+                        <td>{row.campus}</td>
+                        <td>{row.teacherName}</td>
+                        <td>
+                          <select
+                            className="select select-compact"
+                            value={row.status}
+                            onChange={(e) => {
+                              const value = e.target.value as SummaryStatus;
+                              setSummaryRows((prev) =>
+                                prev.map((r, i) =>
+                                  i === idx ? { ...r, status: value } : r
+                                )
+                              );
+                            }}
+                          >
+                            <option value="none">–</option>
+                            <option value="green">Green</option>
+                            <option value="red">Red</option>
+                          </select>
+                        </td>
+                        <td>
+                          <textarea
+                            value={row.nextSteps}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setSummaryRows((prev) =>
+                                prev.map((r, i) =>
+                                  i === idx ? { ...r, nextSteps: value } : r
+                                )
+                              );
+                            }}
+                            rows={3}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="am-summary-email-section">
+                <div className="am-summary-email-header">
+                  <span>Email body (copy into Outlook)</span>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      if (!emailBody) return;
+                      navigator.clipboard
+                        ?.writeText(emailBody)
+                        .catch((err) =>
+                          console.error("Clipboard copy failed", err)
+                        );
+                    }}
+                    disabled={!emailBody}
+                  >
+                    Copy to clipboard
+                  </button>
+                </div>
+
+                <textarea
+                  className="am-summary-email-textarea"
+                  value={emailBody}
+                  readOnly
+                  rows={10}
+                />
+
+                <div className="am-summary-footer">
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={markSummarySent}
+                    disabled={!summaryMonth || !summaryAmKey}
+                  >
+                    Mark summary as sent
+                  </button>
+                  {sentInfo && (
+                    <span className="am-summary-sent-inline">
+                      Already marked as sent on {sentInfo}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          {summaryMonth && summaryAmKey && summaryRows.length === 0 && (
+            <div className="am-summary-empty">
+              No observations for this AM in {summaryMonth}.
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+  </>
+);
+
+// ------------------------------
+// (keep these helpers below as-is; safe even if unused)
+// ------------------------------
 function formatLocalTime(iso?: string) {
   if (!iso) return "";
   try {
@@ -1831,3 +2007,4 @@ function MergedLinkRow({
     </div>
   );
 }
+};
