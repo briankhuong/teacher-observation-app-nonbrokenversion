@@ -56,29 +56,91 @@ export async function loadObservationFromDb(id: string) {
 }
 
 // Save indicators + meta + status back to Supabase
+// export async function saveObservationToDb(args: {
+//   id: string;
+//   status: ObservationStatus;
+//   meta: ObservationMeta;
+//   indicators: any[];
+// }) {
+//   const { id, status, meta, indicators } = args;
+
+//   const { error } = await supabase
+//     .from("observations")
+//     .update({
+//       status,
+//       meta,
+//       indicators,
+//       observation_date: meta.date ?? null,
+//     })
+//     .eq("id", id);
+
+//   if (error) {
+//     console.error("[DB] saveObservationToDb error", error);
+//     throw error;
+//   }
+// }
+
+// Save indicators + meta + status back to Supabase
 export async function saveObservationToDb(args: {
   id: string;
   status: ObservationStatus;
-  meta: ObservationMeta;
+  meta: ObservationMeta; // whatever your type is
   indicators: any[];
 }) {
   const { id, status, meta, indicators } = args;
 
-  const { error } = await supabase
+  // 1) Read existing meta first so we don't wipe workbook links
+  const { data: existing, error: readErr } = await supabase
+    .from("observations")
+    .select("meta")
+    .eq("id", id)
+    .single();
+
+  if (readErr) {
+    console.error("[DB] saveObservationToDb read meta error", readErr);
+    throw readErr;
+  }
+
+  const prevMeta: any = existing?.meta ?? {};
+  const nextMeta: any = meta ?? {};
+
+  // 2) Merge while preserving stable link fields + merge results
+  const mergedMeta: any = {
+    ...prevMeta,
+    ...nextMeta,
+
+    // ✅ preserve stable links if Workspace doesn't provide them
+    teacherWorkbookUrl:
+      nextMeta.teacherWorkbookUrl ?? prevMeta.teacherWorkbookUrl ?? null,
+    adminWorkbookUrl:
+      nextMeta.adminWorkbookUrl ?? prevMeta.adminWorkbookUrl ?? null,
+    adminWorkbookViewUrl:
+      nextMeta.adminWorkbookViewUrl ?? prevMeta.adminWorkbookViewUrl ?? null,
+
+    // ✅ preserve merged sheet results too
+    mergedTeacher:
+      nextMeta.mergedTeacher ?? prevMeta.mergedTeacher ?? null,
+    mergedAdmin:
+      nextMeta.mergedAdmin ?? prevMeta.mergedAdmin ?? null,
+  };
+
+  // 3) Write merged meta
+  const { error: writeErr } = await supabase
     .from("observations")
     .update({
       status,
-      meta,
+      meta: mergedMeta,
       indicators,
-      observation_date: meta.date ?? null,
+      observation_date: mergedMeta.date ?? null,
     })
     .eq("id", id);
 
-  if (error) {
-    console.error("[DB] saveObservationToDb error", error);
-    throw error;
+  if (writeErr) {
+    console.error("[DB] saveObservationToDb error", writeErr);
+    throw writeErr;
   }
 }
+
 
 export async function updateObservationMetaLinks(opts: {
   id: string;
