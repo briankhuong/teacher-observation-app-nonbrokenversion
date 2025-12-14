@@ -6,6 +6,18 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig({
   plugins: [
     react(),
-    basicSsl() // <--- 2. Add this function here
+    basicSsl()
   ],
+  server: {
+    proxy: {
+      // 🔹 PROXY RULE:
+      // Any request made to "/api/ocr-azure" in your React code
+      // will be silently forwarded to "http://localhost:4001/api/ocr-azure"
+      '/api/ocr-azure': {
+        target: 'http://localhost:4001',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 })
