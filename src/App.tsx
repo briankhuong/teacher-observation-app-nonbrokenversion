@@ -185,13 +185,14 @@ interface SchoolRow {
 const ADD_NEW_SCHOOL_OPTION = "__ADD_NEW_SCHOOL__";
 
 // --- New Observation Form Component ---
+// --- New Observation Form Component ---
 const NewObservationForm: React.FC<NewObservationFormProps> = ({
   onCreate,
   onCancel,
   onOpenSchools,
 }) => {
   const todayISO = new Date().toISOString().slice(0, 10);
-  const { user } = useAuth(); // We still use context here for convenience
+  const { user } = useAuth();
 
   const [teacherName, setTeacherName] = useState("");
   const [schoolName, setSchoolName] = useState("");
@@ -204,6 +205,9 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const [worksheetUrl, setWorksheetUrl] = useState("");
   const [autoCreatedTeacherMsg, setAutoCreatedTeacherMsg] = useState<string | null>(null);
 
+  // --- NEW: Search State ---
+  const [teacherSearchTerm, setTeacherSearchTerm] = useState("");
+
   // Data Loading State
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [teachersLoading, setTeachersLoading] = useState(true);
@@ -214,10 +218,9 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const [schoolsLoading, setSchoolsLoading] = useState(true);
   const [schoolsError, setSchoolsError] = useState<string | null>(null);
 
-  // 2. Load teachers (FIXED: Filter by User ID)
+  // 1. Load teachers (Filtered by User ID)
   useEffect(() => {
-    if (!user) return; // Wait for login
-
+    if (!user) return;
     let cancelled = false;
 
     async function loadTeachers() {
@@ -228,7 +231,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         const { data, error } = await supabase
           .from("teachers")
           .select("id, name, email, school_name, campus, worksheet_url")
-          .eq("trainer_id", user!.id) // <--- CRITICAL FIX
+          .eq("trainer_id", user!.id)
           .order("name", { ascending: true });
 
         if (error) {
@@ -246,15 +249,12 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     }
 
     loadTeachers();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [user]);
 
-  // 3. Load schools (Already had the fix, just ensuring consistency)
+  // 2. Load schools
   useEffect(() => {
     if (!user) return;
-
     let cancelled = false;
 
     async function loadSchools() {
@@ -265,7 +265,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         const { data, error } = await supabase
           .from("schools")
           .select("*")
-          .eq("trainer_id", user!.id) // <--- CRITICAL FIX
+          .eq("trainer_id", user!.id)
           .order("school_name", { ascending: true })
           .order("campus_name", { ascending: true });
 
@@ -284,10 +284,19 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     }
 
     loadSchools();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [user]);
+
+  // --- NEW: Filter Logic ---
+  const filteredTeachers = React.useMemo(() => {
+    if (!teacherSearchTerm) return teachers;
+    const lower = teacherSearchTerm.toLowerCase();
+    return teachers.filter(t => 
+      t.name.toLowerCase().includes(lower) || 
+      t.school_name.toLowerCase().includes(lower) ||
+      t.campus.toLowerCase().includes(lower)
+    );
+  }, [teachers, teacherSearchTerm]);
 
   // Options Logic
   const schoolOptions = React.useMemo(() => {
@@ -295,22 +304,18 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       ? schools.map((s) => s.school_name)
       : SCHOOL_MASTER_LIST.map((s) => s.schoolName)
     ).filter(Boolean);
-
     return Array.from(new Set(names)).sort();
   }, [schools]);
 
   const campusOptions = React.useMemo(() => {
     if (!schoolName) return [];
-
     if (schools.length) {
       const campuses = schools
         .filter((s) => s.school_name === schoolName)
         .map((s) => s.campus_name)
         .filter(Boolean);
-
       return Array.from(new Set(campuses));
     }
-
     return SCHOOL_MASTER_LIST.filter((s) => s.schoolName === schoolName)
       .map((s) => s.campusName)
       .filter((v, i, arr) => arr.indexOf(v) === i);
@@ -319,9 +324,10 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const handleSelectTeacher = (id: string) => {
     setSelectedTeacherId(id);
     setAutoCreatedTeacherMsg(null);
+    // Clear search so the dropdown looks normal again (optional preference)
+    // setTeacherSearchTerm(""); 
 
     if (!id) return;
-
     const t = teachers.find((x) => x.id === id);
     if (!t) return;
 
@@ -362,7 +368,6 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     if (!teacherId) {
       try {
         const cleanUrl = worksheetUrl.trim() || null;
-
         const { data, error } = await supabase
           .from("teachers")
           .insert({
@@ -383,7 +388,6 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         }
 
         teacherId = data.id;
-
         // Optimistically update list
         setTeachers((prev) => [
           ...prev,
@@ -398,10 +402,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         ]);
         setSelectedTeacherId(data.id);
         setWorksheetUrl(data.worksheet_url ?? "");
-
-        setAutoCreatedTeacherMsg(
-          `New teacher saved: ${teacherName.trim()} — ${schoolName} (${campus})`
-        );
+        setAutoCreatedTeacherMsg(`New teacher saved: ${teacherName.trim()} — ${schoolName} (${campus})`);
       } catch (err) {
         console.error("[DB] unexpected error creating teacher", err);
         alert("Unexpected error creating teacher.");
@@ -434,7 +435,6 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         status: "draft",
         meta,
         indicators: [],
-        // Mirror columns for DB constraints
         teacher_name: meta.teacherName,
         school_name: meta.schoolName,
         campus: meta.campus,
@@ -470,9 +470,19 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         </div>
 
         <form className="modal-body" onSubmit={handleSubmit}>
-          {/* Teacher Picker */}
+          {/* Teacher Picker Section */}
           <div className="form-row">
             <label>Existing teacher (optional)</label>
+            
+            {/* --- NEW: Search Box --- */}
+            <input 
+              type="text" 
+              className="input mb-2" 
+              placeholder="🔍 Type name or school to filter..." 
+              value={teacherSearchTerm}
+              onChange={(e) => setTeacherSearchTerm(e.target.value)}
+            />
+
             <select
               className="select"
               value={selectedTeacherId}
@@ -482,22 +492,26 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
               <option value="">
                 {teachersLoading
                   ? "Loading teachers…"
-                  : "Select teacher from your list…"}
+                  : filteredTeachers.length === 0 
+                    ? "No matches found" 
+                    : "Select teacher from list…"}
               </option>
-              {teachers.map((t) => (
+              
+              {/* --- UPDATED: Map over filteredTeachers --- */}
+              {filteredTeachers.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name} — {t.school_name} ({t.campus})
                 </option>
               ))}
             </select>
+            
             {teachersError && (
               <div className="field-error">
-                Could not load teachers ({teachersError}). You can still type a
-                new teacher below.
+                Could not load teachers ({teachersError}). You can still type a new teacher below.
               </div>
             )}
             <div className="hint">
-              Pick an existing teacher, or leave this blank and type a new one.
+              Search and pick a teacher, or leave blank to create a new one below.
             </div>
             {autoCreatedTeacherMsg && (
               <div className="hint">{autoCreatedTeacherMsg}</div>
@@ -619,5 +633,4 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     </div>
   );
 };
-
 export default App;
