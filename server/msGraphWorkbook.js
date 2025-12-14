@@ -41,8 +41,8 @@ async function downloadWorkbook(driveId, itemId, token) {
   return await resp.arrayBuffer();
 }
 
-// 🔹 1. SMART VIEW LINK (Retries if Anonymous is blocked)
-async function createViewOnlyLink(driveId, itemId, token) {
+// 🔹 EXPORTED: Smart Link Creator (Used by Route now)
+export async function createViewOnlyLink(driveId, itemId, token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/createLink`;
   
   const tryScope = async (scope) => {
@@ -59,18 +59,12 @@ async function createViewOnlyLink(driveId, itemId, token) {
   };
 
   try {
-    // Try Public Link first
+    // 1. Try Anonymous
     let result = await tryScope("anonymous");
-    
-    // If blocked, try Company Internal Link
-    if (!result) {
-      console.warn("[Graph] Anonymous link blocked. Retrying with Organization scope...");
-      result = await tryScope("organization");
-    }
+    // 2. Try Organization (Fallback)
+    if (!result) result = await tryScope("organization");
 
     if (result) return result.link.webUrl;
-    
-    console.warn("[Graph] All link creation attempts failed.");
     return null;
   } catch (err) {
     console.error("[Graph] Link creation error:", err);
@@ -78,7 +72,6 @@ async function createViewOnlyLink(driveId, itemId, token) {
   }
 }
 
-// 🔹 2. UPLOAD (Returns ID for Link Creation)
 async function uploadWorkbook(driveId, itemId, token, buffer, originalName) {
   const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`;
 
@@ -95,18 +88,16 @@ async function uploadWorkbook(driveId, itemId, token, buffer, originalName) {
   if (resp.ok) {
     console.log("[Upload] Overwrite success!");
     const data = await resp.json(); 
-    return { name: data.name, id: data.id }; // Return ID so we can link to it
+    return { name: data.name, id: data.id };
   }
 
-  // Handle Locked File (423 / 409) -> Save Copy
+  // Handle Locked File (Save Copy)
   if (resp.status === 423 || resp.status === 409 || resp.status === 503) {
     console.warn(`[Upload] File locked (${resp.status}). Saving as COPY...`);
-    
     const time = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const newName = originalName.replace(".xlsx", `_conflict_${time}.xlsx`);
     
     const parentUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/parent/children/${newName}/content`;
-    
     const copyResp = await fetch(parentUrl, {
       method: "PUT",
       headers: { 
@@ -116,18 +107,14 @@ async function uploadWorkbook(driveId, itemId, token, buffer, originalName) {
       body: Buffer.from(buffer)
     });
 
-    if (!copyResp.ok) {
-        throw new Error(`Original locked AND failed to save copy: ${copyResp.statusText}`);
-    }
+    if (!copyResp.ok) throw new Error(`Locked & Failed copy: ${copyResp.statusText}`);
     
     const copyData = await copyResp.json();
     console.log(`[Upload] Saved as copy: ${newName}`);
-    // Return the NEW ID of the copy
     return { name: copyData.name, id: copyData.id, warning: "File was locked. Saved as new copy." };
   }
 
-  const text = await resp.text();
-  throw new Error(`Upload failed: ${resp.statusText} (${resp.status})`);
+  throw new Error(`Upload failed: ${resp.statusText}`);
 }
 
 // ------------------------------
@@ -145,13 +132,11 @@ function duplicateSheet(workbook, templateName, newName) {
   if (!source) throw new Error(`Template sheet "${templateName}" not found.`);
 
   const target = workbook.addWorksheet(newName);
-
   if (source.columns) {
     target.columns = source.columns.map(col => ({
       key: col.key, width: col.width, style: col.style, hidden: col.hidden
     }));
   }
-
   source.eachRow((sourceRow, rowNum) => {
     const targetRow = target.getRow(rowNum);
     targetRow.height = sourceRow.height;
@@ -164,11 +149,9 @@ function duplicateSheet(workbook, templateName, newName) {
     });
     targetRow.commit();
   });
-
   (source.model.merges || []).forEach(range => target.mergeCells(range));
   if (source.pageSetup) target.pageSetup = source.pageSetup;
   copyConditionalFormatting(source, target);
-
   return target;
 }
 
@@ -178,7 +161,6 @@ function duplicateSheet(workbook, templateName, newName) {
 export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }) {
   if (!model) throw new Error("Missing model.");
 
-  console.log("[MergeTeacher] Downloading...");
   const { driveId, itemId, name: fileName } = await getDriveItemInfo(workbookUrl, token);
   const fileBuffer = await downloadWorkbook(driveId, itemId, token);
 
@@ -191,12 +173,10 @@ export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }
     finalName = excelSafeSheetName(`${sheetName} (${counter++})`);
   }
 
-  console.log(`[MergeTeacher] Cloning "_TEMPLATE" to "${finalName}"...`);
   const ws = duplicateSheet(wb, "_TEMPLATE", finalName);
   ws.state = "visible";
 
   if (model.headerBlock) ws.getCell("A1").value = model.headerBlock;
-
   if (Array.isArray(model.rows)) {
     model.rows.forEach(r => {
       const rowIndex = Number(r.rowIndex);
@@ -210,7 +190,6 @@ export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }
     });
   }
 
-  console.log("[MergeTeacher] Uploading...");
   const newBuffer = await wb.xlsx.writeBuffer();
   const uploadResult = await uploadWorkbook(driveId, itemId, token, newBuffer, fileName);
 
@@ -223,12 +202,11 @@ export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }
 }
 
 // ======================================================
-// ADMIN MERGE
+// ADMIN MERGE (Fast Response)
 // ======================================================
 export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) {
   if (!model) throw new Error("Missing model.");
 
-  console.log("[MergeAdmin] Downloading...");
   const { driveId, itemId, name: fileName } = await getDriveItemInfo(workbookUrl, token);
   const fileBuffer = await downloadWorkbook(driveId, itemId, token);
 
@@ -241,7 +219,6 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
     finalName = excelSafeSheetName(`${sheetName} (${counter++})`);
   }
 
-  console.log(`[MergeAdmin] Cloning "_ADMIN_TEMPLATE" to "${finalName}"...`);
   const ws = duplicateSheet(wb, "_ADMIN_TEMPLATE", finalName);
   ws.state = "visible";
 
@@ -260,21 +237,18 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
     if (i === 0 && r.trainerNotes) ws.getCell("E6").value = r.trainerNotes;
   });
 
-  console.log("[MergeAdmin] Uploading...");
   const newBuffer = await wb.xlsx.writeBuffer();
-  
-  // 1. Upload & Get ID
+  // 1. Upload & Get ID (Blocking, but usually fast)
   const uploadResult = await uploadWorkbook(driveId, itemId, token, newBuffer, fileName);
   
-  // 2. Generate Link using the returned ID
-  console.log("[MergeAdmin] Generating View Link for:", uploadResult.id);
-  const viewLink = await createViewOnlyLink(driveId, uploadResult.id, token);
-
+  // 2. Return data for Background Processing
   return {
     sheetUrl: `${workbookUrl}#sheet=${encodeURIComponent(finalName)}`,
     sheetName: finalName,
     usedCopy: true,
-    viewOnlyWorkbookUrl: viewLink, // 👈 This should now populate correctly
+    // Return IDs so the Router can generate the link in background
+    driveId: driveId,
+    itemId: uploadResult.id,
     formattingWarning: uploadResult.warning || null
   };
 }
