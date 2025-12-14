@@ -460,14 +460,13 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
   try {
     const imageBase64 = await strokesToPngBase64(strokes);
 
-    const response = await fetch(
-  `http://${window.location.hostname}:4000/api/ocr-azure`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageBase64 }),
-  }
-);
+    // ✅ CHANGED: Use relative path. 
+    // Vite will catch this and forward it to localhost:4001 automatically.
+    const response = await fetch("/api/ocr-azure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64 }),
+    });
 
     if (!response.ok) {
       console.error("Azure OCR HTTP error", response.status);
