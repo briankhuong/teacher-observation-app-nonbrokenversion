@@ -6,16 +6,15 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
   const [loading, setLoading] = useState(false);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ... (Logic kept exactly the same) ...
     const file = e.target.files?.[0];
     if (!file) return;
 
     setLoading(true);
     try {
-      // 1. Get User
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not logged in.");
 
-      // 2. Fetch Schools for Lookup
       const { data: schools, error: schoolErr } = await supabase
         .from('schools')
         .select('id, official_code, school_name, campus_name')
@@ -24,14 +23,11 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
       if (schoolErr) throw schoolErr;
       if (!schools || schools.length === 0) throw new Error("No schools found. Please import Schools first.");
 
-      // 3. Parse Excel
       const rows = await readXlsxFile(file);
       const dataRows = rows.slice(1);
-
-      let rawTeachers: any[] = []; // Changed name to rawTeachers to indicate they aren't clean yet
+      let rawTeachers: any[] = []; 
       const errors: string[] = [];
 
-      // 4. Loop & Prepare Data
       dataRows.forEach((row, index) => {
         const name = row[0]?.toString().trim();       
         const email = row[1]?.toString().trim();      
@@ -43,12 +39,10 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
            errors.push(`Row ${index + 2}: Missing Name, Code, or Campus.`);
            return;
         }
-
         const matchedSchool = schools.find(s => 
             s.official_code?.toLowerCase() === code.toLowerCase() &&
             s.campus_name?.toLowerCase() === campus.toLowerCase()
         );
-
         if (matchedSchool) {
           rawTeachers.push({
             trainer_id: user.id,            
@@ -65,70 +59,38 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
         }
       });
 
-      // --- NEW LOGIC STARTS HERE ---
-
-      // 5. Smart Deduplication
-      // Goal: If Name+Email+Campus are identical, keep the one with the workbook link.
-
-      // A. Sort so rows with 'worksheet_url' come FIRST. 
-      // This ensures that when we dedup, the "good" row is the one we keep.
       rawTeachers.sort((a, b) => {
-          // If a has url and b doesn't, a comes first (-1)
           if (a.worksheet_url && !b.worksheet_url) return -1;
-          // If b has url and a doesn't, b comes first (1)
           if (!a.worksheet_url && b.worksheet_url) return 1;
           return 0;
       });
 
-      // B. Filter using a Map to ensure Uniqueness
       const uniqueMap = new Map();
       const teachersToUpsert: any[] = [];
-
       for (const teacher of rawTeachers) {
-          // Create a unique key based on your criteria: Name + Email + Campus
-          // We use lowerCase to avoid "John" vs "john" duplicates
           const uniqueKey = `${teacher.name}-${teacher.email || 'no-email'}-${teacher.campus}`.toLowerCase();
-
           if (!uniqueMap.has(uniqueKey)) {
-              uniqueMap.set(uniqueKey, true); // Mark as seen
-              teachersToUpsert.push(teacher); // Add to final list
+              uniqueMap.set(uniqueKey, true);
+              teachersToUpsert.push(teacher);
           }
-          // If uniqueMap HAS the key, we skip this row. 
-          // Since we sorted above, we are skipping the "worse" version (the one without the link).
       }
       
       const duplicateCount = rawTeachers.length - teachersToUpsert.length;
-
-      // --- NEW LOGIC ENDS HERE ---
-
-      // 6. Report Errors (Optional stop)
       if (errors.length > 0) {
-        const proceed = confirm(`Found ${rawTeachers.length} rows (${duplicateCount} duplicates removed) and ${errors.length} errors.\n\nFirst error: ${errors[0]}\n\nProceed with valid rows?`);
-        if (!proceed) {
-            setLoading(false);
-            e.target.value = ''; 
-            return;
-        }
+        const proceed = confirm(`Found ${rawTeachers.length} rows (${duplicateCount} duplicates removed) and ${errors.length} errors.\nFirst error: ${errors[0]}\nProceed?`);
+        if (!proceed) { setLoading(false); e.target.value = ''; return; }
       }
 
-      // 7. UPSERT
       if (teachersToUpsert.length > 0) {
         const { error } = await supabase
           .from('teachers')
-          .upsert(teachersToUpsert, { 
-            // ⚠️ Ensure this constraint exists in Supabase: (trainer_id, name, school_name, campus)
-            onConflict: 'trainer_id, name, school_name, campus' 
-          });
-
+          .upsert(teachersToUpsert, { onConflict: 'trainer_id, name, school_name, campus' });
         if (error) throw error;
-        
-        // Updated Alert message to show user what happened
-        alert(`Success! Imported ${teachersToUpsert.length} teachers.\n(Automatically removed ${duplicateCount} duplicates)`);
+        alert(`Success! Imported ${teachersToUpsert.length} teachers.`);
         onUploadComplete();
       } else {
-        alert("No valid teachers found to import.");
+        alert("No valid teachers found.");
       }
-
     } catch (err: any) {
       console.error(err);
       alert('Error: ' + err.message);
@@ -139,24 +101,41 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
   };
 
   return (
-    <div className="flex flex-col gap-2 items-start">
-        <div className="flex gap-3 items-center">
-            <a 
-                href="/templates/teachers_template.xlsx" 
-                download 
-                className="text-xs text-blue-600 hover:underline"
-            >
-                Download Template
-            </a>
-            
-            <label className="cursor-pointer bg-blue-600 text-white text-sm px-4 py-2 rounded shadow hover:bg-blue-700 transition">
-                {loading ? 'Processing...' : 'Import Teachers'}
-                <input type="file" accept=".xlsx" onChange={handleFileUpload} className="hidden" disabled={loading}/>
-            </label>
-        </div>
-        <p className="text-xs text-gray-500">
-            *Use exact Name & Campus to update existing
-        </p>
+    <div className="flex items-center gap-2">
+      {/* 1. Download Template (Outline Pill) */}
+      <a
+        href="/templates/teachers_template.xlsx"
+        download
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
+      >
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Template
+      </a>
+
+      {/* 2. Import Button (Blue Pill) */}
+      <div>
+        <input
+          type="file"
+          id="file-upload-teachers"
+          accept=".xlsx"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          disabled={loading}
+        />
+        <label
+          htmlFor="file-upload-teachers"
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-full shadow-sm cursor-pointer transition-colors ${
+            loading ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
+          }`}
+        >
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          {loading ? 'Processing...' : 'Import Teachers'}
+        </label>
+      </div>
     </div>
   );
 }
