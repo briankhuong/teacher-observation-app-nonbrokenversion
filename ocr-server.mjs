@@ -82,7 +82,7 @@ app.post("/api/ocr-azure", async (req, res) => {
   }
 });
 
-const PORT = 4000;
+const PORT = 4001;
 app.listen(PORT, () => {
   console.log(`✅ OCR server listening on http://localhost:${PORT}`);
 });
