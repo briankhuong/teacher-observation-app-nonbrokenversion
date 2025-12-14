@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
+import ImportSchoolsBtn from "./components/ImportSchoolsBtn";
 
 export interface SchoolRow {
   id: string;
@@ -269,6 +270,7 @@ export const SchoolsScreen: React.FC = () => {
 
   // NEW: active row id
   const [activeSchoolId, setActiveSchoolId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   if (!user) {
     // AuthGate should prevent this, but just in case
@@ -338,7 +340,7 @@ export const SchoolsScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [trainerId]);
+  }, [trainerId, refreshKey]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -536,6 +538,11 @@ export const SchoolsScreen: React.FC = () => {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="School, campus, city…"
               />
+            </div>
+
+            {/* --- ADD THIS NEW GROUP --- */}
+            <div className="toolbar-group">
+               <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
             </div>
 
             <div className="toolbar-group">
