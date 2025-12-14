@@ -42,16 +42,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       const currentSession = data.session;
 
       // Check if the URL contains an OAuth hash (access_token)
-      // If it does, Supabase is still processing the login redirect.
       const hasAuthHash = window.location.hash.includes("access_token");
 
       if (mounted) {
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
 
-        // CRITICAL FIX:
         // Only stop loading if we have a session OR if there is NO hash to parse.
-        // If there IS a hash, we stay 'loading' and wait for onAuthStateChange below.
         if (currentSession || !hasAuthHash) {
           setLoading(false);
         }
@@ -84,11 +81,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   // ----------------------------
   const signInWithAzure = async () => {
     setLoading(true);
+    
+    // 🟢 FINAL FIX: Explicitly set the production redirect URL when available.
+    // This is the variable set in Vercel to your live domain.
+    const redirectUrl = import.meta.env.VITE_AZURE_REDIRECT_URI_PROD 
+        ? import.meta.env.VITE_AZURE_REDIRECT_URI_PROD as string 
+        : window.location.origin;
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "azure",
       options: {
-        // IMPORTANT: Ensure http://localhost:5173 is in Supabase "Redirect URLs"
-        redirectTo: window.location.origin,
+        // Pass the explicit Vercel URL or the local origin
+        redirectTo: redirectUrl, 
         
         // Standard scopes for reading user profile/email
         scopes: "openid email profile offline_access User.Read Mail.Send",

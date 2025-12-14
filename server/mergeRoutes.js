@@ -1,3 +1,4 @@
+// server/mergeRoutes.js
 import express from "express";
 // 🔹 Import createViewOnlyLink here
 import { mergeTeacherSheet, mergeAdminSheet, createViewOnlyLink } from "./msGraphWorkbook.js";
@@ -5,7 +6,8 @@ import { updateSchoolViewOnlyUrl } from "./supabaseHelpers.js";
 
 const router = express.Router();
 
-router.get("/ping", (req, res) => {
+// 🟢 FIX: Added /api prefix to the ping route
+router.get("/api/ping", (req, res) => {
   res.json({ ok: true, from: "mergeRoutes" });
 });
 
@@ -25,7 +27,8 @@ function errPayload(err) {
   };
 }
 
-router.post("/merge-teacher", async (req, res) => {
+// 🟢 FIX: Added /api prefix to the merge-teacher route
+router.post("/api/merge-teacher", async (req, res) => {
   try {
     const token = extractBearerToken(req);
     const { workbookUrl, sheetName, model } = req.body || {};
@@ -40,7 +43,8 @@ router.post("/merge-teacher", async (req, res) => {
   }
 });
 
-router.post("/merge-admin", async (req, res) => {
+// 🟢 FIX: Added /api prefix to the merge-admin route
+router.post("/api/merge-admin", async (req, res) => {
   try {
     const token = extractBearerToken(req);
     const { workbookUrl, sheetName, model, schoolId } = req.body || {};
@@ -54,7 +58,6 @@ router.post("/merge-admin", async (req, res) => {
     res.json({
       ok: true,
       ...result,
-      // The UI will see this is null initially, but that's okay because...
       viewOnlyWorkbookUrl: null, 
       message: "Sheet merged! View link is generating in background..."
     });
