@@ -16,8 +16,8 @@ import { buildTeacherPostCallHtml } from "./emailTemplates/teacherPostCall";
 import { buildAdminUpdateHtml } from "./emailTemplates/adminUpdate";
 import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
 
-const MERGE_SERVER_BASE =
-  import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
+// Force empty string to ensure we use the Proxy
+const MERGE_SERVER_BASE = "";
 
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
 const STORAGE_PREFIX = "obs-v1-";

@@ -2,19 +2,20 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [
-    react(),
-    basicSsl()
-  ],
+  plugins: [react(), basicSsl()],
   server: {
     proxy: {
-      // 🔹 PROXY RULE:
-      // Any request made to "/api/ocr-azure" in your React code
-      // will be silently forwarded to "http://localhost:4001/api/ocr-azure"
+      // 1. Existing OCR Rule (Keep this)
       '/api/ocr-azure': {
         target: 'http://localhost:4001',
+        changeOrigin: true,
+        secure: false,
+      },
+      // 2. NEW EXCEL MERGE RULE (Add this!)
+      // This catches /api/merge-admin and /api/merge-teacher
+      '/api': {
+        target: 'http://localhost:4000', // Points to your Main Server
         changeOrigin: true,
         secure: false,
       },
