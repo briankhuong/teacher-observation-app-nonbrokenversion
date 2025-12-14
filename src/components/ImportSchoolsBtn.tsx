@@ -11,25 +11,18 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
 
     setLoading(true);
     try {
-      // 1. Get Current User
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("You must be logged in to upload.");
 
-      // 2. Parse Excel
       const rows = await readXlsxFile(file);
-      const dataRows = rows.slice(1); // Skip header row
-
+      const dataRows = rows.slice(1);
       if (dataRows.length === 0) throw new Error("File is empty.");
 
-      // 3. Map Rows to DB Columns
       const schoolsToUpsert = dataRows.map((row) => ({
         trainer_id: user.id,
-        // The Identity Columns (Must match to trigger Update)
         official_code:      row[0]?.toString().trim() || null, 
         school_name:        row[1]?.toString().trim(), 
         campus_name:        row[2]?.toString().trim(), 
-        
-        // The Data Columns (These will be updated)
         address:            row[3]?.toString().trim() || null,
         admin_name:         row[4]?.toString().trim() || null,
         admin_email:        row[5]?.toString().trim() || null,
@@ -39,19 +32,15 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
         admin_workbook_url: row[9]?.toString().trim() || null,
       }));
 
-      // 4. UPSERT (Update if exists, Insert if new)
       const { error } = await supabase
         .from('schools')
         .upsert(schoolsToUpsert, { 
-            // This must match the constraint we created in SQL
             onConflict: 'trainer_id, school_name, campus_name' 
         });
 
       if (error) throw error;
-
       alert(`Success! Processed ${schoolsToUpsert.length} rows.`);
       onUploadComplete(); 
-      
     } catch (err: any) {
       console.error(err);
       alert('Error importing schools: ' + err.message);
@@ -62,30 +51,41 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
   };
 
   return (
-    <div className="flex flex-col gap-2 items-start">
-        <div className="flex gap-3 items-center">
-            <a 
-                href="/templates/schools_template.xlsx" 
-                download 
-                className="text-xs text-blue-600 hover:underline"
-            >
-                Download Template
-            </a>
-            
-            <label className="cursor-pointer bg-green-600 text-white text-sm px-4 py-2 rounded shadow hover:bg-green-700 transition">
-                {loading ? 'Processing...' : 'Import Schools'}
-                <input 
-                type="file" 
-                accept=".xlsx" 
-                onChange={handleFileUpload} 
-                className="hidden" 
-                disabled={loading}
-                />
-            </label>
-        </div>
-        <p className="text-xs text-gray-500">
-            *Re-uploading updates existing schools
-        </p>
+    <div className="flex items-center gap-2">
+      {/* 1. Download Template (Outline Pill) */}
+      <a
+        href="/templates/schools_template.xlsx"
+        download
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
+      >
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Template
+      </a>
+
+      {/* 2. Import Button (Green Pill) */}
+      <div>
+        <input
+          type="file"
+          id="file-upload-schools"
+          accept=".xlsx"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          disabled={loading}
+        />
+        <label
+          htmlFor="file-upload-schools"
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-full shadow-sm cursor-pointer transition-colors ${
+            loading ? "bg-green-400 cursor-wait" : "bg-green-600 hover:bg-green-700"
+          }`}
+        >
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          {loading ? 'Processing...' : 'Import Schools'}
+        </label>
+      </div>
     </div>
   );
 }
