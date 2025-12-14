@@ -14,6 +14,7 @@ import { EmailComposeModal, type EmailMode } from "./components/EmailComposeModa
 import { buildTeacherPreCallHtml } from "./emailTemplates/teacherPreCall";
 import { buildTeacherPostCallHtml } from "./emailTemplates/teacherPostCall";
 import { buildAdminUpdateHtml } from "./emailTemplates/adminUpdate";
+import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
 
 const MERGE_SERVER_BASE =
   import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
@@ -519,17 +520,16 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     useState<AmSummarySentMap>({});
 
     
-// --- EMAIL MODAL STATE ---
-// --- EMAIL MODAL STATE ---
- // --- EMAIL MODAL STATE ---
-// --- EMAIL MODAL STATE ---
+
+  // --- EMAIL MODAL STATE ---
   const [emailModalState, setEmailModalState] = useState<{
     isOpen: boolean;
     mode: EmailMode;
     emailType: "pre" | "post" | "admin" | "am" | null;
-    obsId?: string;
+    obsId?: string;     // Single ID
+    obsIds?: string[];  // <--- ✅ ADD THIS (Plural)
     to: string[];
-    cc: string[]; // <--- ADD THIS
+    cc: string[];
     subject: string;
     bodyHtml?: string;
     sandwichData?: { intro: string; tableHtml: string; outro: string };
@@ -539,10 +539,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     emailType: null,
     obsId: undefined,
     to: [],
-    cc: [], // <--- Initialize Empty
+    cc: [],
     subject: "",
   });
-
   // Fetch helpers for email
   const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
     const { data } = await supabase
@@ -686,8 +685,11 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           totalIndicators: total,
           statusColor,
 
-          teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
-          adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
+          // 🔴 FIX: Check BOTH 'teacherWorkbookUrl' and 'teacherSheetUrl'
+          teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? parsed.meta.teacherSheetUrl ?? null,
+          
+          // 🔴 FIX: Do the same for Admin URL just in case
+          adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? parsed.meta.adminSheetUrl ?? null,
 
           meta: parsed.meta ?? {}, 
         });
@@ -1051,29 +1053,75 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
   };
 
   const handleAdminUpdateEmail = async (obs: DashboardObservationRow) => {
+    // 1. Fetch Admin Email
     const adminEmail = await fetchAdminEmail(obs.schoolName, obs.campus);
-    
-    const html = buildAdminUpdateHtml({
-      adminName: "School Admin",
-      schoolName: obs.schoolName,
-      campus: obs.campus,
-      trainerName: user?.email || "GrapeSEED Trainer",
-      teacherName: obs.teacherName,
-      adminWorkbookUrl: obs.adminWorkbookUrl,
-      viewOnlyUrl: obs.adminViewOnlyUrl
+
+    // 2. Identify the Target Month (YYYY-MM) from the clicked observation
+    // obs.date is expected to be "YYYY-MM-DD"
+    const targetMonthPrefix = obs.isoDate ? obs.isoDate.slice(0, 7) : ""; // "2025-12"
+
+    // 3. Find Matches: Same School + Same Month
+    const matches = observations.filter((o) => {
+      if (o.schoolName !== obs.schoolName) return false;
+      if (!o.isoDate) return false;
+      return o.isoDate.startsWith(targetMonthPrefix);
     });
 
+    // 4. Prepare Data
+    let html = "";
+    const isBulk = matches.length > 1;
+
+    // Helper to format month name (e.g. "12/2025")
+    const monthLabel = targetMonthPrefix 
+      ? `${targetMonthPrefix.split("-")[1]}/${targetMonthPrefix.split("-")[0]}`
+      : "Unknown Date";
+
+    if (isBulk) {
+      // BULK MODE
+      html = buildAdminUpdateBulkHtml({
+        adminName: "School Admin",
+        schoolName: obs.schoolName,
+        reportMonth: monthLabel,
+        trainerName: user?.email || "GrapeSEED Trainer",
+        adminWorkbookUrl: obs.adminWorkbookUrl,
+        viewOnlyUrl: obs.adminViewOnlyUrl,
+        teachers: matches.map(m => ({
+          campus: m.campus,
+          teacherName: m.teacherName,
+          unit: m.unit,
+          lesson: m.lesson,
+          dateStr: m.isoDate ? m.isoDate.slice(5) : "" // "12-14"
+        }))
+      });
+    } else {
+      // SINGLE MODE (Legacy)
+      html = buildAdminUpdateHtml({
+        adminName: "School Admin",
+        schoolName: obs.schoolName,
+        campus: obs.campus,
+        trainerName: user?.email || "GrapeSEED Trainer",
+        teacherName: obs.teacherName,
+        adminWorkbookUrl: obs.adminWorkbookUrl,
+        viewOnlyUrl: obs.adminViewOnlyUrl
+      });
+    }
+
+    // 5. Open Modal
     setEmailModalState({
       isOpen: true,
       mode: "simple",
-      emailType: "admin", // <--- 3. Set Type
-      obsId: obs.id, // <--- ✅ PASS THE ID HERE
+      emailType: "admin",
+      obsId: obs.id, // Primary ID
+      obsIds: matches.map(m => m.id), // <--- Track ALL IDs for badging
       to: adminEmail ? [adminEmail] : [],
       cc: [],
-      subject: `GrapeSEED Support Update: ${obs.schoolName}`,
+      subject: isBulk 
+        ? `GrapeSEED Support Update: ${obs.schoolName} (${monthLabel})`
+        : `GrapeSEED Support Update: ${obs.schoolName}`,
       bodyHtml: html,
     });
   };
+
 
   // ✅ MERGE TEACHER HANDLER (Pinning Logic Included)
   const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
@@ -1324,35 +1372,46 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
   // ✅ NEW: Callback when email is sent successfully
   const handleEmailSuccess = async () => {
-    // 1. Get ID from the Email State (Reliable), not the Action Modal (Unreliable)
-    const obsId = emailModalState.obsId; 
+    // 1. Determine targets (Bulk IDs or Single ID)
+    const targetIds = emailModalState.obsIds && emailModalState.obsIds.length > 0
+      ? emailModalState.obsIds
+      : (emailModalState.obsId ? [emailModalState.obsId] : []);
+
     const type = emailModalState.emailType;
 
-    if (!obsId || !type || type === "am") return;
+    if (targetIds.length === 0 || !type || type === "am") return;
 
     const timestamp = new Date().toISOString();
     let metaKey = "";
-
     if (type === "pre") metaKey = "emailSentPre";
     if (type === "post") metaKey = "emailSentPost";
     if (type === "admin") metaKey = "emailSentAdmin";
 
     if (!metaKey) return;
 
-    // 2. Update UI
-    setObservations(prev => prev.map(o => {
-      if (o.id === obsId) {
-        return {
-          ...o,
-          meta: { ...o.meta, [metaKey]: timestamp }
-        };
-      }
-      return o;
-    }));
+    // 2. Update UI (Optimistic Loop)
+    setObservations((prev) =>
+      prev.map((o) => {
+        if (targetIds.includes(o.id)) {
+          return {
+            ...o,
+            meta: { ...o.meta, [metaKey]: timestamp },
+          };
+        }
+        return o;
+      })
+    );
 
-    // 3. Save to DB
-    await persistMergedLinkToObservationMeta(obsId, { [metaKey]: timestamp });
+    // 3. Save to DB (Parallel Loop)
+    // We reuse the robust persist function we fixed earlier
+    await Promise.all(
+      targetIds.map((id) =>
+        persistMergedLinkToObservationMeta(id, { [metaKey]: timestamp })
+      )
+    );
   };
+
+
   /* ------------------------------
       CARD RENDERER
   --------------------------------- */
