@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
+import ImportTeachersBtn from "./components/ImportTeachersBtn";
 
 export interface TeacherRow {
   id: string;
@@ -190,6 +191,7 @@ export const TeachersScreen: React.FC = () => {
 
   // NEW: active row highlight
   const [activeTeacherId, setActiveTeacherId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   if (!user) {
     return (
@@ -253,7 +255,7 @@ export const TeachersScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [trainerId]);
+  }, [trainerId, refreshKey]);
 
   // Search
   const filteredRows = useMemo(() => {
@@ -428,6 +430,11 @@ export const TeachersScreen: React.FC = () => {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Teacher, school, campus…"
               />
+            </div>
+
+            {/* --- ADD THIS NEW GROUP --- */}
+            <div className="toolbar-group">
+               <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
             </div>
 
             <div className="toolbar-group">
