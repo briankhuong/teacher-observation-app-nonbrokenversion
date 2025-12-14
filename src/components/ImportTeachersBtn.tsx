@@ -15,7 +15,7 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not logged in.");
 
-      // 2. Fetch YOUR Schools (to link teachers correctly)
+      // 2. Fetch Schools for Lookup
       const { data: schools, error: schoolErr } = await supabase
         .from('schools')
         .select('id, official_code, school_name, campus_name')
@@ -28,58 +28,102 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
       const rows = await readXlsxFile(file);
       const dataRows = rows.slice(1);
 
-      const teachersToInsert: any[] = [];
+      let rawTeachers: any[] = []; // Changed name to rawTeachers to indicate they aren't clean yet
       const errors: string[] = [];
 
-      // 4. Loop & Match
+      // 4. Loop & Prepare Data
       dataRows.forEach((row, index) => {
-        // Excel Cols: 0=Name, 1=Email, 2=SchoolCode, 3=Campus, 4=WorksheetURL
-        const name = row[0]?.toString().trim();
-        const email = row[1]?.toString().trim();
-        const code = row[2]?.toString().trim();
-        const campus = row[3]?.toString().trim();
-        const url = row[4]?.toString().trim();
+        const name = row[0]?.toString().trim();       
+        const email = row[1]?.toString().trim();      
+        const code = row[2]?.toString().trim();       
+        const campus = row[3]?.toString().trim();     
+        const url = row[4]?.toString().trim();        
 
         if (!name || !code || !campus) {
            errors.push(`Row ${index + 2}: Missing Name, Code, or Campus.`);
            return;
         }
 
-        // --- THE LOOKUP LOGIC ---
-        // Find a school that matches BOTH the Code AND the Campus Name
         const matchedSchool = schools.find(s => 
             s.official_code?.toLowerCase() === code.toLowerCase() &&
             s.campus_name?.toLowerCase() === campus.toLowerCase()
         );
 
         if (matchedSchool) {
-          teachersToInsert.push({
-            trainer_id: user.id,
-            name: name,
+          rawTeachers.push({
+            trainer_id: user.id,            
+            name: name,                     
+            school_name: matchedSchool.school_name, 
+            campus: campus,                 
             email: email || null,
-            school_id: matchedSchool.id,        // LINKED UUID
-            school_name: matchedSchool.school_name, // COPIED TEXT (For easier display)
-            campus: campus,                     // COPIED TEXT
-            worksheet_url: url || null
+            worksheet_url: url || null,
+            school_id: matchedSchool.id,    
+            updated_at: new Date().toISOString()
           });
         } else {
-          errors.push(`Row ${index + 2}: No match for Code "${code}" + Campus "${campus}"`);
+          errors.push(`Row ${index + 2}: School Code "${code}" + Campus "${campus}" not found.`);
         }
       });
 
-      // 5. Report Errors
+      // --- NEW LOGIC STARTS HERE ---
+
+      // 5. Smart Deduplication
+      // Goal: If Name+Email+Campus are identical, keep the one with the workbook link.
+
+      // A. Sort so rows with 'worksheet_url' come FIRST. 
+      // This ensures that when we dedup, the "good" row is the one we keep.
+      rawTeachers.sort((a, b) => {
+          // If a has url and b doesn't, a comes first (-1)
+          if (a.worksheet_url && !b.worksheet_url) return -1;
+          // If b has url and a doesn't, b comes first (1)
+          if (!a.worksheet_url && b.worksheet_url) return 1;
+          return 0;
+      });
+
+      // B. Filter using a Map to ensure Uniqueness
+      const uniqueMap = new Map();
+      const teachersToUpsert: any[] = [];
+
+      for (const teacher of rawTeachers) {
+          // Create a unique key based on your criteria: Name + Email + Campus
+          // We use lowerCase to avoid "John" vs "john" duplicates
+          const uniqueKey = `${teacher.name}-${teacher.email || 'no-email'}-${teacher.campus}`.toLowerCase();
+
+          if (!uniqueMap.has(uniqueKey)) {
+              uniqueMap.set(uniqueKey, true); // Mark as seen
+              teachersToUpsert.push(teacher); // Add to final list
+          }
+          // If uniqueMap HAS the key, we skip this row. 
+          // Since we sorted above, we are skipping the "worse" version (the one without the link).
+      }
+      
+      const duplicateCount = rawTeachers.length - teachersToUpsert.length;
+
+      // --- NEW LOGIC ENDS HERE ---
+
+      // 6. Report Errors (Optional stop)
       if (errors.length > 0) {
-        alert(`Found ${errors.length} issues:\n` + errors.slice(0, 5).join('\n') + (errors.length > 5 ? '\n...' : ''));
-        const proceed = confirm(`We found ${teachersToInsert.length} valid teachers and ${errors.length} errors. Import the valid ones?`);
-        if (!proceed) return;
+        const proceed = confirm(`Found ${rawTeachers.length} rows (${duplicateCount} duplicates removed) and ${errors.length} errors.\n\nFirst error: ${errors[0]}\n\nProceed with valid rows?`);
+        if (!proceed) {
+            setLoading(false);
+            e.target.value = ''; 
+            return;
+        }
       }
 
-      // 6. Insert Valid Data
-      if (teachersToInsert.length > 0) {
-        const { error } = await supabase.from('teachers').insert(teachersToInsert);
+      // 7. UPSERT
+      if (teachersToUpsert.length > 0) {
+        const { error } = await supabase
+          .from('teachers')
+          .upsert(teachersToUpsert, { 
+            // ⚠️ Ensure this constraint exists in Supabase: (trainer_id, name, school_name, campus)
+            onConflict: 'trainer_id, name, school_name, campus' 
+          });
+
         if (error) throw error;
         
-        alert(`Successfully imported ${teachersToInsert.length} teachers!`);
+        // Updated Alert message to show user what happened
+        alert(`Success! Imported ${teachersToUpsert.length} teachers.\n(Automatically removed ${duplicateCount} duplicates)`);
         onUploadComplete();
       } else {
         alert("No valid teachers found to import.");
@@ -111,7 +155,7 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
             </label>
         </div>
         <p className="text-xs text-gray-500">
-            *Must match School Code & Campus exactly
+            *Use exact Name & Campus to update existing
         </p>
     </div>
   );
