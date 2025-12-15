@@ -1193,7 +1193,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     }
   };
 
-// ✅ MERGE ADMIN HANDLER (With 60s Timeout Protection)
+// ✅ CLIENT-SIDE MERGE ADMIN HANDLER (Fixed UI Update)
   const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     setMergingAdminId(obs.id);
     setActionModal(null);
@@ -1205,7 +1205,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     const adminWorkbookUrl = obs.adminWorkbookUrl;
     if (!adminWorkbookUrl) { alert("Admin workbook URL not found."); setMergingAdminId(null); return; }
 
-    // Resolve School ID (needed for DB updates, not for Excel)
+    // Resolve School ID
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
     if (!schoolId) {
       try {
@@ -1224,7 +1224,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
       const sheetName = buildAdminSheetName(obs);
 
-      // 🚀 4. RUN CLIENT MERGE (iPad/Laptop Logic)
+      // 🚀 4. RUN CLIENT MERGE
       const result = await clientMergeAdminSheet({
         token: graphToken,
         workbookUrl: adminWorkbookUrl,
@@ -1234,18 +1234,30 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
       // 5. Success: Update Database
       const mergedAt = new Date().toISOString();
+      const newViewUrl = obs.adminViewOnlyUrl || result.viewUrl; // Capture the URL here
+
       const patch = {
         mergedAdmin: { url: result.sheetUrl, sheetName: result.sheetName, mergedAt },
         adminWorkbookUrl,
-        adminWorkbookViewUrl: obs.adminViewOnlyUrl || result.viewUrl, // Keep existing if valid
+        adminWorkbookViewUrl: newViewUrl, // Save to DB
         schoolId,
       };
 
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
-      // Update UI
+      // 6. Update UI (The Fix is Here)
       setObservations((prev) =>
-        prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, adminWorkbookUrl } : o))
+        prev.map((o) => 
+          o.id === obs.id 
+            ? { 
+                ...o, 
+                meta: nextMeta, 
+                adminWorkbookUrl, 
+                // ✅ FIX: Explicitly update the view link in local state so the button appears!
+                adminViewOnlyUrl: newViewUrl 
+              } 
+            : o
+        )
       );
 
       setRecentMergePanel({
