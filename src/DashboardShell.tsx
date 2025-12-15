@@ -499,6 +499,10 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const [searchText, setSearchText] = useState("");
   const [recentMergePanel, setRecentMergePanel] =
    useState<RecentMergePanel>(null);
+// NEW: State for tracking Merge process status (Add these two lines)
+  const [isMergingTeacher, setIsMergingTeacher] = useState(false);
+  const [isMergingAdmin, setIsMergingAdmin] = useState(false);
+
 
   // NEW: central modal state for Teacher/Admin actions
   const [actionModal, setActionModal] = useState<{
@@ -1124,7 +1128,10 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
 
   // ✅ MERGE TEACHER HANDLER (Pinning Logic Included)
-  const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+  // ✅ MERGE TEACHER HANDLER (Pinning Logic Included)
+const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+    // 🎯 START: Set Loading State to TRUE
+    setIsMergingTeacher(true); 
     console.log("=====================================================");
     console.log("[MERGE teacher] obs:", obs);
 
@@ -1134,6 +1141,8 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       alert(
         "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
       );
+      // Ensure state is reset if we exit early
+      setIsMergingTeacher(false);
       return;
     }
 
@@ -1142,6 +1151,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
     if (!workbookUrl) {
       alert("Teacher workbook URL not found. Please ensure the teacher is set up in the database.");
+      setIsMergingTeacher(false);
       return;
     }
 
@@ -1155,6 +1165,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     } catch (e: any) {
       console.error("[MERGE teacher] getGraphAccessToken failed", e);
       alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
+      setIsMergingTeacher(false); // Reset on Graph token failure
       return;
     }
 
@@ -1186,7 +1197,6 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       console.log("[Dashboard] merge-teacher response", json);
 
       // Warning for "File Locked"
-      // Warning for "File Locked"
       if (!resp.ok || !json.ok) {
         const errorMsg = String(json.error || json.message || "");
         if (
@@ -1195,13 +1205,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
           resp.status === 423
         ) {
           alert(
-            // 🟢 REVISED DIALOGUE FOR FILE LOCK
-            "⚠️ FILE LOCK ERROR: Report Cannot Be Saved\n\n" +
-            "The Microsoft Excel file is currently open and locked by another user or session.\n\n" +
-            "To successfully merge the data:\n" +
-            "1. Close the Excel file (in all browser tabs/apps).\n" +
-            "2. Wait 10 seconds for Microsoft's lock to clear.\n" +
-            "3. Try the merge again."
+            "⚠️ FILE LOCK ERROR: Report Cannot Be Saved\n\nThe Microsoft Excel file is currently open and locked by another user or session.\n\nTo successfully merge the data:\n1. Close the Excel file (in all browser tabs/apps).\n2. Wait 10 seconds for Microsoft's lock to clear.\n3. Try the merge again."
           );
           return;
         }
@@ -1240,6 +1244,9 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     } catch (err: any) {
       console.error("[Dashboard] merge-teacher error", err);
       alert(`Teacher merge failed: ${err.message}`);
+    } finally {
+      // 🎯 END: Set Loading State to FALSE
+      setIsMergingTeacher(false);
     }
   };
 
@@ -1248,7 +1255,11 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
   // Assuming MERGE_SERVER_BASE is defined here:
 // const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
 
-const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+// ✅ MERGE ADMIN HANDLER (Pinning Logic Included)
+// ✅ MERGE ADMIN HANDLER (Fixed: Missing variables restored)
+  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+    // 🎯 START: Set Loading State to TRUE
+    setIsMergingAdmin(true);
     console.log("=====================================================");
     console.log("[MERGE admin] obs:", obs);
 
@@ -1257,6 +1268,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
       alert(
         "Missing local observation data (localStorage).\nOpen this observation once in Workspace, then try Merge again."
       );
+      setIsMergingAdmin(false); // Reset state
       return;
     }
 
@@ -1265,10 +1277,15 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
 
     if (!adminWorkbookUrl) {
       alert("This observation's school does not have an admin workbook URL set yet.");
+      setIsMergingAdmin(false); // Reset state
       return;
     }
 
-    // We still need schoolId for the backend logic (optional but good)
+    // ---------------------------------------------------------
+    // 🟢 RESTORED LOGIC: Define schoolId and sheetName
+    // ---------------------------------------------------------
+    
+    // We still need schoolId for the backend logic
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
 
     if (!schoolId) {
@@ -1285,6 +1302,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     }
 
     const sheetName = buildAdminSheetName(obs);
+    // ---------------------------------------------------------
 
     let graphToken = "";
     try {
@@ -1292,6 +1310,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     } catch (e: any) {
       console.error("[MERGE admin] getGraphAccessToken failed", e);
       alert(e?.message || "Microsoft not connected. Click Connect Microsoft first.");
+      setIsMergingAdmin(false); // Reset state
       return;
     }
 
@@ -1301,10 +1320,10 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
 
     const body = {
       workbookUrl: adminWorkbookUrl,
-      sheetName,
+      sheetName, // Now defined!
       model: adminModel,
       observationId: obs.id,
-      schoolId,
+      schoolId,  // Now defined!
     };
 
     try {
@@ -1324,34 +1343,26 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
       console.log("[Dashboard] merge-admin response", json);
 
       // -----------------------------------------------------------
-      // 🟢 FILE LOCK/FAILURE CHECK (REVISED LOGIC)
+      // 🟢 FILE LOCK/FAILURE CHECK
       // -----------------------------------------------------------
       if (!resp.ok || !json.ok) {
         const errorMsg = String(json.error || json.message || "");
-        
+
         // Check for File Locked errors (423 is HTTP code for Locked)
         if (
-          errorMsg.includes("Locked") || 
-          errorMsg.includes("LOCKED") || 
+          errorMsg.includes("Locked") ||
+          errorMsg.includes("LOCKED") ||
           resp.status === 423
         ) {
           alert(
-            // REVISED DIALOGUE FOR FILE LOCK
-            "⚠️ FILE LOCK ERROR: Admin Report Cannot Be Saved\n\n" +
-            "The Admin Excel file is currently open and locked by another user or session.\n\n" +
-            "To successfully merge the data:\n" +
-            "1. Close the Excel file (in all browser tabs/apps).\n" +
-            "2. Wait 10 seconds for Microsoft's lock to clear.\n" +
-            "3. Try the merge again."
+            "⚠️ FILE LOCK ERROR: Admin Report Cannot Be Saved\n\nThe Admin Excel file is currently open and locked by another user or session.\n\nTo successfully merge the data:\n1. Close the Excel file (in all browser tabs/apps).\n2. Wait 10 seconds for Microsoft's lock to clear.\n3. Try the merge again."
           );
-          return; // Exit the function gracefully after alert
+          return; // Exit gracefully
         }
-        
-        // If not a lock error, throw a standard error for the catch block
+
+        // If not a lock error, throw a standard error
         throw new Error(errorMsg || `HTTP ${resp.status}`);
       }
-      // -----------------------------------------------------------
-      // END FILE LOCK CHECK
       // -----------------------------------------------------------
 
       const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
@@ -1392,12 +1403,15 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
           obs.adminViewOnlyUrl || "(missing)"
         }`
       );
-    } catch (err: any) { // This catches the network error or the custom error thrown above
+    } catch (err: any) {
       console.error("[Dashboard] merge-admin error", err);
-      // Fallback alert for unexpected errors
       alert(`Admin merge failed: ${err.message || "Unknown error."}`);
+    } finally {
+      // 🎯 END: Set Loading State to FALSE
+      setIsMergingAdmin(false);
     }
   };
+
 
   // NEW: toggle group expanded/collapsed
   const toggleGroupExpanded = (key: string) => {
@@ -1870,28 +1884,52 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
                   >
                     Post call email
                   </button>
+                  {/* TEACHER BUTTON */}
                   <button
                     type="button"
                     className="btn"
+                    // 1. Disable button while merging to prevent double-clicks
+                    disabled={isMergingTeacher} 
                     onClick={() => {
-                      setActionModal(null);
+                      // Note: We do NOT close the modal immediately so the user can see the spinner.
+                      // If you want the modal to close instantly, keep setActionModal(null).
+                      // But usually, you want them to see it spinning.
                       handleMergeTeacherWorkbook(modalObservation);
+                      setActionModal(null); // Optional: Close modal immediately or let success/fail alerts handle flow.
                     }}
                   >
-                    Merge teacher workbook
+                    {/* 2. Show Spinner if merging, otherwise show normal text */}
+                    {isMergingTeacher ? (
+                      <>
+                        {/* If you don't have FontAwesome, remove the <i> tag and just use text */}
+                        <i className="fa fa-spinner fa-spin" style={{ marginRight: '8px' }}></i>
+                        Merging...
+                      </>
+                    ) : (
+                      "Merge teacher workbook"
+                    )}
                   </button>
                 </>
               ) : (
                 <>
+                  {/* ADMIN BUTTON */}
                   <button
                     type="button"
                     className="btn"
+                    disabled={isMergingAdmin}
                     onClick={() => {
-                      setActionModal(null);
                       handleMergeAdminWorkbook(modalObservation);
+                      setActionModal(null);
                     }}
                   >
-                    Merge admin workbook
+                    {isMergingAdmin ? (
+                      <>
+                        <i className="fa fa-spinner fa-spin" style={{ marginRight: '8px' }}></i>
+                        Merging...
+                      </>
+                    ) : (
+                      "Merge admin workbook"
+                    )}
                   </button>
                   <button
                     type="button"
