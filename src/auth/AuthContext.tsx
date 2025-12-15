@@ -79,11 +79,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   // ----------------------------
   // Sign-in with Azure
   // ----------------------------
-  const signInWithAzure = async () => {
+  // const signInWithAzure = async () => {
+  //   setLoading(true);
+    
+  //   // 🟢 FINAL FIX: Explicitly set the production redirect URL when available.
+  //   // This is the variable set in Vercel to your live domain.
+  //   const redirectUrl = import.meta.env.VITE_AZURE_REDIRECT_URI_PROD 
+  //       ? import.meta.env.VITE_AZURE_REDIRECT_URI_PROD as string 
+  //       : window.location.origin;
+
+  //   const { error } = await supabase.auth.signInWithOAuth({
+  //     provider: "azure",
+  //     options: {
+  //       // Pass the explicit Vercel URL or the local origin
+  //       redirectTo: redirectUrl, 
+        
+  //       // Standard scopes for reading user profile/email
+  //       scopes: "openid email profile offline_access User.Read Mail.Send",
+  //     },
+  //   });
+
+  //   if (error) {
+  //     console.error("[Auth] Azure sign-in error:", error);
+  //     alert("Could not sign in. Please try again.");
+  //     setLoading(false);
+  //   }
+  // };
+
+  // AuthContext
+
+const signInWithAzure = async () => {
     setLoading(true);
     
-    // 🟢 FINAL FIX: Explicitly set the production redirect URL when available.
-    // This is the variable set in Vercel to your live domain.
     const redirectUrl = import.meta.env.VITE_AZURE_REDIRECT_URI_PROD 
         ? import.meta.env.VITE_AZURE_REDIRECT_URI_PROD as string 
         : window.location.origin;
@@ -91,11 +118,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "azure",
       options: {
-        // Pass the explicit Vercel URL or the local origin
         redirectTo: redirectUrl, 
         
         // Standard scopes for reading user profile/email
         scopes: "openid email profile offline_access User.Read Mail.Send",
+        
+        // 🎯 THE FIX: Place the 'prompt' parameter inside 'queryParams'
+        queryParams: {
+            prompt: 'select_account', 
+        },
       },
     });
 
