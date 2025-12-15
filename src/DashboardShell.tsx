@@ -1245,7 +1245,10 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
 
   // ✅ MERGE ADMIN HANDLER (Pinning Logic Included)
-  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+  // Assuming MERGE_SERVER_BASE is defined here:
+// const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
+
+const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     console.log("=====================================================");
     console.log("[MERGE admin] obs:", obs);
 
@@ -1266,7 +1269,6 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     }
 
     // We still need schoolId for the backend logic (optional but good)
-    // We can fetch it or trust it's in meta. Let's do a quick lookup to be safe or rely on meta.
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
 
     if (!schoolId) {
@@ -1308,6 +1310,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     try {
       console.log("[Dashboard] Calling /api/merge-admin with", body);
 
+      // Ensure MERGE_SERVER_BASE is available in scope
       const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
         method: "POST",
         headers: {
@@ -1320,7 +1323,36 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       const json = await resp.json();
       console.log("[Dashboard] merge-admin response", json);
 
-      if (!resp.ok || !json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+      // -----------------------------------------------------------
+      // 🟢 FILE LOCK/FAILURE CHECK (REVISED LOGIC)
+      // -----------------------------------------------------------
+      if (!resp.ok || !json.ok) {
+        const errorMsg = String(json.error || json.message || "");
+        
+        // Check for File Locked errors (423 is HTTP code for Locked)
+        if (
+          errorMsg.includes("Locked") || 
+          errorMsg.includes("LOCKED") || 
+          resp.status === 423
+        ) {
+          alert(
+            // REVISED DIALOGUE FOR FILE LOCK
+            "⚠️ FILE LOCK ERROR: Admin Report Cannot Be Saved\n\n" +
+            "The Admin Excel file is currently open and locked by another user or session.\n\n" +
+            "To successfully merge the data:\n" +
+            "1. Close the Excel file (in all browser tabs/apps).\n" +
+            "2. Wait 10 seconds for Microsoft's lock to clear.\n" +
+            "3. Try the merge again."
+          );
+          return; // Exit the function gracefully after alert
+        }
+        
+        // If not a lock error, throw a standard error for the catch block
+        throw new Error(errorMsg || `HTTP ${resp.status}`);
+      }
+      // -----------------------------------------------------------
+      // END FILE LOCK CHECK
+      // -----------------------------------------------------------
 
       const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
       const mergedAt = new Date().toISOString();
@@ -1360,9 +1392,10 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
           obs.adminViewOnlyUrl || "(missing)"
         }`
       );
-    } catch (err) {
+    } catch (err: any) { // This catches the network error or the custom error thrown above
       console.error("[Dashboard] merge-admin error", err);
-      alert("Admin merge failed – check the console for details.");
+      // Fallback alert for unexpected errors
+      alert(`Admin merge failed: ${err.message || "Unknown error."}`);
     }
   };
 
