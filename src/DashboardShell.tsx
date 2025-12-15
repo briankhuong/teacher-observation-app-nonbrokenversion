@@ -1127,7 +1127,8 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
 
 // ✅ MERGE TEACHER HANDLER (ID-Based Progress)
-const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+// ✅ MERGE TEACHER HANDLER (With 60s Timeout Protection)
+  const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     // 🎯 START: Track this specific ID
     setMergingTeacherId(obs.id);
     
@@ -1179,7 +1180,13 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       observationId: obs.id,
     };
 
+    // 🟢 NEW: Set a 60-second timer
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds
+
     try {
+      console.log("[Dashboard] Calling /api/merge-teacher with", body);
+
       const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
         method: "POST",
         headers: {
@@ -1187,7 +1194,11 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
           Authorization: `Bearer ${graphToken}`,
         },
         body: JSON.stringify(body),
+        signal: controller.signal, // 🟢 Connect the timer to the fetch
       });
+
+      // Clear the timer immediately if we get a response
+      clearTimeout(timeoutId);
 
       const json = await resp.json();
 
@@ -1195,7 +1206,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       if (!resp.ok || !json.ok) {
         const errorMsg = String(json.error || json.message || "");
         if (errorMsg.includes("Locked") || errorMsg.includes("LOCKED") || resp.status === 423) {
-          alert("⚠️ FILE LOCK ERROR: Excel file is open elsewhere. Please close it and try again.");
+          alert("⚠️ FILE LOCK ERROR: Excel file is open elsewhere.\n\nTip: Open the file in Excel Online manually, then close it to reset the lock.");
           return;
         }
         throw new Error(errorMsg || `HTTP ${resp.status}`);
@@ -1227,37 +1238,42 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 
     } catch (err: any) {
       console.error("[Dashboard] merge-teacher error", err);
-      alert(`Teacher merge failed: ${err.message}`);
+      
+      // 🟢 Specific Error for Timeout
+      if (err.name === 'AbortError') {
+        alert("⚠️ TIMEOUT ERROR: The server took too long to respond (over 60s).\n\nPossible reasons:\n1. The Excel file is locked by a 'ghost' user.\n2. Microsoft Graph is running slowly.\n\nTry opening the Excel file manually to clear any locks.");
+      } else {
+        alert(`Teacher merge failed: ${err.message}`);
+      }
     } finally {
+      clearTimeout(timeoutId); // Safety clear
       // 🎯 END: Reset ID
       setMergingTeacherId(null);
     }
   };
 
 
-// ✅ MERGE ADMIN HANDLER (ID-Based Progress)
-const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
-    // 🎯 START: Track this specific ID
+// ✅ MERGE ADMIN HANDLER (With 60s Timeout Protection)
+  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     setMergingAdminId(obs.id);
-    
-    // Close modal immediately
-    setActionModal(null);
+    setActionModal(null); // Close modal immediately
 
+    // 1. Basic Checks
     const full = loadFullObservation(obs.id);
     if (!full) {
       alert("Missing local observation data.");
-      setMergingAdminId(null); // Reset
+      setMergingAdminId(null); 
       return;
     }
 
     const adminWorkbookUrl = obs.adminWorkbookUrl;
     if (!adminWorkbookUrl) {
       alert("Admin workbook URL not found.");
-      setMergingAdminId(null); // Reset
+      setMergingAdminId(null); 
       return;
     }
 
-    // Define School ID and Sheet Name
+    // 2. Resolve School ID
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
     if (!schoolId) {
       try {
@@ -1267,16 +1283,18 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     }
     const sheetName = buildAdminSheetName(obs);
 
+    // 3. Get Token
     let graphToken = "";
     try {
       graphToken = await getGraphAccessToken();
     } catch (e: any) {
       console.error("[MERGE admin] Graph token failed", e);
       alert(e?.message || "Microsoft not connected.");
-      setMergingAdminId(null); // Reset
+      setMergingAdminId(null);
       return;
     }
 
+    // 4. Prepare Body
     const exportMeta = toMetaForExport(full, obs);
     const exportIndicators = toIndicatorsForExport(full);
     const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
@@ -1289,7 +1307,13 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
       schoolId,
     };
 
+    // 🟢 NEW: Set a 60-second timer
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds
+
     try {
+      console.log("[Dashboard] Calling /api/merge-admin with", body);
+
       const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
         method: "POST",
         headers: {
@@ -1297,20 +1321,25 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
           Authorization: `Bearer ${graphToken}`,
         },
         body: JSON.stringify(body),
+        signal: controller.signal, // 🟢 Connect the timer to the fetch
       });
+
+      // Clear the timer if it finishes in time
+      clearTimeout(timeoutId);
 
       const json = await resp.json();
 
-      // File Lock Check
+      // File Lock / Error Check
       if (!resp.ok || !json.ok) {
         const errorMsg = String(json.error || json.message || "");
         if (errorMsg.includes("Locked") || errorMsg.includes("LOCKED") || resp.status === 423) {
-           alert("⚠️ FILE LOCK ERROR: Excel file is open elsewhere. Please close it and try again.");
+           alert("⚠️ FILE LOCK ERROR: Excel file is open elsewhere.\n\nTip: Open the file in Excel Online manually, then close it to reset the lock.");
            return;
         }
         throw new Error(errorMsg || `HTTP ${resp.status}`);
       }
 
+      // Success Logic
       const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
       const mergedAt = new Date().toISOString();
 
@@ -1339,10 +1368,16 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
 
     } catch (err: any) {
       console.error("[Dashboard] merge-admin error", err);
-      alert(`Admin merge failed: ${err.message}`);
+      
+      // 🟢 Specific Error for Timeout
+      if (err.name === 'AbortError') {
+        alert("⚠️ TIMEOUT ERROR: The server took too long to respond (over 60s).\n\nPossible reasons:\n1. The Excel file is locked by a 'ghost' user.\n2. Microsoft Graph is running slowly.\n\nTry opening the Excel file manually to clear any locks.");
+      } else {
+        alert(`Admin merge failed: ${err.message}`);
+      }
     } finally {
-      // 🎯 END: Reset ID
-      setMergingAdminId(null);
+      clearTimeout(timeoutId); // Safety clear
+      setMergingAdminId(null); // 🎯 END: Reset UI (Stop the loading bar)
     }
   };
 
