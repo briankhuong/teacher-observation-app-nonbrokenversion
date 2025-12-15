@@ -1183,7 +1183,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         mergedAt,
       });
 
-      alert("Teacher merge succeeded (Client-Side)!");
+      alert("Teacher merge succeeded!");
 
     } catch (err: any) {
       console.error("Client merge error:", err);
@@ -1256,7 +1256,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         mergedAt,
       });
 
-      alert("Admin merge succeeded (Client-Side)!");
+      alert("Admin merge succeeded!");
 
     } catch (err: any) {
       console.error("Client admin merge error:", err);
