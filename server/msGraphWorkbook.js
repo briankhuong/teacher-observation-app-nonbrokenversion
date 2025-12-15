@@ -167,6 +167,9 @@ export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileBuffer);
 
+  const templateSheet = wb.getWorksheet("_TEMPLATE");
+  if (templateSheet) cleanWorksheet(templateSheet);
+
   let finalName = excelSafeSheetName(sheetName);
   let counter = 2;
   while (wb.getWorksheet(finalName)) {
@@ -213,6 +216,10 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileBuffer);
 
+  // 🟢 NEW: Clean the template
+  const adminTemplate = wb.getWorksheet("_ADMIN_TEMPLATE");
+  if (adminTemplate) cleanWorksheet(adminTemplate);
+
   let finalName = excelSafeSheetName(sheetName);
   let counter = 2;
   while (wb.getWorksheet(finalName)) {
@@ -251,4 +258,28 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
     itemId: uploadResult.id,
     formattingWarning: uploadResult.warning || null
   };
+}
+
+// 🧹 HELPER: Remove "Ghost" Rows to fix slow performance
+function cleanWorksheet(worksheet) {
+  // 1. Find the real last row with actual text/numbers
+  let realLastRow = 1;
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (row.hasValues) {
+      realLastRow = rowNumber;
+    }
+  });
+
+  // 2. Identify the "Ghost" Zone (rows that exist but have no data)
+  const rowCount = worksheet.rowCount;
+
+  // If we have more than 5 empty rows at the end, delete them
+  if (rowCount > realLastRow + 5) {
+    const rowsToDelete = rowCount - (realLastRow + 5);
+    if (rowsToDelete > 0) {
+      console.log(`[Cleanup] Deleting ${rowsToDelete} empty 'ghost' rows (detected last data at ${realLastRow}).`);
+      // ExcelJS spliceRows is the magic command
+      worksheet.spliceRows(realLastRow + 5, rowsToDelete);
+    }
+  }
 }
