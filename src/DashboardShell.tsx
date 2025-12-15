@@ -15,9 +15,13 @@ import { buildTeacherPreCallHtml } from "./emailTemplates/teacherPreCall";
 import { buildTeacherPostCallHtml } from "./emailTemplates/teacherPostCall";
 import { buildAdminUpdateHtml } from "./emailTemplates/adminUpdate";
 import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
+// Update the import to include the Admin function
+import { clientMergeTeacherSheet, clientMergeAdminSheet } from './utils/clientExcelMerge';
 
-// Force empty string to ensure we use the Proxy
-const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
+// ✅ NEW SAFE VERSION:
+// 1. Try to get the URL from the Environment (Vercel/Render)
+// 2. If missing, automatically fallback to "http://localhost:4000" for local testing
+const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
 
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
 const STORAGE_PREFIX = "obs-v1-";
@@ -1128,152 +1132,81 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
 
 // ✅ MERGE TEACHER HANDLER (With 60s Timeout Protection)
+
+// ✅ CLIENT-SIDE MERGE HANDLER
   const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
-    // 🎯 START: Track this specific ID
     setMergingTeacherId(obs.id);
-    
-    // Close modal immediately so user sees the dashboard card
-    setActionModal(null); 
+    setActionModal(null);
 
-    console.log("=====================================================");
-    console.log("[MERGE teacher] obs:", obs);
-
-    // 0) Load full observation
+    // 1. Basic Validation
     const full = loadFullObservation(obs.id);
-    if (!full) {
-      alert("Missing local observation data (localStorage).");
-      setMergingTeacherId(null); // Reset
-      return;
-    }
-
-    // 1) Resolve teacher workbook URL
+    if (!full) { alert("Missing data"); setMergingTeacherId(null); return; }
+    
     const workbookUrl = obs.teacherWorkbookUrl;
-    if (!workbookUrl) {
-      alert("Teacher workbook URL not found.");
-      setMergingTeacherId(null); // Reset
-      return;
-    }
-
-    // 2) Sheet name
-    const sheetName = buildTeacherSheetName(obs);
-
-    // 3) Graph token
-    let graphToken = "";
-    try {
-      graphToken = await getGraphAccessToken();
-    } catch (e: any) {
-      console.error("[MERGE teacher] Graph token failed", e);
-      alert(e?.message || "Microsoft not connected.");
-      setMergingTeacherId(null); // Reset
-      return;
-    }
-
-    // 4) Build REAL export model
-    const exportMeta = toMetaForExport(full, obs);
-    const exportIndicators = toIndicatorsForExport(full);
-    const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
-
-    const body = {
-      workbookUrl,
-      sheetName,
-      model: teacherModel,
-      observationId: obs.id,
-    };
-
-    // 🟢 NEW: Set a 60-second timer
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds
+    if (!workbookUrl) { alert("No Workbook URL"); setMergingTeacherId(null); return; }
 
     try {
-      console.log("[Dashboard] Calling /api/merge-teacher with", body);
+      // 2. Get Token
+      const graphToken = await getGraphAccessToken();
 
-      const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-teacher`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${graphToken}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal, // 🟢 Connect the timer to the fetch
+      // 3. Prepare Data
+      const exportMeta = toMetaForExport(full, obs);
+      const exportIndicators = toIndicatorsForExport(full);
+      const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
+
+      // 🚀 4. RUN CLIENT MERGE (No Server!)
+      const result = await clientMergeTeacherSheet({
+        token: graphToken,
+        workbookUrl,
+        sheetName: buildTeacherSheetName(obs),
+        model: teacherModel
       });
 
-      // Clear the timer immediately if we get a response
-      clearTimeout(timeoutId);
-
-      const json = await resp.json();
-
-      // File Lock Check
-      if (!resp.ok || !json.ok) {
-        const errorMsg = String(json.error || json.message || "");
-        if (errorMsg.includes("Locked") || errorMsg.includes("LOCKED") || resp.status === 423) {
-          alert("⚠️ FILE LOCK ERROR: Excel file is open elsewhere.\n\nTip: Open the file in Excel Online manually, then close it to reset the lock.");
-          return;
-        }
-        throw new Error(errorMsg || `HTTP ${resp.status}`);
-      }
-
-      const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
+      // 5. Success: Update Database
       const mergedAt = new Date().toISOString();
-
       const patch = {
-        mergedTeacher: { url: sheetUrl, sheetName: json.sheetName || sheetName, mergedAt },
+        mergedTeacher: { url: result.sheetUrl, sheetName: result.sheetName, mergedAt },
         teacherWorkbookUrl: workbookUrl,
       };
 
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
+      // Update UI
       setObservations((prev) =>
-        prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, teacherWorkbookUrl: workbookUrl } : o))
+        prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta } : o))
       );
 
       setRecentMergePanel({
         obsId: obs.id,
         kind: "teacher",
-        sheetUrl,
-        sheetName: json.sheetName || sheetName,
+        sheetUrl: result.sheetUrl,
+        sheetName: result.sheetName,
         mergedAt,
       });
 
-      alert(`Teacher merge succeeded!`);
+      alert("Teacher merge succeeded (Client-Side)!");
 
     } catch (err: any) {
-      console.error("[Dashboard] merge-teacher error", err);
-      
-      // 🟢 Specific Error for Timeout
-      if (err.name === 'AbortError') {
-        alert("⚠️ TIMEOUT ERROR: The server took too long to respond (over 60s).\n\nPossible reasons:\n1. The Excel file is locked by a 'ghost' user.\n2. Microsoft Graph is running slowly.\n\nTry opening the Excel file manually to clear any locks.");
-      } else {
-        alert(`Teacher merge failed: ${err.message}`);
-      }
+      console.error("Client merge error:", err);
+      alert(`Merge failed: ${err.message}`);
     } finally {
-      clearTimeout(timeoutId); // Safety clear
-      // 🎯 END: Reset ID
       setMergingTeacherId(null);
     }
   };
 
-
 // ✅ MERGE ADMIN HANDLER (With 60s Timeout Protection)
   const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     setMergingAdminId(obs.id);
-    setActionModal(null); // Close modal immediately
+    setActionModal(null);
 
-    // 1. Basic Checks
+    // 1. Basic Validation
     const full = loadFullObservation(obs.id);
-    if (!full) {
-      alert("Missing local observation data.");
-      setMergingAdminId(null); 
-      return;
-    }
+    if (!full) { alert("Missing local data"); setMergingAdminId(null); return; }
 
     const adminWorkbookUrl = obs.adminWorkbookUrl;
-    if (!adminWorkbookUrl) {
-      alert("Admin workbook URL not found.");
-      setMergingAdminId(null); 
-      return;
-    }
+    if (!adminWorkbookUrl) { alert("Admin workbook URL not found."); setMergingAdminId(null); return; }
 
-    // 2. Resolve School ID
+    // Resolve School ID (needed for DB updates, not for Excel)
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
     if (!schoolId) {
       try {
@@ -1281,103 +1214,56 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         if (data?.[0]) schoolId = data[0].id;
       } catch {}
     }
-    const sheetName = buildAdminSheetName(obs);
-
-    // 3. Get Token
-    let graphToken = "";
-    try {
-      graphToken = await getGraphAccessToken();
-    } catch (e: any) {
-      console.error("[MERGE admin] Graph token failed", e);
-      alert(e?.message || "Microsoft not connected.");
-      setMergingAdminId(null);
-      return;
-    }
-
-    // 4. Prepare Body
-    const exportMeta = toMetaForExport(full, obs);
-    const exportIndicators = toIndicatorsForExport(full);
-    const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
-
-    const body = {
-      workbookUrl: adminWorkbookUrl,
-      sheetName,
-      model: adminModel,
-      observationId: obs.id,
-      schoolId,
-    };
-
-    // 🟢 NEW: Set a 60-second timer
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds
 
     try {
-      console.log("[Dashboard] Calling /api/merge-admin with", body);
+      // 2. Get Token
+      const graphToken = await getGraphAccessToken();
 
-      const resp = await fetch(`${MERGE_SERVER_BASE}/api/merge-admin`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${graphToken}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal, // 🟢 Connect the timer to the fetch
+      // 3. Prepare Data
+      const exportMeta = toMetaForExport(full, obs);
+      const exportIndicators = toIndicatorsForExport(full);
+      const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
+      const sheetName = buildAdminSheetName(obs);
+
+      // 🚀 4. RUN CLIENT MERGE (iPad/Laptop Logic)
+      const result = await clientMergeAdminSheet({
+        token: graphToken,
+        workbookUrl: adminWorkbookUrl,
+        sheetName,
+        model: adminModel
       });
 
-      // Clear the timer if it finishes in time
-      clearTimeout(timeoutId);
-
-      const json = await resp.json();
-
-      // File Lock / Error Check
-      if (!resp.ok || !json.ok) {
-        const errorMsg = String(json.error || json.message || "");
-        if (errorMsg.includes("Locked") || errorMsg.includes("LOCKED") || resp.status === 423) {
-           alert("⚠️ FILE LOCK ERROR: Excel file is open elsewhere.\n\nTip: Open the file in Excel Online manually, then close it to reset the lock.");
-           return;
-        }
-        throw new Error(errorMsg || `HTTP ${resp.status}`);
-      }
-
-      // Success Logic
-      const sheetUrl: string = typeof json.sheetUrl === "string" ? json.sheetUrl : "";
+      // 5. Success: Update Database
       const mergedAt = new Date().toISOString();
-
       const patch = {
-        mergedAdmin: { url: sheetUrl, sheetName: json.sheetName || sheetName, mergedAt },
+        mergedAdmin: { url: result.sheetUrl, sheetName: result.sheetName, mergedAt },
         adminWorkbookUrl,
-        adminWorkbookViewUrl: obs.adminViewOnlyUrl,
+        adminWorkbookViewUrl: obs.adminViewOnlyUrl, // Keep existing if valid
         schoolId,
       };
 
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
+      // Update UI
       setObservations((prev) =>
-        prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, adminWorkbookUrl: adminWorkbookUrl } : o))
+        prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta, adminWorkbookUrl } : o))
       );
 
       setRecentMergePanel({
         obsId: obs.id,
         kind: "admin",
-        sheetUrl,
-        sheetName: json.sheetName || sheetName,
+        sheetUrl: result.sheetUrl,
+        sheetName: result.sheetName,
         mergedAt,
       });
 
-      alert(`Admin merge succeeded!`);
+      alert("Admin merge succeeded (Client-Side)!");
 
     } catch (err: any) {
-      console.error("[Dashboard] merge-admin error", err);
-      
-      // 🟢 Specific Error for Timeout
-      if (err.name === 'AbortError') {
-        alert("⚠️ TIMEOUT ERROR: The server took too long to respond (over 60s).\n\nPossible reasons:\n1. The Excel file is locked by a 'ghost' user.\n2. Microsoft Graph is running slowly.\n\nTry opening the Excel file manually to clear any locks.");
-      } else {
-        alert(`Admin merge failed: ${err.message}`);
-      }
+      console.error("Client admin merge error:", err);
+      alert(`Admin merge failed: ${err.message}`);
     } finally {
-      clearTimeout(timeoutId); // Safety clear
-      setMergingAdminId(null); // 🎯 END: Reset UI (Stop the loading bar)
+      setMergingAdminId(null);
     }
   };
 
