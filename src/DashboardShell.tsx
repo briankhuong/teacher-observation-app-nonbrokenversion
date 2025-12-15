@@ -18,10 +18,9 @@ import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
 // Update the import to include the Admin function
 import { clientMergeTeacherSheet, clientMergeAdminSheet } from './utils/clientExcelMerge';
 
-// ✅ NEW SAFE VERSION:
-// 1. Try to get the URL from the Environment (Vercel/Render)
-// 2. If missing, automatically fallback to "http://localhost:4000" for local testing
-const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE || "http://localhost:4000";
+
+// ✅ CORRECT (Matches your screenshots & Vercel settings)
+const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
 const STORAGE_PREFIX = "obs-v1-";
