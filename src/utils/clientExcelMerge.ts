@@ -78,7 +78,14 @@ export async function clientMergeTeacherSheet({
   
   if (!itemResp.ok) throw new Error("Could not access Excel file. Check permissions.");
   const itemData = await itemResp.json();
-  const { driveId, id: itemId } = itemData.parentReference ? { ...itemData, id: itemData.id } : itemData;
+ // 🐛 FIX: Robustly find the Drive ID (Handle shared items vs direct items)
+  const driveId = itemData.parentReference?.driveId || itemData.remoteItem?.parentReference?.driveId;
+  const itemId = itemData.id;
+
+  if (!driveId) {
+    console.error("❌ Graph API Error: Drive ID missing", itemData);
+    throw new Error("Could not find Drive ID. The file might be a shortcut or you lack permission.");
+  }
 
   // 2. Download File (Directly to Browser RAM)
   const downloadResp = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`, {
@@ -172,7 +179,14 @@ export async function clientMergeAdminSheet({
   });
   if (!itemResp.ok) throw new Error("Could not access Excel file. Check permissions.");
   const itemData = await itemResp.json();
-  const { driveId, id: itemId } = itemData.parentReference ? { ...itemData, id: itemData.id } : itemData;
+ // 🐛 FIX: Robustly find the Drive ID
+  const driveId = itemData.parentReference?.driveId || itemData.remoteItem?.parentReference?.driveId;
+  const itemId = itemData.id;
+
+  if (!driveId) {
+    console.error("❌ Graph API Error: Drive ID missing", itemData);
+    throw new Error("Could not find Drive ID. The file might be a shortcut or you lack permission.");
+  }
 
   // 2. Download File
   const downloadResp = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`, {
