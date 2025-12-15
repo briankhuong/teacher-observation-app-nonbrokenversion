@@ -1605,26 +1605,27 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
               >
                 Admin…
               </button>
-              {/* 🟢 NEW: DELETE BUTTON */}
+              {/* 🟢 ICON-ONLY VERSION */}
               <button
                 type="button"
                 className="obs-pill-button"
                 style={{ 
-                  marginLeft: '8px', 
-                  color: '#dc3545', // Red color for danger
-                  borderColor: '#dc354520', // Faint red border
-                  padding: '4px 8px' // Slightly smaller padding if you want
+                  marginLeft: '8px',
+                  color: '#888', // Grey by default (subtle)
+                  borderColor: 'transparent', // No border until hover (cleaner)
+                  padding: '4px 8px'
                 }}
+                // Hover effect handled by browser, or add onMouseOver to turn red
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#dc3545'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#888'; }}
                 title="Delete Observation"
                 onClick={(e) => {
-                  e.stopPropagation(); // Prevent opening the workspace
+                  e.stopPropagation();
                   handleDeleteObservation(obs);
                 }}
               >
-                {/* Trash Icon (FontAwesome) */}
                 <i className="fa fa-trash"></i>
               </button>
-              {/* 🟢 END NEW BUTTON */}
             </div>
           </div>
 
