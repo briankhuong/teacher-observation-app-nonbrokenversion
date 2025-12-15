@@ -2,37 +2,33 @@
 import ExcelJS from 'exceljs';
 
 // =========================================================
-// 🧹 HELPER 1: Remove "Ghost" Rows (Vital for performance)
+// 🧹 HELPER 1: Remove "Ghost" Rows
 // =========================================================
 function cleanWorksheet(worksheet: ExcelJS.Worksheet) {
   let realLastRow = 1;
   worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
     if (row.hasValues) realLastRow = rowNumber;
   });
-  
   if (worksheet.rowCount > realLastRow + 5) {
     worksheet.spliceRows(realLastRow + 5, worksheet.rowCount - (realLastRow + 5));
   }
 }
 
 // =========================================================
-// 🎨 HELPER 2: Copy Conditional Formatting (Colors, Data Bars)
+// 🎨 HELPER 2: Copy Conditional Formatting
 // =========================================================
 function copyConditionalFormatting(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet) {
-  // @ts-ignore - accessing internal conditionalFormattings
+  // @ts-ignore
   const cfs = source.conditionalFormattings; 
   if (!cfs || cfs.length === 0) return;
 
   cfs.forEach((cf: any) => {
-    target.addConditionalFormatting({
-      ref: cf.ref,
-      rules: cf.rules,
-    });
+    target.addConditionalFormatting({ ref: cf.ref, rules: cf.rules });
   });
 }
 
 // =========================================================
-// 📋 HELPER 3: Duplicate Sheet (Browser Version)
+// 📋 HELPER 3: Duplicate Sheet
 // =========================================================
 function duplicateSheet(workbook: ExcelJS.Workbook, templateName: string, newName: string) {
   const source = workbook.getWorksheet(templateName);
@@ -40,22 +36,17 @@ function duplicateSheet(workbook: ExcelJS.Workbook, templateName: string, newNam
 
   const target = workbook.addWorksheet(newName);
 
-  // Copy Page Setup
   if (source.pageSetup) target.pageSetup = Object.assign({}, source.pageSetup);
-
-  // Copy Columns
   if (source.columns) {
     target.columns = source.columns.map(col => ({
       key: col.key, width: col.width, style: col.style, hidden: col.hidden
     }));
   }
 
-  // Copy Rows & Styles
   source.eachRow({ includeEmpty: true }, (sourceRow, rowNum) => {
     const targetRow = target.getRow(rowNum);
     targetRow.height = sourceRow.height;
     targetRow.hidden = sourceRow.hidden;
-
     sourceRow.eachCell({ includeEmpty: true }, (sourceCell, colNum) => {
       const targetCell = targetRow.getCell(colNum);
       targetCell.value = sourceCell.value;
@@ -65,11 +56,8 @@ function duplicateSheet(workbook: ExcelJS.Workbook, templateName: string, newNam
     targetRow.commit();
   });
 
-  // Copy Merged Cells
   // @ts-ignore
   (source.model.merges || []).forEach((range: string) => target.mergeCells(range));
-
-  // ✅ Apply Conditional Formatting
   copyConditionalFormatting(source, target);
 
   return target;
@@ -100,7 +88,6 @@ async function uploadBufferWithRetry(
         body: buffer
       });
 
-      // ✅ Success
       if (resp.ok) {
         console.log("✅ Upload successful!");
         return; 
@@ -109,18 +96,14 @@ async function uploadBufferWithRetry(
       // ⚠️ LOCKED (423) or CONFLICT (409)
       if (resp.status === 423 || resp.status === 409) {
         console.warn(`⚠️ File Locked (423). Waiting to retry...`);
+        if (attempt === MAX_RETRIES) throw new Error("File is strictly locked. Please close it in Excel Online and try again.");
         
-        if (attempt === MAX_RETRIES) {
-            throw new Error("File is strictly locked. Please close it in Excel Online and try again.");
-        }
-
-        // ⏳ Wait: 2s, then 4s, then 6s
+        // Wait 2s, 4s, 6s...
         const delay = attempt * 2000; 
         await new Promise(resolve => setTimeout(resolve, delay));
-        continue; // Retry loop
+        continue; 
       }
 
-      // Other errors -> Fail immediately
       const txt = await resp.text();
       throw new Error(`Upload failed (${resp.status}): ${txt}`);
 
@@ -132,35 +115,47 @@ async function uploadBufferWithRetry(
 }
 
 // =========================================================
+// 🔗 HELPER 5: Create/Get View Link (RESTORED)
+// =========================================================
+async function ensureViewLink(token: string, driveId: string, itemId: string) {
+  try {
+    const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/createLink`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      // "view" allows read-only. "organization" means anyone in your school/org.
+      body: JSON.stringify({ type: "view", scope: "organization" })
+    });
+    
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.link?.webUrl || null;
+  } catch (err) {
+    console.warn("Could not create view link:", err);
+    return null;
+  }
+}
+
+
+// =========================================================
 // 🚀 EXPORT 1: Teacher Merge Function
 // =========================================================
-export async function clientMergeTeacherSheet({
-  token,
-  workbookUrl,
-  sheetName,
-  model
-}: {
-  token: string;
-  workbookUrl: string;
-  sheetName: string;
-  model: any;
-}) {
-  console.log("🚀 [Client] Starting Teacher Merge on Device...");
+export async function clientMergeTeacherSheet({ token, workbookUrl, sheetName, model }: any) {
+  console.log("🚀 [Client] Starting Teacher Merge...");
 
-  // 1. Get Drive & Item ID
+  // 1. Resolve IDs
   const shareId = "u!" + btoa(workbookUrl).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const itemResp = await fetch(`https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem`, {
     headers: { Authorization: `Bearer ${token}` }
   });
-  
-  if (!itemResp.ok) throw new Error("Could not access Excel file. Check permissions.");
+  if (!itemResp.ok) throw new Error("Could not access Excel file.");
   const itemData = await itemResp.json();
-  
-  // Robust ID Logic
   const driveId = itemData.parentReference?.driveId || itemData.remoteItem?.parentReference?.driveId;
   const itemId = itemData.id;
-
-  if (!driveId) throw new Error("Could not find Drive ID.");
+  if (!driveId) throw new Error("Drive ID not found.");
 
   // 2. Download
   const downloadResp = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`, {
@@ -172,7 +167,6 @@ export async function clientMergeTeacherSheet({
   // 3. Process
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileArrayBuffer);
-
   const templateSheet = wb.getWorksheet("_TEMPLATE");
   if (templateSheet) cleanWorksheet(templateSheet);
 
@@ -199,10 +193,8 @@ export async function clientMergeTeacherSheet({
     });
   }
 
-  // 4. Write to Buffer
+  // 4. Upload (Wait & Retry)
   const newBuffer = await wb.xlsx.writeBuffer();
-
-  // 5. 🟢 Upload with Retry Logic
   await uploadBufferWithRetry(token, driveId, itemId, newBuffer);
 
   return {
@@ -214,31 +206,19 @@ export async function clientMergeTeacherSheet({
 // =========================================================
 // 🚀 EXPORT 2: Admin Merge Function
 // =========================================================
-export async function clientMergeAdminSheet({
-  token,
-  workbookUrl,
-  sheetName,
-  model
-}: {
-  token: string;
-  workbookUrl: string;
-  sheetName: string;
-  model: any;
-}) {
-  console.log("🚀 [Client] Starting Admin Merge on Device...");
+export async function clientMergeAdminSheet({ token, workbookUrl, sheetName, model }: any) {
+  console.log("🚀 [Client] Starting Admin Merge...");
 
-  // 1. Get IDs
+  // 1. Resolve IDs
   const shareId = "u!" + btoa(workbookUrl).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const itemResp = await fetch(`https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem`, {
     headers: { Authorization: `Bearer ${token}` }
   });
   if (!itemResp.ok) throw new Error("Could not access Excel file.");
   const itemData = await itemResp.json();
-  
   const driveId = itemData.parentReference?.driveId || itemData.remoteItem?.parentReference?.driveId;
   const itemId = itemData.id;
-
-  if (!driveId) throw new Error("Could not find Drive ID.");
+  if (!driveId) throw new Error("Drive ID not found.");
 
   // 2. Download
   const downloadResp = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`, {
@@ -250,7 +230,6 @@ export async function clientMergeAdminSheet({
   // 3. Process
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileArrayBuffer);
-
   const templateSheet = wb.getWorksheet("_ADMIN_TEMPLATE");
   if (templateSheet) cleanWorksheet(templateSheet);
 
@@ -278,14 +257,16 @@ export async function clientMergeAdminSheet({
     if (i === 0 && r.trainerNotes) ws.getCell("E6").value = r.trainerNotes;
   });
 
-  // 4. Write
+  // 4. Upload (Wait & Retry)
   const newBuffer = await wb.xlsx.writeBuffer();
-  
-  // 5. 🟢 Upload with Retry Logic
   await uploadBufferWithRetry(token, driveId, itemId, newBuffer);
+
+  // 5. 🔗 NEW: Get View Link
+  const viewUrl = await ensureViewLink(token, driveId, itemId);
 
   return {
     sheetUrl: `${workbookUrl}#sheet=${encodeURIComponent(finalName)}`,
-    sheetName: finalName
+    sheetName: finalName,
+    viewUrl: viewUrl // 👈 This is the part you were looking for!
   };
 }
