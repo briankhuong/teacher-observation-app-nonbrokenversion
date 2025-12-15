@@ -127,7 +127,7 @@ async function ensureViewLink(token: string, driveId: string, itemId: string) {
         "Content-Type": "application/json"
       },
       // "view" allows read-only. "organization" means anyone in your school/org.
-      body: JSON.stringify({ type: "view", scope: "organization" })
+      body: JSON.stringify({ type: "view", scope: "anonymous" })
     });
     
     if (!resp.ok) return null;
