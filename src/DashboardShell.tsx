@@ -1237,7 +1237,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       const patch = {
         mergedAdmin: { url: result.sheetUrl, sheetName: result.sheetName, mergedAt },
         adminWorkbookUrl,
-        adminWorkbookViewUrl: obs.adminViewOnlyUrl, // Keep existing if valid
+        adminWorkbookViewUrl: obs.adminViewOnlyUrl || result.viewUrl, // Keep existing if valid
         schoolId,
       };
 
