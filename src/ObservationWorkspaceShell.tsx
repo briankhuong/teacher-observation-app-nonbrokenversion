@@ -4,7 +4,7 @@ import React, { useEffect, useRef,useState } from "react";
 import { exportAdminExcel } from "./exportAdminExcel"; // ← NEW
 //import { buildAdminExportModel, type AdminExportModel } from "./exportAdminModel";
 import { emailTeacherReport } from "./emailTeacherReport";
-
+const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
 import {
   loadObservationFromDb,
   saveObservationToDb,
@@ -455,22 +455,30 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
   return base64;
 }
 
-// 🚀 Real OCR hook: strokes → PNG base64 → local Node server → Azure
+
+// 🚀 Real OCR hook: strokes → PNG base64 → Render Server → Azure
 async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
+  // CRITICAL CHECK: Ensure the base URL is defined before attempting to fetch
+  if (!MERGE_SERVER_BASE) {
+      console.error("VITE_MERGE_SERVER_BASE is missing. Cannot perform OCR.");
+      return { text: "Error: Server base URL is not configured.", confidence: 0 };
+  }
+
   try {
     const imageBase64 = await strokesToPngBase64(strokes);
 
-    // ✅ CHANGED: Use relative path. 
-    // Vite will catch this and forward it to localhost:4001 automatically.
-    const response = await fetch("/api/ocr-azure", {
+    // 🟢 FIX: Explicitly use the Render URL + the API endpoint
+    const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-azure`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageBase64 }),
     });
 
     if (!response.ok) {
-      console.error("Azure OCR HTTP error", response.status);
-      return { text: "", confidence: 0 };
+      // Try to read the error message from the server if possible
+      const errorText = await response.text();
+      console.error("Azure OCR HTTP error", response.status, errorText);
+      return { text: `Error: Server responded with status ${response.status}`, confidence: 0 };
     }
 
     const data: { text?: string; confidence?: number } = await response.json();
@@ -480,8 +488,8 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
       confidence: typeof data.confidence === "number" ? data.confidence : 0.7,
     };
   } catch (err) {
-    console.error("Azure OCR request failed", err);
-    return { text: "", confidence: 0 };
+    console.error("Azure OCR request failed (Network/Fetch error)", err);
+    return { text: "Error: Could not reach the API server.", confidence: 0 };
   }
 }
 

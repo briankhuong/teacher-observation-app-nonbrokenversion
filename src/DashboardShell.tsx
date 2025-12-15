@@ -1186,6 +1186,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       console.log("[Dashboard] merge-teacher response", json);
 
       // Warning for "File Locked"
+      // Warning for "File Locked"
       if (!resp.ok || !json.ok) {
         const errorMsg = String(json.error || json.message || "");
         if (
@@ -1194,9 +1195,13 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
           resp.status === 423
         ) {
           alert(
-            "⚠️ FILE IS OPEN\n\n" +
-            "Microsoft cannot save the report because the Excel file is currently open in another tab.\n\n" +
-            "👉 Please CLOSE the Excel tab and try again."
+            // 🟢 REVISED DIALOGUE FOR FILE LOCK
+            "⚠️ FILE LOCK ERROR: Report Cannot Be Saved\n\n" +
+            "The Microsoft Excel file is currently open and locked by another user or session.\n\n" +
+            "To successfully merge the data:\n" +
+            "1. Close the Excel file (in all browser tabs/apps).\n" +
+            "2. Wait 10 seconds for Microsoft's lock to clear.\n" +
+            "3. Try the merge again."
           );
           return;
         }
