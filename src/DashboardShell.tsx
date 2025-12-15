@@ -1605,27 +1605,28 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
               >
                 Admin…
               </button>
-              {/* 🟢 ICON-ONLY VERSION */}
+              {/* 🟢 NEW: DELETE BUTTON (Styled to match perfectly) */}
               <button
                 type="button"
                 className="obs-pill-button"
+                // We only override color/border to signal "Danger"
                 style={{ 
                   marginLeft: '8px',
-                  color: '#888', // Grey by default (subtle)
-                  borderColor: 'transparent', // No border until hover (cleaner)
-                  padding: '4px 8px'
+                  color: '#d32f2f',       // Standard Danger Red
+                  borderColor: '#d32f2f', // Red border to match text
+                  backgroundColor: 'transparent' // Ensure it doesn't have a weird background
                 }}
-                // Hover effect handled by browser, or add onMouseOver to turn red
-                onMouseEnter={(e) => { e.currentTarget.style.color = '#dc3545'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = '#888'; }}
                 title="Delete Observation"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDeleteObservation(obs);
                 }}
               >
-                <i className="fa fa-trash"></i>
+                {/* Trash Icon + Text (Optional: remove "Delete" text if you want icon only) */}
+                <i className="fa fa-trash" style={{ marginRight: '4px' }}></i>
+                Delete
               </button>
+              {/* 🟢 END NEW BUTTON */}
             </div>
           </div>
 
