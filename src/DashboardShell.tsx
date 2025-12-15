@@ -1126,7 +1126,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
   };
 
 
-// ✅ MERGE TEACHER HANDLER (ID-Based Progress)
+
 // ✅ MERGE TEACHER HANDLER (With 60s Timeout Protection)
   const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     // 🎯 START: Track this specific ID
@@ -1381,6 +1381,41 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     }
   };
 
+  // ✅ DELETE HANDLER
+  const handleDeleteObservation = async (obs: DashboardObservationRow) => {
+    // 1. Simple Confirmation Step
+    const confirmed = window.confirm(
+      `Are you sure you want to DELETE the observation for:\n${obs.teacherName}?\n\n⚠️ This action cannot be undone.`
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      // 2. Delete from Supabase
+      const { error } = await supabase
+        .from("observations") // Make sure this matches your table name
+        .delete()
+        .eq("id", obs.id);
+
+      if (error) throw error;
+
+      // 3. Update Local State (Remove the card instantly)
+      setObservations((prev) => prev.filter((o) => o.id !== obs.id));
+
+      // 4. Cleanup LocalStorage (Optional but recommended)
+      // We try to remove the cached version to free up space
+      try {
+        localStorage.removeItem(`${STORAGE_PREFIX}${obs.id}`);
+      } catch (e) {
+        // Ignore local storage errors
+      }
+
+    } catch (err: any) {
+      console.error("[Dashboard] delete error", err);
+      alert(`Failed to delete observation: ${err.message}`);
+    }
+  };
+
 
   // NEW: toggle group expanded/collapsed
   const toggleGroupExpanded = (key: string) => {
@@ -1570,6 +1605,26 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
               >
                 Admin…
               </button>
+              {/* 🟢 NEW: DELETE BUTTON */}
+              <button
+                type="button"
+                className="obs-pill-button"
+                style={{ 
+                  marginLeft: '8px', 
+                  color: '#dc3545', // Red color for danger
+                  borderColor: '#dc354520', // Faint red border
+                  padding: '4px 8px' // Slightly smaller padding if you want
+                }}
+                title="Delete Observation"
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent opening the workspace
+                  handleDeleteObservation(obs);
+                }}
+              >
+                {/* Trash Icon (FontAwesome) */}
+                <i className="fa fa-trash"></i>
+              </button>
+              {/* 🟢 END NEW BUTTON */}
             </div>
           </div>
 
