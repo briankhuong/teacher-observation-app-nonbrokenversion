@@ -19,6 +19,21 @@ function cleanWorksheet(worksheet: ExcelJS.Worksheet) {
 // =========================================================
 // 📋 HELPER 2: Duplicate Sheet (Browser Version)
 // =========================================================
+  // 🎨 HELPER 3: Copy Conditional Formatting (Colors, Data Bars, etc.)
+function copyConditionalFormatting(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet) {
+  // @ts-ignore - accessing internal conditionalFormattings
+  const cfs = source.conditionalFormattings; 
+  if (!cfs || cfs.length === 0) return;
+
+  cfs.forEach((cf: any) => {
+    // We must copy the rules to the new sheet
+    target.addConditionalFormatting({
+      ref: cf.ref,
+      rules: cf.rules,
+    });
+  });
+}
+
 function duplicateSheet(workbook: ExcelJS.Workbook, templateName: string, newName: string) {
   const source = workbook.getWorksheet(templateName);
   if (!source) throw new Error(`Template sheet "${templateName}" not found.`);
@@ -109,6 +124,7 @@ export async function clientMergeTeacherSheet({
   while (wb.getWorksheet(finalName)) {
     finalName = `${sheetName.slice(0, 25)} (${counter++})`;
   }
+
 
   // Duplicate & Fill
   const ws = duplicateSheet(wb, "_TEMPLATE", finalName);
