@@ -1634,7 +1634,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
             </div>
           )}
 
-          {/* 🟢 START: INSERT THIS PROGRESS BAR BLOCK HERE 🟢 */}
+       {/* 🟢 START: INSERT THIS PROGRESS BAR BLOCK HERE 🟢 */}
           {(mergingTeacherId === obs.id || mergingAdminId === obs.id) && (
             <div style={{ marginTop: '12px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
               
@@ -1658,8 +1658,8 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
                 max="100" 
                 style={{ 
                   width: '100%', 
-                  height: '6px',
-                  borderRadius: '4px',
+                  height: '3px', /* 🟢 CHANGED: 6px -> 3px for a sleeker look */
+                  borderRadius: '2px',
                   accentColor: '#007bff' /* Makes the bar blue */
                 }} 
               />
@@ -1670,6 +1670,8 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
             </div>
           )}
           {/* 🟢 END: PROGRESS BAR BLOCK 🟢 */}
+
+
         </div>
 
         <div className="obs-date">{obs.dateLabel}</div>
@@ -1882,25 +1884,36 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
                 </>
               ) : (
                 <>
-                 {/* 🟢 FIXED ADMIN BUTTON */}
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={mergingAdminId === modalObservation.id}
-                  onClick={() => {
-                    setActionModal(null);
-                    handleMergeAdminWorkbook(modalObservation);
-                  }}
-                >
-                  {mergingAdminId === modalObservation.id ? (
-                    <>
-                      <i className="fa fa-spinner fa-spin" style={{ marginRight: '8px' }}></i>
-                      Merging...
-                    </>
-                  ) : (
-                    "Merge admin workbook"
-                  )}
-                </button>
+                  {/* ADMIN BUTTON */}
+                  {/* 🟢 FIXED ADMIN BUTTON */}
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={mergingAdminId === modalObservation.id}
+                    onClick={() => {
+                      setActionModal(null);
+                      handleMergeAdminWorkbook(modalObservation);
+                    }}
+                  >
+                    {mergingAdminId === modalObservation.id ? (
+                      <>
+                        <i className="fa fa-spinner fa-spin" style={{ marginRight: '8px' }}></i>
+                        Merging...
+                      </>
+                    ) : (
+                      "Merge admin workbook"
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      setActionModal(null);
+                      handleAdminUpdateEmail(modalObservation);
+                    }}
+                  >
+                    Admin update email
+                  </button>
                 </>
               )}
             </div>
