@@ -29,9 +29,21 @@ if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
 const app = express();
 
 // --- CORS Setup ---
-const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
+// const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
+//     ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
+//     : 'http://localhost:5173'; 
+// 🟢 USE THIS: Allow any local network origin (for development)
+const origin = process.env.NODE_ENV === 'production'
     ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
-    : 'http://localhost:5173'; 
+    : req.headers.origin; // Trust the incoming request in dev (handles 192.168...)
+
+// Update the app.use(cors(...)) block below it:
+app.use(
+  cors({
+    origin: true, // "true" means reflect the request origin (works for localhost AND 192.168...)
+    credentials: false,
+  })
+);
 
 app.use(
   cors({
