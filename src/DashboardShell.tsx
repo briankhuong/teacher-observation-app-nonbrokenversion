@@ -52,6 +52,7 @@ interface DashboardObservationRow {
 
   // IMPORTANT: keep meta available on dashboard rows
   meta?: any;
+  admin_summary_vn?: string | null;
 }
 
 type RecentMergePanel =
@@ -764,6 +765,30 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
     return list;
   }, [observations, searchText, sortMode]);
 
+  // Assuming 'observations' and 'setObservations' are managed via useState in DashboardShell
+// const [observations, setObservations] = useState<DashboardObservationRow[]>([]);
+
+const handleSummarySaved = React.useCallback(
+    (obsId: string, vnSummary: string | null) => {
+        // This function is the KEY FIX. It updates the parent's state directly, 
+        // forcing the AM Summary useEffect to re-run with the fresh data.
+        setObservations(prev =>
+            prev.map(o => 
+                o.id === obsId 
+                    ? { 
+                        ...o, 
+                        // Update the specific field on the observation object
+                        admin_summary_vn: vnSummary 
+                      }
+                    : o
+            )
+        );
+    },
+    [setObservations] 
+);
+
+// --- Now, continue with the rest of your component's code ---
+
   const grouped = React.useMemo(() => {
     if (groupMode === "none") return null;
 
@@ -849,7 +874,8 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
   }, [observations, summaryMonth]);
 
   // Build summary rows when both month + AM are chosen
-  React.useEffect(() => {
+  // Build summary rows when both month + AM are chosen
+React.useEffect(() => {
     if (!summaryMonth || !summaryAmKey) {
       setSummaryRows([]);
       return;
@@ -859,6 +885,7 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
     const rowMap = new Map<string, AmSummaryRow>();
 
     observations.forEach((o) => {
+      // Assuming 'o' is a type that includes 'admin_summary_vn: string | null | undefined'
       const mk = monthKeyFromTs(o.rawDate);
       if (mk !== summaryMonth) return;
 
@@ -867,41 +894,56 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
       const amKey = amKeyFromSchool(info);
       if (amKey !== summaryAmKey) return;
 
-      // load the full observation from storage so we can pull indicator notes
-      const storageKey = `${STORAGE_PREFIX}${o.id}`;
-      let details: any = null;
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if (raw) details = JSON.parse(raw);
-      } catch (err) {
-        console.error("Failed to load full observation:", storageKey, err);
-      }
-
-      const obsLabel = o.dateLabel || mk;
+      // -----------------------------------------------------------------
+      // 🔑 FIX: PRIORITIZE SAVED TRANSLATION (admin_summary_vn)
+      // -----------------------------------------------------------------
       let collected = "";
+      
+      // 1. Check if the dedicated translated summary is available (highest priority)
+      // We assume 'o' in the observations array is augmented with data from the DB load.
+      if (o.admin_summary_vn) {
+          collected = o.admin_summary_vn;
+      } else {
+          // 2. Fallback: If no dedicated translated summary exists, build the
+          //    English/Source summary from local storage (original logic).
+          
+          const storageKey = `${STORAGE_PREFIX}${o.id}`;
+          let details: any = null;
+          try {
+            // Note: This local storage lookup is retained for legacy/offline support
+            const raw = localStorage.getItem(storageKey); 
+            if (raw) details = JSON.parse(raw);
+          } catch (err) {
+            console.error("Failed to load full observation cache:", storageKey, err);
+          }
 
-      if (details && Array.isArray(details.indicators)) {
-        (details.indicators as any[]).forEach((ind) => {
-          const comment = (ind.commentText ?? "").toString().trim();
-          const hasComment = comment.length > 0;
+          const obsLabel = o.dateLabel || mk;
 
-          // Prefer explicit trainer-summary checkbox
-          const explicitlyFlagged =
-            ind.includeInTrainerSummary === true && hasComment;
+          if (details && Array.isArray(details.indicators)) {
+            (details.indicators as any[]).forEach((ind) => {
+              const comment = (ind.commentText ?? "").toString().trim();
+              const hasComment = comment.length > 0;
 
-          // Fallback for old observations (no checkbox yet):
-          const legacyFlagged =
-            ind.includeInTrainerSummary === undefined &&
-            !!ind.growth &&
-            hasComment;
+              // Prefer explicit trainer-summary checkbox
+              const explicitlyFlagged =
+                ind.includeInTrainerSummary === true && hasComment;
 
-          if (!explicitlyFlagged && !legacyFlagged) return;
+              // Fallback for old observations (no checkbox yet):
+              const legacyFlagged =
+                ind.includeInTrainerSummary === undefined &&
+                !!ind.growth &&
+                hasComment;
 
-          const number = ind.number ?? "";
-          const line = `- [${obsLabel}] ${number}: ${comment}`;
-          collected += (collected ? "\n" : "") + line;
-        });
+              if (!explicitlyFlagged && !legacyFlagged) return;
+
+              const number = ind.number ?? "";
+              const line = `- [${obsLabel}] ${number}: ${comment}`;
+              collected += (collected ? "\n" : "") + line;
+            });
+          }
       }
+      // -----------------------------------------------------------------
+
 
       const key = `${o.teacherName}|${o.schoolName}|${o.campus}`;
 
@@ -911,13 +953,16 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
           campus: o.campus,
           teacherName: o.teacherName,
           status: "none",
-          nextSteps: collected,
+          nextSteps: collected, // Use the collected (now potentially VN) text
         });
       } else {
         const existing = rowMap.get(key)!;
+        
+        // This append logic is retained from original code to merge multiple observations
         const appended = collected
           ? [existing.nextSteps, collected].filter(Boolean).join("\n")
           : existing.nextSteps;
+          
         rowMap.set(key, {
           ...existing,
           nextSteps: appended,
@@ -932,6 +977,8 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
     setSummaryRows(rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryMonth, summaryAmKey, observations]);
+
+
 
   // Build email body from current table state
   const emailBody = React.useMemo(() => {

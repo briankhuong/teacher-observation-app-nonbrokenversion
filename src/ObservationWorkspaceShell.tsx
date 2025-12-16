@@ -8,6 +8,7 @@ const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
 import {
   loadObservationFromDb,
   saveObservationToDb,
+  saveAdminSummaryToDb
 } from "./db/observations";
 
 import type {
@@ -132,6 +133,9 @@ interface SavedObservationPayload {
   status: "draft" | "saved";
   updatedAt: number;
   scratchpadText?: string;
+  isGood?: boolean;
+  isBad?: boolean;
+  isFavorite?: boolean;
 }
 
 const STORAGE_PREFIX = "obs-v1-";
@@ -523,7 +527,11 @@ export const ObservationWorkspaceShell: React.FC<
   // For the little "saved at" label (existing behaviour)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
   const isLocked = observationStatus === "saved";
-
+// 👇 UPDATE 2: Add State for Global Flags
+  const [isGood, setIsGood] = useState(false);
+  const [isBad, setIsBad] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [filterMode, setFilterMode] = useState<"all" | "good" | "growth" | "favorites">(
@@ -583,64 +591,80 @@ export const ObservationWorkspaceShell: React.FC<
         setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
         setLastSavedAt(parsed.updatedAt ?? null);
         setScratchpadText(parsed.scratchpadText ?? "");
-        return; // ✅ done, no need to hit Supabase
+
+        // ✅ RESTORE FLAGS FROM LOCAL STORAGE
+            setIsGood(parsed.isGood ?? false);
+            setIsBad(parsed.isBad ?? false);
+            setIsFavorite(parsed.isFavorite ?? false);
+
+        //return; // ✅ done, no need to hit Supabase
       }
     }
   } catch (err) {
     console.error("Failed to load observation from storage", err);
   }
 
+      try {
+        // NOTE: row is now correctly typed as ObservationRecord
+        const row = await loadObservationFromDb(observationMeta.id);
+    
+        if (cancelled) return;
 
-    // 2️⃣ Nothing in localStorage → load from Supabase
-    // 2️⃣ Nothing in localStorage → load from Supabase
-      try {
-        const row = await loadObservationFromDb(observationMeta.id);
-    
+        // 🔑 LOAD THE NEW FIELD HERE (No longer errors if type is updated)
+        const dbAdminSummaryVN = row.admin_summary_vn ?? null; 
+        const metaFromDb = (row.meta ?? {}) as any;
 
-        if (cancelled) return;
+        // 1️⃣ Normalize DB indicators & fall back to INITIAL_INDICATORS if empty
+        const normalizedFromDb = normalizeIndicators(row.indicators);
+        const finalIndicators =
+          normalizedFromDb.length > 0
+            ? (normalizedFromDb as IndicatorState[])
+            : INITIAL_INDICATORS;
 
-        const metaFromDb = (row.meta ?? {}) as any;
+        const dbIsGood = row.is_good ?? false;
+        const dbIsBad = row.is_bad ?? false;
+        const dbIsFavorite = row.is_favorite ?? false;
 
-        // 1️⃣ Normalize DB indicators & fall back to INITIAL_INDICATORS if empty
-        const normalizedFromDb = normalizeIndicators(row.indicators);
-        const finalIndicators =
-          normalizedFromDb.length > 0
-            ? (normalizedFromDb as IndicatorState[])
-            : INITIAL_INDICATORS;
+        const payload: SavedObservationPayload = {
+          id: row.id,
+          meta: {
+            teacherName: metaFromDb.teacherName ?? observationMeta.teacherName,
+            schoolName: metaFromDb.schoolName ?? observationMeta.schoolName,
+            campus: metaFromDb.campus ?? observationMeta.campus,
+            unit: metaFromDb.unit ?? observationMeta.unit,
+            lesson: metaFromDb.lesson ?? observationMeta.lesson,
+            supportType: metaFromDb.supportType ?? observationMeta.supportType,
+            date: metaFromDb.date ?? observationMeta.date,
+          },
+          indicators: finalIndicators,
+          status: row.status ?? "draft",
+          updatedAt: Date.now(),
+          scratchpadText: "", // we don't store this in DB (yet)
+        };
 
-        const payload: SavedObservationPayload = {
-          id: row.id,
-          meta: {
-            teacherName: metaFromDb.teacherName ?? observationMeta.teacherName,
-            schoolName: metaFromDb.schoolName ?? observationMeta.schoolName,
-            campus: metaFromDb.campus ?? observationMeta.campus,
-            unit: metaFromDb.unit ?? observationMeta.unit,
-            lesson: metaFromDb.lesson ?? observationMeta.lesson,
-            supportType: metaFromDb.supportType ?? observationMeta.supportType,
-            date: metaFromDb.date ?? observationMeta.date,
-          },
-          indicators: finalIndicators,
-          status: row.status ?? "draft",
-          updatedAt: Date.now(),
-          scratchpadText: "", // we don't store this in DB (yet)
-        };
+        // cache for next time
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(payload));
+        } catch (err) {
+          console.error("Failed to cache observation to localStorage", err);
+        }
 
-        // cache for next time
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(payload));
-        } catch (err) {
-          console.error("Failed to cache observation to localStorage", err);
-        }
+        setIndicators(finalIndicators);
+        // 🔐 restore observation status from DB
+        setObservationStatus(payload.status ?? "draft");
+        setSaveStatus(payload.status === "saved" ? "saved" : "idle");
+        setLastSavedAt(payload.updatedAt);
+        setScratchpadText(payload.scratchpadText ?? "");
 
-        setIndicators(finalIndicators);
-        // 🔐 restore observation status from DB
-        setObservationStatus(payload.status ?? "draft");
-        setSaveStatus(payload.status === "saved" ? "saved" : "idle");
-        setLastSavedAt(payload.updatedAt);
-        setScratchpadText(payload.scratchpadText ?? "");
-      } catch (err) {
+        // 🔑 SET THE NEW STATE FIELD
+        setAdminSummaryVN(dbAdminSummaryVN);
+
+        // ✅ SET STATE FROM DB
+        setIsGood(dbIsGood);
+        setIsBad(dbIsBad);
+        setIsFavorite(dbIsFavorite);
+      } catch (err) {
         console.error("[Workspace] Could not load observation from DB", err);
-
       if (!cancelled) {
         // fall back to fresh blank observation
         setIndicators(INITIAL_INDICATORS);
@@ -659,6 +683,9 @@ export const ObservationWorkspaceShell: React.FC<
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [storageKey, observationMeta.id]);
+
+
+
 
 const persistObservation = React.useCallback(
   async (payload: SavedObservationPayload) => {
@@ -687,6 +714,7 @@ const persistObservation = React.useCallback(
   [storageKey]
 );
 
+
    useEffect(() => {
   if (!observationMeta.id) return;
 
@@ -712,6 +740,10 @@ const persistObservation = React.useCallback(
     status: observationStatus,       // 🔒 now respects lock status
     updatedAt: Date.now(),
     scratchpadText,
+    // ✅ SYNC CURRENT STATE
+        isGood,
+        isBad,
+        isFavorite,
   };
 
   persistObservation(payload);
@@ -741,6 +773,10 @@ const persistObservation = React.useCallback(
   unit,
   lesson,
   supportType,
+  // ✅ DEPENDENCIES
+    isGood,
+    isBad,
+    isFavorite,
 ]);
   
   // How many indicators have any value (good/growth/comment/strokes)
@@ -751,7 +787,7 @@ const persistObservation = React.useCallback(
     return hasMark || hasComment || hasInk;
   }).length;
 
-  const handleManualSave = () => {
+const handleManualSave = async () => {
   if (canvasDirty) {
     handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
     setCanvasDirty(false);
@@ -770,22 +806,51 @@ const persistObservation = React.useCallback(
         date,
       },
       indicators,
-      status: observationStatus,   // 🔒 important!
+      status: observationStatus,
       updatedAt: Date.now(),
+      // ✅ INCLUDE FLAGS
+      isGood,
+      isBad,
+      isFavorite,
     };
 
-    localStorage.setItem(storageKey, JSON.stringify(payload));
+    // 🟢 NEW: Use persistObservation so it hits the Database
+    await persistObservation(payload);
+
     setLastSavedAt(payload.updatedAt);
-    setSaveStatus(
-      observationStatus === "saved" ? "saved" : "idle"
-    );
+    setSaveStatus(observationStatus === "saved" ? "saved" : "idle");
   } catch (err) {
     console.error("Manual save failed", err);
   }
 };
 
+const handleAdminReviewSave = async () => {
+  if (!adminPreview) {
+    console.warn("Cannot save admin review: Preview model is missing.");
+    return;
+  }
 
-const handleBackToDashboard = () => {
+  // 1. Get the translated summary from the current adminPreview state
+  const translatedSummary = adminPreview.trainerSummary;
+
+  try {
+    // 2. Save it to the database
+    await saveAdminSummaryToDb(observationMeta.id, translatedSummary);
+
+    // 3. Update the local observation state with the newly saved text
+    // 🔑 FIX: Update the new state variable so the preview remains consistent
+    setAdminSummaryVN(translatedSummary);
+    onSummarySaved(observationMeta.id, translatedSummary);
+    alert("✅ Translated Summary Saved to Database!");
+
+  } catch (err) {
+    console.error("Admin Review Save failed", err);
+    alert("❌ Save failed. Check console for details.");
+  }
+};
+
+
+const handleBackToDashboard = async () => {
   try {
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -804,15 +869,20 @@ const handleBackToDashboard = () => {
         date,
       },
       indicators,
-      status: observationStatus,     // 🔒 respect locked state
+      status: observationStatus,
       updatedAt: Date.now(),
+      // ✅ INCLUDE FLAGS
+      isGood,
+      isBad,
+      isFavorite,
     };
 
-    localStorage.setItem(storageKey, JSON.stringify(payload));
+    // 🔴 OLD: localStorage.setItem(...) <-- This was the problem. It ignored Supabase.
+    // 🟢 NEW: Save to BOTH LocalStorage and Supabase before leaving.
+    await persistObservation(payload); 
+    
     setLastSavedAt(payload.updatedAt);
-    setSaveStatus(
-      observationStatus === "saved" ? "saved" : "idle"
-    );
+    setSaveStatus(observationStatus === "saved" ? "saved" : "idle");
   } catch (err) {
     console.error("Back-to-dashboard save failed", err);
   }
@@ -870,6 +940,9 @@ const handleReopenDraft = async () => {
     status: "draft",
     updatedAt: Date.now(),
     scratchpadText,
+    isGood,
+      isBad,
+      isFavorite,
   };
 
   setObservationStatus("draft");
@@ -1062,39 +1135,55 @@ const handleExportPreview = () => {
 
 //admin preview
 // admin preview
+// admin preview
 const handleAdminPreview = () => {
-  // flush canvas first
-  if (canvasDirty) {
-    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-    setCanvasDirty(false);
-  }
+  // 1. Flush canvas first
+  if (canvasDirty) {
+    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+    setCanvasDirty(false);
+  }
 
-  const metaForExport: ObservationMetaForExport = {
-    teacherName,
-    schoolName,
-    campus,
-    unit,
-    lesson,
-    supportType,
-    date: observationMeta.date, // already wired
-  };
+  const metaForExport: ObservationMetaForExport = {
+    teacherName,
+    schoolName,
+    campus,
+    unit,
+    lesson,
+    supportType,
+    date: observationMeta.date, // already wired
+  };
 
-  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
-    id: ind.id,
-    number: ind.number,
-    title: ind.title,
-    description: ind.description,
-    good: ind.good,
-    growth: ind.growth,
-    commentText: ind.commentText,
-    // ✅ pass Trainer-summary flag through to the export model
-    includeInTrainerSummary: !!ind.includeInTrainerSummary,
-  }));
+  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
+    id: ind.id,
+    number: ind.number,
+    title: ind.title,
+    description: ind.description,
+    good: ind.good,
+    growth: ind.growth,
+    commentText: ind.commentText,
+    // ✅ pass Trainer-summary flag through to the export model
+    includeInTrainerSummary: !!ind.includeInTrainerSummary,
+  }));
 
-  const model = buildAdminExportModel(metaForExport, exportIndicators);
-  setAdminPreview(model);
-  setShowAdminPreview(true);
+  // 2. Build the fresh model (this calculates the English trainerSummary)
+  const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
+  
+  // 3. Check for SAVED Vietnamese text from the state variable
+  const savedVNSummary = adminSummaryVN; 
+
+  // 4. Create the final model, prioritizing the saved Vietnamese text
+  const finalModel = {
+      ...freshModel,
+      // If savedVNSummary is truthy (a string), use it. Otherwise, use the fresh English summary.
+      trainerSummary: savedVNSummary || freshModel.trainerSummary, 
+  };
+
+  // 5. Set the final model to the preview state
+  setAdminPreview(finalModel);
+  setShowAdminPreview(true);
 };
+
+
 
 
 const [canvasDirty, setCanvasDirty] = useState(false);
@@ -1428,6 +1517,9 @@ const handleToggleLock = async () => {
     status: nextStatus,
     updatedAt: Date.now(),
     scratchpadText,
+    isGood,
+      isBad,
+      isFavorite,
   };
 
   await persistObservation(payload);
@@ -2159,7 +2251,7 @@ const handleToggleLock = async () => {
             {showAdminPreview && adminPreview && (
               <div className="export-preview-panel admin-preview">
                 <div className="export-preview-header">
-                  <div>
+                  <div className="flex-grow"> {/* Added flex-grow div for spacing */}
                     <div className="export-preview-title">
                       Admin export preview
                     </div>
@@ -2170,6 +2262,16 @@ const handleToggleLock = async () => {
                         : null}
                     </div>
                   </div>
+                  {/* 👇 ADD SAVE BUTTON HERE 👇 */}
+                  <button
+                    type="button"
+                    className="btn btn-primary" // Assuming you have a btn-primary style
+                    onClick={handleAdminReviewSave} // Function defined in Step 4
+                    style={{ marginRight: 8, backgroundColor: 'var(--color-primary)' }} 
+                  >
+                    Save Translated Summary
+                  </button>
+                  {/* 👆 END SAVE BUTTON 👆 */}
                   <button
                     type="button"
                     className="btn"

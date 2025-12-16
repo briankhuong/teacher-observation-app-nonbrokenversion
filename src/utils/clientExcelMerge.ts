@@ -206,10 +206,13 @@ export async function clientMergeTeacherSheet({ token, workbookUrl, sheetName, m
 // =========================================================
 // 🚀 EXPORT 2: Admin Merge Function
 // =========================================================
+// =========================================================
+// 🚀 EXPORT 2: Admin Merge Function
+// =========================================================
 export async function clientMergeAdminSheet({ token, workbookUrl, sheetName, model }: any) {
   console.log("🚀 [Client] Starting Admin Merge...");
 
-  // 1. Resolve IDs
+  // 1. Resolve IDs (omitted for brevity, assume helper functions are available)
   const shareId = "u!" + btoa(workbookUrl).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const itemResp = await fetch(`https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -231,7 +234,7 @@ export async function clientMergeAdminSheet({ token, workbookUrl, sheetName, mod
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileArrayBuffer);
   const templateSheet = wb.getWorksheet("_ADMIN_TEMPLATE");
-  if (templateSheet) cleanWorksheet(templateSheet);
+  if (templateSheet) cleanWorksheet(templateSheet); // Assuming cleanWorksheet is defined
 
   let finalName = sheetName.replace(/[:\\\/\?\*\[\]]/g, " ").trim().slice(0, 31);
   let counter = 2;
@@ -239,7 +242,7 @@ export async function clientMergeAdminSheet({ token, workbookUrl, sheetName, mod
     finalName = `${sheetName.slice(0, 25)} (${counter++})`;
   }
 
-  const ws = duplicateSheet(wb, "_ADMIN_TEMPLATE", finalName);
+  const ws = duplicateSheet(wb, "_ADMIN_TEMPLATE", finalName); // Assuming duplicateSheet is defined
   ws.state = "visible";
 
   if (model.headerLeft) ws.getCell("A1").value = model.headerLeft;
@@ -254,19 +257,35 @@ export async function clientMergeAdminSheet({ token, workbookUrl, sheetName, mod
     if (r.aspect) ws.getCell(`B${rowIndex}`).value = r.aspect;
     if (r.classroomSigns) ws.getCell(`C${rowIndex}`).value = r.classroomSigns;
     if (r.trainerRating) ws.getCell(`D${rowIndex}`).value = r.trainerRating;
-    if (i === 0 && r.trainerNotes) ws.getCell("E6").value = r.trainerNotes;
+    // Removed: if (i === 0 && r.trainerNotes) ws.getCell("E6").value = r.trainerNotes;
+    // We now handle E6 placement separately below.
   });
 
-  // 4. Upload (Wait & Retry)
+  // -------------------------------------
+  // 🔑 INSERT THE TRAINER SUMMARY (TRANSLATED TEXT) 🔑
+  // -------------------------------------
+  if (model.trainerSummary) {
+    // The merged cell E6 is the starting point for the Trainer Notes/Summary column.
+    const mergedSummaryCell = ws.getCell("E6");
+    mergedSummaryCell.value = model.trainerSummary;
+    mergedSummaryCell.alignment = {
+        vertical: "top",
+        horizontal: "left",
+        wrapText: true,
+    };
+  }
+  // -------------------------------------
+
+  // 4. Upload (Wait & Retry) (Assuming uploadBufferWithRetry is defined)
   const newBuffer = await wb.xlsx.writeBuffer();
   await uploadBufferWithRetry(token, driveId, itemId, newBuffer);
 
-  // 5. 🔗 NEW: Get View Link
+  // 5. 🔗 NEW: Get View Link (Assuming ensureViewLink is defined)
   const viewUrl = await ensureViewLink(token, driveId, itemId);
 
   return {
     sheetUrl: `${workbookUrl}#sheet=${encodeURIComponent(finalName)}`,
     sheetName: finalName,
-    viewUrl: viewUrl // 👈 This is the part you were looking for!
+    viewUrl: viewUrl
   };
 }

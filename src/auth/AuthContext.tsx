@@ -111,10 +111,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 const signInWithAzure = async () => {
     setLoading(true);
     
-    const redirectUrl = import.meta.env.VITE_AZURE_REDIRECT_URI_PROD 
-        ? import.meta.env.VITE_AZURE_REDIRECT_URI_PROD as string 
-        : window.location.origin;
+    // const redirectUrl = import.meta.env.VITE_AZURE_REDIRECT_URI_PROD 
+    //     ? import.meta.env.VITE_AZURE_REDIRECT_URI_PROD as string 
+    //     : window.location.origin;
 
+    const redirectUrl = window.location.origin;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "azure",
       options: {
