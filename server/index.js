@@ -1,61 +1,65 @@
-// server/index.js - CONSOLIDATED OCR AND MERGE SERVER
-
+// server/index.js
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
-import fetch from "node-fetch"; // <-- 1. REQUIRED: Import fetch for Azure API calls
-
-// ⚠️ We no longer need this import, as the OCR logic is inline/moved
-// import ocrAzureRoute from "./ocrAzureRoute.js"; 
-
+import fetch from "node-fetch"; 
 import mergeRoutes from "./mergeRoutes.js";
 
 dotenv.config({ path: ".env.azure" });
 
 // -----------------------------------------------------------------
-// 🟢 AZURE OCR Configuration & Check
+// 1. Configuration & Checks
 // -----------------------------------------------------------------
 const AZURE_OCR_ENDPOINT = process.env.AZURE_OCR_ENDPOINT;
 const AZURE_OCR_KEY = process.env.AZURE_OCR_KEY;
 
 if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
   console.error("❌ Missing AZURE_OCR_ENDPOINT or AZURE_OCR_KEY in .env.azure");
-  // In a production app, we won't exit, but we should log the error.
 }
 
 // -----------------------------------------------------------------
-// 🟢 Main Express App Setup
+// 2. Main Express App Setup
 // -----------------------------------------------------------------
 const app = express();
 
-// --- CORS Setup ---
-// const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
-//     ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
-//     : 'http://localhost:5173'; 
-// 🟢 USE THIS: Allow any local network origin (for development)
-const origin = process.env.NODE_ENV === 'production'
+// 👇 PRODUCTION URL (Update this if your Vercel URL changes)
+const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
     ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
-    : req.headers.origin; // Trust the incoming request in dev (handles 192.168...)
+    : 'http://localhost:5173'; 
 
-// Update the app.use(cors(...)) block below it:
-app.use(
-  cors({
-    origin: true, // "true" means reflect the request origin (works for localhost AND 192.168...)
-    credentials: false,
-  })
-);
+// 🟢 ROBUST CORS SETUP
+app.use(cors({
+  origin: function(origin, callback){
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if(!origin) return callback(null, true);
 
-app.use(
-  cors({
-    origin: ALLOWED_ORIGIN,
-    credentials: false,
-  })
-);
+    // 1. Allow Localhost (HTTP or HTTPS)
+    if (origin.includes('localhost')) {
+      return callback(null, true);
+    }
 
-app.use(express.json({ limit: "10mb" })); // Handles JSON and base64 images
+    // 2. Allow Local Network IP (HTTP or HTTPS)
+    // 🟢 FIX: Used .includes() instead of .startsWith('http') to allow https://192...
+    if (origin.includes('192.168')) {
+      return callback(null, true);
+    }
+
+    // 3. Allow Production Domain
+    if (origin === ALLOWED_ORIGIN) {
+      return callback(null, true);
+    }
+
+    // Block everything else
+    console.log("🚫 Blocked CORS origin:", origin);
+    return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+  },
+  credentials: false,
+}));
+
+app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
-// 🟢 OCR Endpoint - MOVED FROM azure-ocr-server.mjs
+// 3. OCR Endpoint (With Smart Paragraph Logic)
 // -----------------------------------------------------------------
 app.post("/api/ocr-azure", async (req, res) => {
   if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
@@ -92,14 +96,13 @@ app.post("/api/ocr-azure", async (req, res) => {
 
     const result = await azureResponse.json();
 
-    // 🔎 Safely pull out lines + average confidence
     const blocks = result?.readResult?.blocks ?? [];
-    const lines = [];
+    const rawLines = [];
     const confidences = [];
 
     for (const block of blocks) {
       for (const line of block.lines ?? []) {
-        if (line.text) lines.push(line.text);
+        if (line.text) rawLines.push(line.text.trim());
         if (line.words && line.words.length) {
           const avg =
             line.words.reduce((sum, w) => sum + (w.confidence ?? 0), 0) /
@@ -109,7 +112,21 @@ app.post("/api/ocr-azure", async (req, res) => {
       }
     }
 
-    const text = lines.join("\n");
+    // B. SMART GLUE LOGIC
+    const text = rawLines.reduce((acc, line) => {
+      if (!line) return acc;
+
+      const isNewItem = line.startsWith("-") || line.toUpperCase().startsWith("(GA)");
+
+      if (acc.length === 0) return line;
+
+      if (isNewItem) {
+        return `${acc}\n${line}`; 
+      } else {
+        return `${acc} ${line}`; 
+      }
+    }, "");
+
     const confidence =
       confidences.length === 0
         ? 0
@@ -122,9 +139,8 @@ app.post("/api/ocr-azure", async (req, res) => {
   }
 });
 
-
 // -----------------------------------------------------------------
-// 🔗 Merge endpoints - Already fixed to include /api prefix in mergeRoutes.js
+// 4. Merge Routes & Start Server
 // -----------------------------------------------------------------
 app.use(mergeRoutes); 
 
@@ -132,5 +148,4 @@ const PORT = process.env.OCR_SERVER_PORT || 4000;
 
 app.listen(PORT, () => {
   console.log(`✅ Main server (OCR/Merge) running at http://localhost:${PORT}`);
-  console.log(`Allowed CORS Origin: ${ALLOWED_ORIGIN}`);
 });
