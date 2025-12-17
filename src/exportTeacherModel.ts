@@ -285,14 +285,116 @@ export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
 /**
  * Builds the Teacher Export model (no Excel yet) from an observation meta + indicators.
  */
+// export function buildTeacherExportModel(
+//   meta: ObservationMetaForExport,
+//   indicators: IndicatorStateForExport[]
+// ): TeacherExportModel {
+//   const byNumber = new Map(indicators.map((i) => [i.number, i]));
+//   const TRAINER_NAME = "Brian"; // fixed trainer name for now
+
+//   // Human-facing date for the header
+//   const displayDate = meta.date ?? "(not set in app yet)";
+
+//   const rows: TeacherExportRow[] = TEACHER_LAYOUT.map((layout) => {
+//     const src = byNumber.get(layout.indicatorNumber);
+
+//     const good = src?.good ?? false;
+//     const growth = src?.growth ?? false;
+//     const anyMark = good || growth;
+//     const comment = src?.commentText ?? "";
+
+//     // 🔽 Teacher column D dropdown value
+//     // - Good only        → "Good"
+//     // - Growth only      → "Need some work"
+//     // - Good + Growth    → "Good"  (follow Admin: this is "Rất tốt")
+//     // - No mark          → "Not applicable"
+//     let checklist: string;
+//     if (!anyMark) {
+//       checklist = "Not applicable";
+//     } else if (good) {
+//       checklist = "Good";
+//     } else {
+//       checklist = "Need some work";
+//     }
+
+//     // 🔽 Status used only in the preview UI
+//     // - no mark        → ""
+//     // - Growth only    → "Pending"
+//     // - Good only      → "Done"
+//     // - Good + Growth  → "Done" (overall very good)
+//     const status: "" | "Done" | "Pending" =
+//       !anyMark
+//         ? ""
+//         : good && !growth
+//         ? "Done"
+//         : !good && growth
+//         ? "Pending"
+//         : "Done"; // good && growth
+
+//     // 🔽 Decide where the comment goes:
+//     // - Good only        → Strengths
+//     // - Growth only      → Growths
+//     // - Good + Growth    → Strengths only (avoid duplicate text)
+//     let strengths = "";
+//     let growths = "";
+
+//     if (good && !growth) {
+//       strengths = comment;
+//     } else if (!good && growth) {
+//       growths = comment;
+//     } else if (good && growth) {
+//       // Admin: "Rất tốt" → treat as overall strength in Teacher export
+//       strengths = comment;
+//     }
+
+//     return {
+//       rowIndex: layout.rowIndex,
+//       area: layout.area,
+//       indicatorLabel: layout.indicatorLabel,
+//       description: layout.excelDescription,
+//       checklist,
+//       status,
+//       strengths,
+//       growths,
+
+//       // For preview-only UI
+//       goodFlag: good,
+//       growthFlag: growth,
+//     };
+//   });
+
+//   const sheetName = buildMonthYearSheetName(meta.date);
+//   const fileDate = buildFileDateLabel(meta.date);
+
+//   const headerBlock = [
+//     `GrapeSEED Trainer: ${TRAINER_NAME}`,
+//     `School: ${meta.schoolName} – ${meta.campus}`,
+//     `Support type: ${meta.supportType}`,
+//     `Unit ${meta.unit} – Lesson ${meta.lesson}`,
+//     `Teacher: ${meta.teacherName}`,
+//     `Date: ${displayDate}`,
+//   ].join("\n");
+
+//   return {
+//     sheetName,
+//     headerBlock,
+//     rows,
+//     teacherName: meta.teacherName,
+//     schoolName: meta.schoolName,
+//     fileDate,
+//   };
+// }
+
+// src/exportTeacherModel.ts
+
+// ... (imports remain the same) ...
+
 export function buildTeacherExportModel(
   meta: ObservationMetaForExport,
   indicators: IndicatorStateForExport[]
 ): TeacherExportModel {
   const byNumber = new Map(indicators.map((i) => [i.number, i]));
-  const TRAINER_NAME = "Brian"; // fixed trainer name for now
-
-  // Human-facing date for the header
+  const TRAINER_NAME = "Brian"; 
   const displayDate = meta.date ?? "(not set in app yet)";
 
   const rows: TeacherExportRow[] = TEACHER_LAYOUT.map((layout) => {
@@ -300,16 +402,47 @@ export function buildTeacherExportModel(
 
     const good = src?.good ?? false;
     const growth = src?.growth ?? false;
-    const anyMark = good || growth;
+    // Normalized comment text from the app (contains the \n structure from server)
     const comment = src?.commentText ?? "";
 
-    // 🔽 Teacher column D dropdown value
-    // - Good only        → "Good"
-    // - Growth only      → "Need some work"
-    // - Good + Growth    → "Good"  (follow Admin: this is "Rất tốt")
-    // - No mark          → "Not applicable"
+    // 🟢 3. SHUFFLE SORTER LOGIC
+    const strengthItems: string[] = [];
+    const growthItems: string[] = [];
+
+    // Split by the newlines created on the server
+    const lines = comment.split("\n").map(l => l.trim()).filter(Boolean);
+
+    lines.forEach(line => {
+      // CASE A: Bad Point (Starts with GA)
+      if (line.toUpperCase().startsWith("(GA)")) {
+        const cleanText = line.substring(4).trim(); // Remove "(GA)"
+        if (cleanText) growthItems.push(cleanText);
+      }
+      // CASE B: Good Point (Starts with Hyphen)
+      else if (line.startsWith("-")) {
+        const cleanText = line.substring(1).trim(); // Remove "-"
+        if (cleanText) strengthItems.push(cleanText);
+      }
+      // CASE C: Fallback (No marker?)
+      // Default to Strength to be safe.
+      else {
+        strengthItems.push(line);
+      }
+    });
+
+    // Join with bullets for the final Excel cell
+    let strengths = strengthItems.map(s => `• ${s}`).join("\n");
+    let growths = growthItems.map(g => `• ${g}`).join("\n");
+
+    // 🔽 Fallback: If checkboxes used WITHOUT text, keep simple logic
+    if (!comment) {
+        if (good && !growth) strengths = "• Good performance (checkbox)"; 
+        if (!good && growth) growths = "• Needs improvement (checkbox)";
+    }
+
+    // 🔽 Checklist Status (Dropdown Column) logic
     let checklist: string;
-    if (!anyMark) {
+    if (!good && !growth) {
       checklist = "Not applicable";
     } else if (good) {
       checklist = "Good";
@@ -317,35 +450,14 @@ export function buildTeacherExportModel(
       checklist = "Need some work";
     }
 
-    // 🔽 Status used only in the preview UI
-    // - no mark        → ""
-    // - Growth only    → "Pending"
-    // - Good only      → "Done"
-    // - Good + Growth  → "Done" (overall very good)
     const status: "" | "Done" | "Pending" =
-      !anyMark
+      !good && !growth
         ? ""
         : good && !growth
         ? "Done"
         : !good && growth
         ? "Pending"
-        : "Done"; // good && growth
-
-    // 🔽 Decide where the comment goes:
-    // - Good only        → Strengths
-    // - Growth only      → Growths
-    // - Good + Growth    → Strengths only (avoid duplicate text)
-    let strengths = "";
-    let growths = "";
-
-    if (good && !growth) {
-      strengths = comment;
-    } else if (!good && growth) {
-      growths = comment;
-    } else if (good && growth) {
-      // Admin: "Rất tốt" → treat as overall strength in Teacher export
-      strengths = comment;
-    }
+        : "Done";
 
     return {
       rowIndex: layout.rowIndex,
@@ -356,13 +468,12 @@ export function buildTeacherExportModel(
       status,
       strengths,
       growths,
-
-      // For preview-only UI
       goodFlag: good,
       growthFlag: growth,
     };
   });
 
+  // ... (rest of function remains the same) ...
   const sheetName = buildMonthYearSheetName(meta.date);
   const fileDate = buildFileDateLabel(meta.date);
 
