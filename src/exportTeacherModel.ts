@@ -1,6 +1,6 @@
 // src/exportTeacherModel.ts
 
-// 1. Helper: build sheet name like "11.2025"
+// 1. Helper: build sheet name
 export function buildMonthYearSheetName(dateString?: string): string {
   let d: Date | null = null;
   if (dateString) {
@@ -8,13 +8,12 @@ export function buildMonthYearSheetName(dateString?: string): string {
     if (!isNaN(parsed.getTime())) d = parsed;
   }
   if (!d) d = new Date();
-
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const year = d.getFullYear();
-  return `${month}.${year}`; // e.g. 11.2025
+  return `${month}.${year}`;
 }
 
-// 2. Helper: build file date label like "2025.11.27"
+// 2. Helper: build file date label
 export function buildFileDateLabel(dateString?: string): string {
   let d: Date | null = null;
   if (dateString) {
@@ -22,20 +21,18 @@ export function buildFileDateLabel(dateString?: string): string {
     if (!isNaN(parsed.getTime())) d = parsed;
   }
   if (!d) d = new Date();
-
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
-  return `${year}.${month}.${day}`; // 2025.11.27
+  return `${year}.${month}.${day}`;
 }
 
 // -----------------------------------------------------------------
-// 3. Type Definitions (Self-contained)
+// 3. Type Definitions
 // -----------------------------------------------------------------
 
 export type SupportType = "Training" | "LVA" | "Visit";
 
-/** Meta info for one observation used for export */
 export interface ObservationMetaForExport {
   teacherName: string;
   schoolName: string;
@@ -46,7 +43,6 @@ export interface ObservationMetaForExport {
   date?: string;
 }
 
-/** Minimal per-indicator state we need for teacher export */
 export interface IndicatorStateForExport {
   id: string;
   number: string;
@@ -58,24 +54,19 @@ export interface IndicatorStateForExport {
   includeInTrainerSummary?: boolean;
 }
 
-/** Two big areas in the teacher template */
-export type TeacherArea =
-  | "LEARNING_ENVIRONMENT"
-  | "PREPARATION_AND_REFLECTION";
+export type TeacherArea = "LEARNING_ENVIRONMENT" | "PREPARATION_AND_REFLECTION";
 
-/** Where each indicator should appear in the teacher sheet */
 export interface TeacherRowConfig {
-  rowIndex: number; // Excel row number (4–21 in your template)
+  rowIndex: number; 
   area: TeacherArea;
 }
 
-/** One resolved row of the teacher export table (row 4–21) */
 export interface TeacherExportRow {
   rowIndex: number;
   area: string;
   indicatorLabel: string;
   description: string;
-  checklist: string; // "Good" | "Need some work" | "Not applicable"
+  checklist: string;
   status: "Done" | "Pending" | "";
   strengths: string;
   growths: string;
@@ -89,15 +80,15 @@ export interface TeacherExportModel {
   rows: TeacherExportRow[];
   teacherName: string;
   schoolName: string;
-  fileDate: string; // "YYYY.MM.DD"
+  fileDate: string;
 }
 
 interface TeacherLayoutEntry {
-  indicatorNumber: string;   // must match .number in your app
-  rowIndex: number;          // 4–21
-  area: "LE" | "PR";         // Learning Env / Prep+Reflection
-  indicatorLabel: string;    // text that goes into column B
-  excelDescription: string;  // full long description for column C
+  indicatorNumber: string;
+  rowIndex: number;
+  area: "LE" | "PR";
+  indicatorLabel: string;
+  excelDescription: string;
 }
 
 // -----------------------------------------------------------------
@@ -105,163 +96,26 @@ interface TeacherLayoutEntry {
 // -----------------------------------------------------------------
 
 const TEACHER_LAYOUT: TeacherLayoutEntry[] = [
-  {
-    indicatorNumber: "1.1",
-    rowIndex: 4,
-    area: "LE",
-    indicatorLabel: "1.1. Organized Teaching Area",
-    excelDescription:
-      "- Teaching area is highly organized; materials, props, and technology are easily accessible. Students can see the teaching materials well.",
-  },
-  {
-    indicatorNumber: "1.2",
-    rowIndex: 5,
-    area: "LE",
-    indicatorLabel: "1.2. Safe teaching environment",
-    excelDescription:
-      "Teaching environment is completely safe for all activities. Classroom space is effectively organized for easy movement during AAs and transitions.",
-  },
-  {
-    indicatorNumber: "1.3",
-    rowIndex: 6,
-    area: "LE",
-    indicatorLabel: "1.3. Visually stimulating environment",
-    excelDescription:
-      "Classroom visuals fully reinforce lesson content and engage students.",
-  },
-  {
-    indicatorNumber: "2.1.– 2.2",
-    rowIndex: 7,
-    area: "PR",
-    indicatorLabel: "2.1.+ 2.2. Classroom Routines  & Management Strategies",
-    excelDescription:
-      "- Routines are well-planned, effectively taught/modeled, and consistently reinforced.\n" +
-      "- Effective strategies create a productive and positive environment.",
-  },
-  {
-    indicatorNumber: "2.3",
-    rowIndex: 8,
-    area: "PR",
-    indicatorLabel: "2.3. Problem-Solving Tech Issues",
-    excelDescription:
-      "Proactively resolves tech issues without interrupting lessons.",
-  },
-  {
-    indicatorNumber: "3.1",
-    rowIndex: 9,
-    area: "PR",
-    indicatorLabel: "3.1. Utilizing Lession Plans",
-    excelDescription:
-      "Follows lesson plans with precision and adapts effectively.",
-  },
-  {
-    indicatorNumber: "3.5",
-    rowIndex: 10,
-    area: "PR",
-    indicatorLabel: "3.5. Using Memory Mode",
-    excelDescription:
-      "Effectively delivers lessons using Memory Mode, allowing smooth and engaging instruction.",
-  },
-  {
-    indicatorNumber: "3.4 – 5.1",
-    rowIndex: 11,
-    area: "PR",
-    indicatorLabel: "3.4 + 5.1 Using Materials Effectively",
-    excelDescription:
-      "Fully utilizes GrapeSEED materials as outlined in the Lesson Plans and manuals.",
-  },
-  {
-    indicatorNumber: "3.3 – 6.1 – 7.2",
-    rowIndex: 12,
-    area: "PR",
-    indicatorLabel: "3.3 + 6.1 + 7.2 Actively Monitoring Student Progress",
-    excelDescription:
-      "- Prepares for diverse student responses and uses them to enrich lessons. Use the Lesson Plan, Learning Objectives, and components to create follow-up prompts and questions.\n" +
-      "- Consistently monitors and adjusts teaching based on students’ responses and behavior to enhance learning.\n" +
-      "- Listens for correct pronunciation, enunciation, and use of words related to the Learning Objectives.\n" +
-      "- Provides timely, specific, and constructive feedback to help students improve accuracy and pronunciation.",
-  },
-  {
-    indicatorNumber: "7.1",
-    rowIndex: 13,
-    area: "PR",
-    indicatorLabel: "7.1. Asking targeted Questions",
-    excelDescription:
-      "Consistently asks purposeful questions that align with lesson objectives and engage all students.",
-  },
-  {
-    indicatorNumber: "7.3",
-    rowIndex: 14,
-    area: "PR",
-    indicatorLabel: "7.3. Using Effective Transitions",
-    excelDescription:
-      "Uses transitions in the Lesson Plans or smoothly connects lesson components with purposeful transitions that reinforce objectives.",
-  },
-  {
-    indicatorNumber: "7.4 – 8.1",
-    rowIndex: 15,
-    area: "PR",
-    indicatorLabel: "7.4 + 8.1. Positive Presence and Participation",
-    excelDescription:
-      "- Utilizes gestures, expressions, and prompts to actively engage all students in lessons.\n" +
-      "- Builds on student responses.\n" +
-      "- Uses props students are interested in that relate to the target words and expressions.\n" +
-      "- Maintains a positive demeanor with engaging facial expressions, body language, and voice that foster a joyful classroom.",
-  },
-  {
-    indicatorNumber: "7.5",
-    rowIndex: 16,
-    area: "PR",
-    indicatorLabel: "7.5. Allowing Time for Student Responses",
-    excelDescription:
-      "Consistently provides appropriate wait time for students to think and respond using English.",
-  },
-  {
-    indicatorNumber: "7.6",
-    rowIndex: 17,
-    area: "PR",
-    indicatorLabel: "7.6. Facilitatiing Peer Practice",
-    excelDescription:
-      "Regularly creates opportunities for students to practice speaking in pairs or small groups, fostering confidence and language use.",
-  },
-  {
-    indicatorNumber: "8.2",
-    rowIndex: 18,
-    area: "PR",
-    indicatorLabel: "8.2. Using Gestures and Props",
-    excelDescription:
-      "- Purposefully integrates gestures and props to enhance comprehension and retention.\n" +
-      "- Points at the pictures while saying the target word, purposefully connecting the word with the image.",
-  },
-  {
-    indicatorNumber: "8.3",
-    rowIndex: 19,
-    area: "PR",
-    indicatorLabel: "8.3. Emphasizing Learning Objectives",
-    excelDescription:
-      "Consistently uses visual cues to reinforce lesson objectives (e.g., phonograms) and key vocabulary.",
-  },
-  {
-    indicatorNumber: "8.4",
-    rowIndex: 20,
-    area: "PR",
-    indicatorLabel: "8.4. Modeling Proper Speech",
-    excelDescription:
-      "- Clearly models speech with correct grammar, intonation, and pronunciation, serving as an effective language role model.",
-  },
-  {
-    indicatorNumber: "8.5",
-    rowIndex: 21,
-    area: "PR",
-    indicatorLabel: "8.5. Modeling Actions",
-    excelDescription:
-      "- Accurately models actions and movements that align with lesson content, enhancing comprehension and engagement.",
-  },
+  { indicatorNumber: "1.1", rowIndex: 4, area: "LE", indicatorLabel: "1.1. Organized Teaching Area", excelDescription: "- Teaching area is highly organized; materials, props, and technology are easily accessible. Students can see the teaching materials well." },
+  { indicatorNumber: "1.2", rowIndex: 5, area: "LE", indicatorLabel: "1.2. Safe teaching environment", excelDescription: "Teaching environment is completely safe for all activities. Classroom space is effectively organized for easy movement during AAs and transitions." },
+  { indicatorNumber: "1.3", rowIndex: 6, area: "LE", indicatorLabel: "1.3. Visually stimulating environment", excelDescription: "Classroom visuals fully reinforce lesson content and engage students." },
+  { indicatorNumber: "2.1.– 2.2", rowIndex: 7, area: "PR", indicatorLabel: "2.1.+ 2.2. Classroom Routines  & Management Strategies", excelDescription: "- Routines are well-planned, effectively taught/modeled, and consistently reinforced.\n- Effective strategies create a productive and positive environment." },
+  { indicatorNumber: "2.3", rowIndex: 8, area: "PR", indicatorLabel: "2.3. Problem-Solving Tech Issues", excelDescription: "Proactively resolves tech issues without interrupting lessons." },
+  { indicatorNumber: "3.1", rowIndex: 9, area: "PR", indicatorLabel: "3.1. Utilizing Lession Plans", excelDescription: "Follows lesson plans with precision and adapts effectively." },
+  { indicatorNumber: "3.5", rowIndex: 10, area: "PR", indicatorLabel: "3.5. Using Memory Mode", excelDescription: "Effectively delivers lessons using Memory Mode, allowing smooth and engaging instruction." },
+  { indicatorNumber: "3.4 – 5.1", rowIndex: 11, area: "PR", indicatorLabel: "3.4 + 5.1 Using Materials Effectively", excelDescription: "Fully utilizes GrapeSEED materials as outlined in the Lesson Plans and manuals." },
+  { indicatorNumber: "3.3 – 6.1 – 7.2", rowIndex: 12, area: "PR", indicatorLabel: "3.3 + 6.1 + 7.2 Actively Monitoring Student Progress", excelDescription: "- Prepares for diverse student responses and uses them to enrich lessons.\n- Consistently monitors and adjusts teaching based on students’ responses." },
+  { indicatorNumber: "7.1", rowIndex: 13, area: "PR", indicatorLabel: "7.1. Asking targeted Questions", excelDescription: "Consistently asks purposeful questions that align with lesson objectives and engage all students." },
+  { indicatorNumber: "7.3", rowIndex: 14, area: "PR", indicatorLabel: "7.3. Using Effective Transitions", excelDescription: "Uses transitions in the Lesson Plans or smoothly connects lesson components with purposeful transitions." },
+  { indicatorNumber: "7.4 – 8.1", rowIndex: 15, area: "PR", indicatorLabel: "7.4 + 8.1. Positive Presence and Participation", excelDescription: "- Utilizes gestures, expressions, and prompts to actively engage all students.\n- Maintains a positive demeanor." },
+  { indicatorNumber: "7.5", rowIndex: 16, area: "PR", indicatorLabel: "7.5. Allowing Time for Student Responses", excelDescription: "Consistently provides appropriate wait time for students to think and respond using English." },
+  { indicatorNumber: "7.6", rowIndex: 17, area: "PR", indicatorLabel: "7.6. Facilitatiing Peer Practice", excelDescription: "Regularly creates opportunities for students to practice speaking in pairs or small groups." },
+  { indicatorNumber: "8.2", rowIndex: 18, area: "PR", indicatorLabel: "8.2. Using Gestures and Props", excelDescription: "- Purposefully integrates gestures and props to enhance comprehension and retention." },
+  { indicatorNumber: "8.3", rowIndex: 19, area: "PR", indicatorLabel: "8.3. Emphasizing Learning Objectives", excelDescription: "Consistently uses visual cues to reinforce lesson objectives and key vocabulary." },
+  { indicatorNumber: "8.4", rowIndex: 20, area: "PR", indicatorLabel: "8.4. Modeling Proper Speech", excelDescription: "- Clearly models speech with correct grammar, intonation, and pronunciation." },
+  { indicatorNumber: "8.5", rowIndex: 21, area: "PR", indicatorLabel: "8.5. Modeling Actions", excelDescription: "- Accurately models actions and movements that align with lesson content." },
 ];
 
-/**
- * Mapping from indicator.number => Excel row + area.
- */
 export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
   "1.1": { rowIndex: 4, area: "LEARNING_ENVIRONMENT" },
   "1.2": { rowIndex: 5, area: "LEARNING_ENVIRONMENT" },
@@ -284,7 +138,7 @@ export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
 };
 
 // -----------------------------------------------------------------
-// 5. Main Export Function
+// 5. Main Export Function (Revised for Hybrid Logic)
 // -----------------------------------------------------------------
 
 export function buildTeacherExportModel(
@@ -300,45 +154,70 @@ export function buildTeacherExportModel(
 
     const good = src?.good ?? false;
     const growth = src?.growth ?? false;
-    // Normalized comment text from the app (contains the \n structure from server)
-    const comment = src?.commentText ?? "";
+    let comment = src?.commentText ?? "";
 
-    // 🟢 3. SHUFFLE SORTER LOGIC
-    const strengthItems: string[] = [];
-    const growthItems: string[] = [];
+    // 1. GLOBAL CLEAN: Remove [OCR] tags and surrounding spaces
+    comment = comment.replace(/\[\s*OCR\s*\]/gi, "").trim();
 
-    // Split by the newlines created on the server
+    // 🟢 DEDUPLICATION: Use Sets to ensure unique lines
+    const strengthSet = new Set<string>();
+    const growthSet = new Set<string>();
+
+    // Split by newlines (created by server glue logic)
     const lines = comment.split("\n").map(l => l.trim()).filter(Boolean);
 
     lines.forEach(line => {
-      // CASE A: Bad Point (Starts with GA)
-      if (line.toUpperCase().startsWith("(GA)")) {
-        const cleanText = line.substring(4).trim(); // Remove "(GA)"
-        if (cleanText) growthItems.push(cleanText);
+      // 🟢 HYBRID LOGIC START
+
+      // Rule A: Explicit Markers (These override everything)
+      
+      // 1. Check for (GA) - Priority 1
+      // Regex looks for (GA) anywhere, even if preceded by "- " or "• "
+      const gaRegex = /[\s\-\•]*\(\s*GA\s*\)(.*)$/i;
+      const gaMatch = line.match(gaRegex);
+
+      if (gaMatch) {
+        // Found (GA) -> It is definitely GROWTH (Bad)
+        // gaMatch[1] contains the text AFTER (GA). Clean it up.
+        const content = gaMatch[1].trim(); 
+        if (content) growthSet.add(content);
+        return; // Line handled, stop processing.
+      } 
+
+      // 2. Check for Hyphen or Bullet - Priority 2
+      if (line.startsWith("-") || line.startsWith("•")) {
+        // Found Hyphen -> It is definitely STRENGTH (Good)
+        const content = line.replace(/^[\s\-\•]+/, "").trim();
+        if (content) strengthSet.add(content);
+        return; // Line handled, stop processing.
       }
-      // CASE B: Good Point (Starts with Hyphen)
-      else if (line.startsWith("-")) {
-        const cleanText = line.substring(1).trim(); // Remove "-"
-        if (cleanText) strengthItems.push(cleanText);
-      }
-      // CASE C: Fallback (No marker?)
-      // Default to Strength to be safe.
-      else {
-        strengthItems.push(line);
+
+      // Rule B: No Markers? Fallback to Checkboxes (Original Logic)
+      if (!good && growth) {
+        // Only "Growth" is checked -> Unlabeled text goes to GROWTH
+        growthSet.add(line);
+      } else {
+        // "Good" is checked OR "Both" checked OR "Neither" -> Unlabeled text goes to STRENGTH
+        strengthSet.add(line);
       }
     });
 
-    // Join with bullets for the final Excel cell
-    let strengths = strengthItems.map(s => `• ${s}`).join("\n");
-    let growths = growthItems.map(g => `• ${g}`).join("\n");
+    // Convert Sets back to Arrays for formatting
+    const strengthItems = Array.from(strengthSet);
+    const growthItems = Array.from(growthSet);
 
-    // 🔽 Fallback: If checkboxes used WITHOUT text, keep simple logic
-    if (!comment) {
-        if (good && !growth) strengths = "• Good performance (checkbox)"; 
-        if (!good && growth) growths = "• Needs improvement (checkbox)";
+    // 🟢 FORMATTING: Join with Hyphens ("- ")
+    let strengths = strengthItems.map(s => `- ${s}`).join("\n");
+    let growths = growthItems.map(g => `- ${g}`).join("\n");
+
+    // 🟢 BLANK CHECK: No default text if empty
+    // If user checked boxes but wrote no text, cells stay blank.
+    if (!strengthItems.length && !growthItems.length) {
+        strengths = "";
+        growths = "";
     }
 
-    // 🔽 Checklist Status (Dropdown Column) logic
+    // Dropdown Logic (Column D)
     let checklist: string;
     if (!good && !growth) {
       checklist = "Not applicable";
@@ -364,8 +243,8 @@ export function buildTeacherExportModel(
       description: layout.excelDescription,
       checklist,
       status,
-      strengths,
-      growths,
+      strengths, // Maps to Column E
+      growths,   // Maps to Column F
       goodFlag: good,
       growthFlag: growth,
     };
