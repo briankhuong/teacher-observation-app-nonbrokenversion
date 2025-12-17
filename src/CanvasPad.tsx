@@ -1,414 +1,370 @@
-import React, { useEffect, useRef, useState } from "react";
-
-interface StrokePoint {
+import React, { useLayoutEffect, useRef, useState, useCallback } from "react";
+import { getStroke } from "perfect-freehand";
+// ------------------------------------------------------------------
+// 1. Configuration (Standard Pen Feel)
+// ------------------------------------------------------------------
+const STROKE_OPTIONS = {
+  size: 3,
+  thinning: 0.3,
+  smoothing: 0.5,
+  streamline: 0.5,
+  easing: (t: number) => t,
+  start: { taper: 0, easing: (t: number) => t, cap: true },
+  end: { taper: 0, easing: (t: number) => t, cap: true },
+};
+function getSvgPathFromStroke(strokePoints: number[][]) {
+  const len = strokePoints.length;
+  if (!len) return "";
+  const d = strokePoints.reduce(
+    (acc, [x0, y0], i, arr) => {
+      const [x1, y1] = arr[(i + 1) % len];
+      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+      return acc;
+    },
+    ["M", ...strokePoints[0], "Q"]
+  );
+  d.push("Z");
+  return d.join(" ");
+}
+export interface StrokePoint {
   x: number;
   y: number;
   pressure: number;
 }
-
 export interface Stroke {
   color: string;
   size: number;
   points: StrokePoint[];
   mode: "pen" | "eraser";
 }
-
 interface CanvasPadProps {
   strokes: Stroke[];
   onChange: (strokes: Stroke[]) => void;
-  readOnly?: boolean; // 🔒 when true, no drawing/editing
+  readOnly?: boolean;
 }
-
-export const CanvasPad: React.FC<CanvasPadProps> = ({
+// ------------------------------------------------------------------
+// 2. Component
+// ------------------------------------------------------------------
+export const CanvasPad = React.memo<CanvasPadProps>(({
   strokes,
   onChange,
   readOnly = false,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Element Refs
+  const canvasStaticRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasLiveRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const [localStrokes, setLocalStrokes] = useState<Stroke[]>(strokes);
-  const [redoStack, setRedoStack] = useState<Stroke[]>([]);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
+  // State Refs (Mutable source of truth to bypass React lag)
+  const history = useRef<Stroke[]>(strokes);
+  const currentStroke = useRef<StrokePoint[]>([]);
+  const isDrawing = useRef(false);
+  // Tools
   const [mode, setMode] = useState<"pen" | "eraser">("pen");
   const [color, setColor] = useState<string>("#e5e7eb");
   const [size, setSize] = useState<number>(3);
-
-  const strokesRef = useRef<Stroke[]>(localStrokes);
-  const currentStrokeRef = useRef<Stroke | null>(currentStroke);
-
-  useEffect(() => {
-    strokesRef.current = localStrokes;
-  }, [localStrokes]);
-
-  useEffect(() => {
-    currentStrokeRef.current = currentStroke;
-  }, [currentStroke]);
-
-  // Keep local strokes in sync when prop changes (e.g. switch indicator)
-  useEffect(() => {
-    setLocalStrokes(strokes);
-    // Do NOT clear redoStack here, or redo breaks
+ 
+  // These are for the UI buttons only
+  const [canUndo, setCanUndo] = useState(strokes.length > 0);
+  const [redoStack, setRedoStack] = useState<Stroke[]>([]);
+  // Refs for event listeners to access latest tools without re-binding
+  const toolsRef = useRef({ mode, color, size, readOnly });
+ 
+  // Keep tools refs updated
+  useLayoutEffect(() => {
+    toolsRef.current = { mode, color, size, readOnly };
+  }, [mode, color, size, readOnly]);
+  // ----------------------------------------------------------------
+  // 3. Drawing Logic (Retina Ready)
+  // ----------------------------------------------------------------
+  const drawAll = () => {
+    const liveCanvas = canvasLiveRef.current;
+    if (!liveCanvas) return;
+    const liveCtx = liveCanvas.getContext("2d");
+    if (!liveCtx) return;
+   
+    // Clear live canvas
+    liveCtx.clearRect(0, 0, liveCanvas.width, liveCanvas.height);
+   
+    // Draw Current Line on live canvas
+    if (currentStroke.current.length > 0) {
+      drawRawStroke(liveCtx, currentStroke.current);
+    }
+  };
+  const drawRawStroke = (ctx: CanvasRenderingContext2D, points: StrokePoint[]) => {
+    if (points.length < 2) return;
+    ctx.lineWidth = toolsRef.current.size * (window.devicePixelRatio || 1);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = toolsRef.current.mode === "pen" ? toolsRef.current.color : "#020617";
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.stroke();
+  };
+  const stampPrettyStroke = (ctx: CanvasRenderingContext2D, stroke: Stroke) => {
+    if (stroke.points.length === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const inputPoints = stroke.points.map((p) => [p.x, p.y, p.pressure]);
+   
+    const outlinePoints = getStroke(inputPoints, {
+      ...STROKE_OPTIONS,
+      size: stroke.size * dpr, // Scale for Retina
+      simulatePressure: true,
+    });
+    const pathData = getSvgPathFromStroke(outlinePoints);
+    ctx.fillStyle = stroke.color;
+   
+    const path = new Path2D(pathData);
+    ctx.fill(path);
+  };
+  const redrawAll = () => {
+    const staticCanvas = canvasStaticRef.current;
+    if (!staticCanvas) return;
+    const ctx = staticCanvas.getContext("2d");
+    if (!ctx) return;
+    const width = staticCanvas.width;
+    const height = staticCanvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    // Clear
+    ctx.clearRect(0, 0, width, height);
+   
+    // Background
+    ctx.fillStyle = "#020617";
+    ctx.fillRect(0, 0, width, height);
+    // Grid
+    ctx.fillStyle = "rgba(148,163,184,0.35)";
+    const spacing = 20 * dpr;
+    for (let x = 0; x < width; x += spacing) {
+      for (let y = 0; y < height; y += spacing) {
+        ctx.beginPath();
+        ctx.arc(x, y, 0.7 * dpr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // Draw History
+    history.current.forEach(stroke => stampPrettyStroke(ctx, stroke));
+  };
+  // ----------------------------------------------------------------
+  // 4. Props Sync (Handling Undo/Redo from Parent)
+  // ----------------------------------------------------------------
+ 
+  useLayoutEffect(() => {
+    // Only update if the length changed externally (e.g. initial load or reset)
+    if (strokes.length !== history.current.length) {
+        history.current = strokes;
+        setCanUndo(strokes.length > 0);
+        redrawAll();
+        requestAnimationFrame(drawAll);
+    }
   }, [strokes]);
-
-  // Resize canvas to match container
-  useEffect(() => {
-    const canvas = canvasRef.current;
+  // ----------------------------------------------------------------
+  // 5. Input Handling
+  // ----------------------------------------------------------------
+  // Helper to get coordinates relative to canvas
+  const getPoint = (x: number, y: number): StrokePoint => {
+    const canvas = canvasLiveRef.current;
+    if (!canvas) return { x: 0, y: 0, pressure: 0.5 };
+   
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+   
+    return {
+      x: (x - rect.left) * dpr,
+      y: (y - rect.top) * dpr,
+      pressure: 0.5, // For mouse/touch, default pressure
+    };
+  };
+  const isStylusTouch = (touch: Touch): boolean => {
+    const anyTouch = touch as any;
+    if (typeof anyTouch.touchType === "string") {
+      return anyTouch.touchType === "stylus";
+    }
+    return true; // Fallback
+  };
+  useLayoutEffect(() => {
+    const liveCanvas = canvasLiveRef.current;
     const container = containerRef.current;
-    if (!canvas || !container) return;
-
+    if (!liveCanvas || !container) return;
+    // Handle Resize
     const resize = () => {
       const rect = container.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-
-      // Use the latest strokes when redrawing
-      drawAll(canvas, strokesRef.current, currentStrokeRef.current);
-    };
-
-    // Initial sizing once layout is ready
-    const frameId = requestAnimationFrame(resize);
-
-    if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => {
-        // Wait for layout to settle, then resize/redraw
-        requestAnimationFrame(resize);
+      const dpr = window.devicePixelRatio || 1;
+     
+      [canvasStaticRef.current, canvasLiveRef.current].forEach(cvs => {
+        if (cvs) {
+          cvs.width = rect.width * dpr;
+          cvs.height = rect.height * dpr;
+          cvs.style.width = `${rect.width}px`;
+          cvs.style.height = `${rect.height}px`;
+        }
       });
-      ro.observe(container);
-
-      return () => {
-        ro.disconnect();
-        cancelAnimationFrame(frameId);
-      };
-    } else {
-      // Fallback: window resize for old browsers
-      window.addEventListener("resize", resize);
-      return () => {
-        window.removeEventListener("resize", resize);
-        cancelAnimationFrame(frameId);
-      };
-    }
-  }, []);
-
-  // Redraw when strokes or currentStroke change
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    drawAll(canvas, localStrokes, currentStroke);
-  }, [localStrokes, currentStroke]);
-
-  // ---- Shared helpers ----
-
-  const beginStrokeAt = (x: number, y: number) => {
-    if (readOnly) return; // 🔒
-    const stroke: Stroke = {
-      color: mode === "pen" ? color : "#020617", // dark bg as eraser
-      size: mode === "pen" ? size : size * 2,
-      points: [{ x, y, pressure: 0.5 }],
-      mode,
+      redrawAll();
+      drawAll();
     };
-    setCurrentStroke(stroke);
-    setIsDrawing(true);
-  };
-
-  const extendStrokeTo = (x: number, y: number) => {
-    if (readOnly) return; // 🔒
-    if (!isDrawing || !currentStroke) return;
-    const updated: Stroke = {
-      ...currentStroke,
-      points: [...currentStroke.points, { x, y, pressure: 0.5 }],
+    // Mouse handlers
+    const handleMouseDown = (e: MouseEvent) => {
+      if (toolsRef.current.readOnly) return;
+      e.preventDefault();
+      isDrawing.current = true;
+      currentStroke.current = [getPoint(e.clientX, e.clientY)];
+      requestAnimationFrame(drawAll);
     };
-    setCurrentStroke(updated);
-  };
-
-  const finishStroke = () => {
-    if (readOnly) {
-      setIsDrawing(false);
-      setCurrentStroke(null);
-      return;
-    }
-
-    if (!isDrawing || !currentStroke) {
-      setIsDrawing(false);
-      return;
-    }
-    const newStrokes = [...localStrokes, currentStroke];
-    setLocalStrokes(newStrokes);
-    setCurrentStroke(null);
-    setIsDrawing(false);
-    setRedoStack([]);
-    onChange(newStrokes);
-  };
-
-  // Small helper to check if a touch is from Apple Pencil
-  // Small helper to check if a touch is from Apple Pencil
-const isStylusTouch = (touch: any): boolean => {
-  const anyTouch = touch as any;
-  // On modern iOS Safari, touchType is "stylus" for Pencil
-  if (typeof anyTouch.touchType === "string") {
-    return anyTouch.touchType === "stylus";
-  }
-  // If touchType is missing (older devices), fall back to allowing it.
-  return true;
-};
-
-
-  // ---- Mouse handlers (for desktop testing only) ----
-
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (readOnly) return; // 🔒
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    beginStrokeAt(e.clientX - rect.left, e.clientY - rect.top);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (readOnly) return; // 🔒
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    extendStrokeTo(e.clientX - rect.left, e.clientY - rect.top);
-  };
-
-  const handleMouseUp = () => {
-    if (readOnly) return; // 🔒
-    finishStroke();
-  };
-
-  const handleMouseLeave = () => {
-    if (readOnly) return; // 🔒
-    finishStroke();
-  };
-
-  // ---- Touch handlers (for iPad / Pencil) ----
-
-  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (readOnly) return; // 🔒
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const touch = e.touches[0];
-    if (!touch) return;
-
-    if (!isStylusTouch(touch)) {
-      return;
-    }
-
-    e.preventDefault();
-
-    const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    beginStrokeAt(x, y);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (readOnly) return; // 🔒
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const touch = e.touches[0];
-    if (!touch) return;
-
-    if (!isStylusTouch(touch)) {
-      return;
-    }
-
-    e.preventDefault();
-
-    const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    extendStrokeTo(x, y);
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (readOnly) return; // 🔒
-    e.preventDefault();
-    finishStroke();
-  };
-
-  const handleTouchCancel = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (readOnly) return; // 🔒
-    e.preventDefault();
-    finishStroke();
-  };
-
-  // ---- Undo / Redo / Clear ----
-
-  const handleUndo = () => {
-    if (readOnly) return; // 🔒
-    if (localStrokes.length === 0) return;
-    const newStrokes = localStrokes.slice(0, -1);
-    const undone = localStrokes[localStrokes.length - 1];
-    setLocalStrokes(newStrokes);
-    setRedoStack((prev) => [...prev, undone]);
-    onChange(newStrokes);
-  };
-
-  const handleRedo = () => {
-    if (readOnly) return; // 🔒
-    if (redoStack.length === 0) return;
-    const last = redoStack[redoStack.length - 1];
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDrawing.current) return;
+      e.preventDefault();
+      currentStroke.current.push(getPoint(e.clientX, e.clientY));
+      requestAnimationFrame(drawAll);
+    };
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!isDrawing.current) return;
+      isDrawing.current = false;
+      commitStroke();
+    };
+    const handleMouseLeave = (e: MouseEvent) => {
+      if (!isDrawing.current) return;
+      isDrawing.current = false;
+      commitStroke();
+    };
+    // Touch handlers
+    const handleTouchStart = (e: TouchEvent) => {
+      if (toolsRef.current.readOnly) return;
+      const touch = e.touches[0];
+      if (!touch || !isStylusTouch(touch)) return;
+      e.preventDefault();
+      isDrawing.current = true;
+      currentStroke.current = [getPoint(touch.clientX, touch.clientY)];
+      requestAnimationFrame(drawAll);
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isDrawing.current) return;
+      const touch = e.touches[0];
+      if (!touch || !isStylusTouch(touch)) return;
+      e.preventDefault();
+      currentStroke.current.push(getPoint(touch.clientX, touch.clientY));
+      requestAnimationFrame(drawAll);
+    };
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!isDrawing.current) return;
+      e.preventDefault();
+      isDrawing.current = false;
+      commitStroke();
+    };
+    const handleTouchCancel = (e: TouchEvent) => {
+      if (!isDrawing.current) return;
+      e.preventDefault();
+      isDrawing.current = false;
+      commitStroke();
+    };
+    const commitStroke = () => {
+      if (currentStroke.current.length > 0) {
+        const newStroke: Stroke = {
+          color: toolsRef.current.mode === "pen" ? toolsRef.current.color : "#020617",
+          size: toolsRef.current.mode === "pen" ? toolsRef.current.size : toolsRef.current.size * 4,
+          points: [...currentStroke.current],
+          mode: toolsRef.current.mode as "pen" | "eraser",
+        };
+        // Commit to static canvas
+        const staticCtx = canvasStaticRef.current?.getContext("2d");
+        if (staticCtx) stampPrettyStroke(staticCtx, newStroke);
+        // Update history
+        history.current = [...history.current, newStroke];
+        setCanUndo(true);
+        setRedoStack([]);
+        // Clear current
+        currentStroke.current = [];
+        requestAnimationFrame(drawAll);
+        // Notify parent
+        onChange([...history.current]);
+      }
+    };
+    // Attach listeners to live canvas
+    const ro = new ResizeObserver(resize);
+    ro.observe(container);
+    resize();
+    liveCanvas.addEventListener("mousedown", handleMouseDown);
+    liveCanvas.addEventListener("mousemove", handleMouseMove);
+    liveCanvas.addEventListener("mouseup", handleMouseUp);
+    liveCanvas.addEventListener("mouseleave", handleMouseLeave);
+    liveCanvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+    liveCanvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+    liveCanvas.addEventListener("touchend", handleTouchEnd, { passive: false });
+    liveCanvas.addEventListener("touchcancel", handleTouchCancel, { passive: false });
+    return () => {
+      ro.disconnect();
+      liveCanvas.removeEventListener("mousedown", handleMouseDown);
+      liveCanvas.removeEventListener("mousemove", handleMouseMove);
+      liveCanvas.removeEventListener("mouseup", handleMouseUp);
+      liveCanvas.removeEventListener("mouseleave", handleMouseLeave);
+      liveCanvas.removeEventListener("touchstart", handleTouchStart);
+      liveCanvas.removeEventListener("touchmove", handleTouchMove);
+      liveCanvas.removeEventListener("touchend", handleTouchEnd);
+      liveCanvas.removeEventListener("touchcancel", handleTouchCancel);
+    };
+  }, []); // Empty dependency array: Setup ONCE.
+  // ----------------------------------------------------------------
+  // 6. Toolbar Actions
+  // ----------------------------------------------------------------
+  const handleUndo = useCallback(() => {
+    if (toolsRef.current.readOnly || history.current.length === 0) return;
+    const newHistory = history.current.slice(0, -1);
+    const undone = history.current[history.current.length - 1];
+   
+    history.current = newHistory;
+    setCanUndo(newHistory.length > 0);
+    setRedoStack(prev => [...prev, undone]);
+   
+    redrawAll();
+    requestAnimationFrame(drawAll);
+    onChange([...newHistory]);
+  }, [onChange]);
+  const handleRedo = useCallback(() => {
+    if (toolsRef.current.readOnly || redoStack.length === 0) return;
+    const toRestore = redoStack[redoStack.length - 1];
     const newRedo = redoStack.slice(0, -1);
-    const newStrokes = [...localStrokes, last];
-    setLocalStrokes(newStrokes);
+   
+    history.current = [...history.current, toRestore];
+    setCanUndo(true);
     setRedoStack(newRedo);
-    onChange(newStrokes);
-  };
-
-  const handleClear = () => {
-    if (readOnly) return; // 🔒
-    setLocalStrokes([]);
+    redrawAll();
+    requestAnimationFrame(drawAll);
+    onChange([...history.current]);
+  }, [redoStack, onChange]);
+  const handleClear = useCallback(() => {
+    if (toolsRef.current.readOnly) return;
+    history.current = [];
+    setCanUndo(false);
     setRedoStack([]);
-    setCurrentStroke(null);
+    redrawAll();
+    requestAnimationFrame(drawAll);
     onChange([]);
-  };
-
+  }, [onChange]);
   return (
     <div className="canvas-pad-wrapper">
       <div className="canvas-pad-toolbar">
         <div className="canvas-pad-tools-left">
-          <button
-            type="button"
-            className={`btn ${mode === "pen" ? "btn-primary" : ""}`}
-            onClick={() => !readOnly && setMode("pen")}
-            disabled={readOnly}
-          >
-            ✏️ Pencil
-          </button>
-          <button
-            type="button"
-            className={`btn ${mode === "eraser" ? "btn-primary" : ""}`}
-            onClick={() => !readOnly && setMode("eraser")}
-            disabled={readOnly}
-          >
-            🧽 Eraser
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={handleUndo}
-            disabled={readOnly || localStrokes.length === 0}
-          >
-            ⤺ Undo
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={handleRedo}
-            disabled={readOnly || redoStack.length === 0}
-          >
-            ⤻ Redo
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={handleClear}
-            disabled={readOnly || localStrokes.length === 0}
-          >
-            Clear
-          </button>
+          <button type="button" className={`btn ${mode === "pen" ? "btn-primary" : ""}`} onClick={() => setMode("pen")}>✏️ Pencil</button>
+          <button type="button" className={`btn ${mode === "eraser" ? "btn-primary" : ""}`} onClick={() => setMode("eraser")}>🧽 Eraser</button>
+          <button type="button" className="btn" onClick={handleUndo} disabled={!canUndo}>⤺ Undo</button>
+          <button type="button" className="btn" onClick={handleRedo} disabled={redoStack.length === 0}>⤻ Redo</button>
+          <button type="button" className="btn" onClick={handleClear} disabled={!canUndo}>Clear</button>
         </div>
         <div className="canvas-pad-tools-right">
-          <label style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            Color{" "}
-            <input
-              type="color"
-              value={color}
-              onChange={(e) => !readOnly && setColor(e.target.value)}
-              disabled={readOnly}
-              style={{ marginLeft: 4 }}
-            />
-          </label>
-          <label style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            Brush{" "}
-            <input
-              type="range"
-              min={1}
-              max={16}
-              value={size}
-              onChange={(e) => !readOnly && setSize(Number(e.target.value))}
-              disabled={readOnly}
-              style={{ marginLeft: 4 }}
-            />
-          </label>
+           <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+           <input type="range" min={1} max={16} value={size} onChange={(e) => setSize(Number(e.target.value))} />
         </div>
       </div>
-
-      <div className="canvas-surface-wrapper" ref={containerRef}>
+      <div className="canvas-surface-wrapper" ref={containerRef} style={{ position: "relative", width: "100%", height: "100%", touchAction: "none" }}>
         <canvas
-          ref={canvasRef}
-          className="canvas-surface"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchCancel}
+          ref={canvasStaticRef}
+          style={{ position: "absolute", top: 0, left: 0, zIndex: 1, width: "100%", height: "100%", touchAction: "none", display: "block" }}
+        />
+        <canvas
+          ref={canvasLiveRef}
+          style={{ position: "absolute", top: 0, left: 0, zIndex: 2, width: "100%", height: "100%", touchAction: "none", display: "block" }}
         />
       </div>
     </div>
   );
-};
-
-function drawAll(
-  canvas: HTMLCanvasElement,
-  strokes: Stroke[],
-  currentStroke: Stroke | null
-) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  // Clear
-  ctx.fillStyle = "#020617";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Dotted grid
-  const spacing = 20;
-  ctx.fillStyle = "rgba(148,163,184,0.35)";
-  for (let x = 0; x < canvas.width; x += spacing) {
-    for (let y = 0; y < canvas.height; y += spacing) {
-      ctx.beginPath();
-      ctx.arc(x, y, 0.7, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  const drawStroke = (stroke: Stroke) => {
-    const pts = stroke.points;
-    if (pts.length === 0) return;
-
-    ctx.strokeStyle = stroke.color;
-    ctx.fillStyle = stroke.color;
-    ctx.lineWidth = stroke.size;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    if (pts.length === 1) {
-      const p = pts[0];
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, stroke.size / 2, 0, Math.PI * 2);
-      ctx.fill();
-      return;
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) {
-      ctx.lineTo(pts[i].x, pts[i].y);
-    }
-    ctx.stroke();
-  };
-
-  strokes.forEach(drawStroke);
-  if (currentStroke) drawStroke(currentStroke);
-}
+});
