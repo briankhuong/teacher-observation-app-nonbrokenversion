@@ -410,6 +410,26 @@ function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
   }));
 }
 
+
+function cleanTextForAdmin(text: string) {
+  if (!text) return "";
+  return text
+    .split('\n') // Split into lines
+    .map(line => {
+      let clean = line.trim();
+      // Remove (GA) (case insensitive)
+      if (clean.toUpperCase().startsWith("(GA)")) {
+        clean = clean.substring(4).trim(); 
+      }
+      // Remove Hyphen
+      else if (clean.startsWith("-")) {
+        clean = clean.substring(1).trim();
+      }
+      return clean;
+    })
+    .filter(Boolean) // Remove empty lines
+    .join('\n'); // Join back together
+}
 // ✅ NEW: Helper to bulk-fetch defaults for a list of observations
 async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[]) {
   if (rawObs.length === 0) return rawObs;
@@ -1247,43 +1267,42 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
   };
 
 // ✅ CLIENT-SIDE MERGE ADMIN HANDLER (With Translation Fix)
-  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     setMergingAdminId(obs.id);
     setActionModal(null);
 
-    // 1. Basic Validation
     const full = loadFullObservation(obs.id);
     if (!full) { alert("Missing local data"); setMergingAdminId(null); return; }
 
     const adminWorkbookUrl = obs.adminWorkbookUrl;
     if (!adminWorkbookUrl) { alert("Admin workbook URL not found."); setMergingAdminId(null); return; }
 
-    // Resolve School ID
+    // Resolve School ID logic... (keep existing)
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
     if (!schoolId) {
-      try {
-        const { data } = await supabase.from("schools").select("id").eq("school_name", obs.schoolName).eq("campus_name", obs.campus).limit(1);
-        if (data?.[0]) schoolId = data[0].id;
-      } catch {}
+       try {
+         const { data } = await supabase.from("schools").select("id").eq("school_name", obs.schoolName).eq("campus_name", obs.campus).limit(1);
+         if (data?.[0]) schoolId = data[0].id;
+       } catch {}
     }
 
     try {
-      // 2. Get Token
       const graphToken = await getGraphAccessToken();
 
-      // 3. Prepare Data
+      // Prepare Data
       const exportMeta = toMetaForExport(full, obs);
       const exportIndicators = toIndicatorsForExport(full);
       const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
 
-      // 👇👇 CRITICAL FIX: Inject the Vietnamese summary if it exists 👇👇
+      // 👇👇 CRITICAL UPDATE: Clean the text before adding to model 👇👇
       if (obs.admin_summary_vn) {
-        adminModel.trainerSummary = obs.admin_summary_vn;
+        // Remove (GA) and Hyphens so Admin sheet looks clean
+        adminModel.trainerSummary = cleanTextForAdmin(obs.admin_summary_vn);
       }
       
       const sheetName = buildAdminSheetName(obs);
 
-      // 🚀 4. RUN CLIENT MERGE
+      // Run Merge
       const result = await clientMergeAdminSheet({
         token: graphToken,
         workbookUrl: adminWorkbookUrl,
@@ -1291,7 +1310,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         model: adminModel
       });
 
-      // 5. Success: Update Database
+      // Update Database
       const mergedAt = new Date().toISOString();
       const newViewUrl = obs.adminViewOnlyUrl || result.viewUrl; 
 
@@ -1304,16 +1323,11 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
-      // 6. Update UI
+      // Update UI
       setObservations((prev) =>
         prev.map((o) => 
           o.id === obs.id 
-            ? { 
-                ...o, 
-                meta: nextMeta, 
-                adminWorkbookUrl, 
-                adminViewOnlyUrl: newViewUrl 
-              } 
+            ? { ...o, meta: nextMeta, adminWorkbookUrl, adminViewOnlyUrl: newViewUrl } 
             : o
         )
       );

@@ -1,6 +1,6 @@
 // src/exportTeacherModel.ts
 
-// Helper: build sheet name like "11.2025"
+// 1. Helper: build sheet name like "11.2025"
 export function buildMonthYearSheetName(dateString?: string): string {
   let d: Date | null = null;
   if (dateString) {
@@ -14,7 +14,7 @@ export function buildMonthYearSheetName(dateString?: string): string {
   return `${month}.${year}`; // e.g. 11.2025
 }
 
-// Helper: build file date label like "2025.11.27"
+// 2. Helper: build file date label like "2025.11.27"
 export function buildFileDateLabel(dateString?: string): string {
   let d: Date | null = null;
   if (dateString) {
@@ -29,6 +29,69 @@ export function buildFileDateLabel(dateString?: string): string {
   return `${year}.${month}.${day}`; // 2025.11.27
 }
 
+// -----------------------------------------------------------------
+// 3. Type Definitions (Self-contained)
+// -----------------------------------------------------------------
+
+export type SupportType = "Training" | "LVA" | "Visit";
+
+/** Meta info for one observation used for export */
+export interface ObservationMetaForExport {
+  teacherName: string;
+  schoolName: string;
+  campus: string;
+  unit: string;
+  lesson: string;
+  supportType: SupportType;
+  date?: string;
+}
+
+/** Minimal per-indicator state we need for teacher export */
+export interface IndicatorStateForExport {
+  id: string;
+  number: string;
+  title: string;
+  description: string;
+  good: boolean;
+  growth: boolean;
+  commentText: string;
+  includeInTrainerSummary?: boolean;
+}
+
+/** Two big areas in the teacher template */
+export type TeacherArea =
+  | "LEARNING_ENVIRONMENT"
+  | "PREPARATION_AND_REFLECTION";
+
+/** Where each indicator should appear in the teacher sheet */
+export interface TeacherRowConfig {
+  rowIndex: number; // Excel row number (4–21 in your template)
+  area: TeacherArea;
+}
+
+/** One resolved row of the teacher export table (row 4–21) */
+export interface TeacherExportRow {
+  rowIndex: number;
+  area: string;
+  indicatorLabel: string;
+  description: string;
+  checklist: string; // "Good" | "Need some work" | "Not applicable"
+  status: "Done" | "Pending" | "";
+  strengths: string;
+  growths: string;
+  goodFlag?: boolean;
+  growthFlag?: boolean;
+}
+
+export interface TeacherExportModel {
+  sheetName: string;
+  headerBlock: string;
+  rows: TeacherExportRow[];
+  teacherName: string;
+  schoolName: string;
+  fileDate: string; // "YYYY.MM.DD"
+}
+
 interface TeacherLayoutEntry {
   indicatorNumber: string;   // must match .number in your app
   rowIndex: number;          // 4–21
@@ -36,6 +99,10 @@ interface TeacherLayoutEntry {
   indicatorLabel: string;    // text that goes into column B
   excelDescription: string;  // full long description for column C
 }
+
+// -----------------------------------------------------------------
+// 4. Layout Configuration
+// -----------------------------------------------------------------
 
 const TEACHER_LAYOUT: TeacherLayoutEntry[] = [
   {
@@ -192,79 +259,13 @@ const TEACHER_LAYOUT: TeacherLayoutEntry[] = [
   },
 ];
 
-// Support type is same as in your app
-export type SupportType = "Training" | "LVA" | "Visit";
-
-/** Meta info for one observation used for export */
-export interface ObservationMetaForExport {
-  teacherName: string;
-  schoolName: string;
-  campus: string;
-  unit: string;
-  lesson: string;
-  supportType: SupportType;
-  /** Optional for now – we will wire this once date is stored in meta */
-  date?: string;
-}
-
-/** Minimal per-indicator state we need for teacher export */
-export interface IndicatorStateForExport {
-  id: string;
-  number: string;
-  title: string;
-  description: string;
-  good: boolean;
-  growth: boolean;
-  commentText: string;
-  includeInTrainerSummary?: boolean;
-}
-
-/** Two big areas in the teacher template */
-export type TeacherArea =
-  | "LEARNING_ENVIRONMENT"
-  | "PREPARATION_AND_REFLECTION";
-
-/** Where each indicator should appear in the teacher sheet */
-export interface TeacherRowConfig {
-  rowIndex: number; // Excel row number (4–21 in your template)
-  area: TeacherArea;
-}
-
-/** One resolved row of the teacher export table (row 4–21) */
-export interface TeacherExportRow {
-  rowIndex: number;
-  area: string;
-  indicatorLabel: string;
-  description: string;
-  checklist: string; // now: "Good" | "Need some work" | "Not applicable"
-  status: "Done" | "Pending" | "";
-  strengths: string;
-  growths: string;
-
-  // used only for preview UI
-  goodFlag?: boolean;
-  growthFlag?: boolean;
-}
-
-export interface TeacherExportModel {
-  sheetName: string;
-  headerBlock: string;
-  rows: TeacherExportRow[];
-  teacherName: string;
-  schoolName: string;
-  fileDate: string; // "YYYY.MM.DD"
-}
-
 /**
  * Mapping from indicator.number => Excel row + area.
  */
 export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
-  // LEARNING ENVIRONMENT (rows 4–6)
   "1.1": { rowIndex: 4, area: "LEARNING_ENVIRONMENT" },
   "1.2": { rowIndex: 5, area: "LEARNING_ENVIRONMENT" },
   "1.3": { rowIndex: 6, area: "LEARNING_ENVIRONMENT" },
-
-  // PREPARATION AND REFLECTION & INSTRUCTIONAL DELIVERY (rows 7–21)
   "2.1.– 2.2": { rowIndex: 7, area: "PREPARATION_AND_REFLECTION" },
   "2.3": { rowIndex: 8, area: "PREPARATION_AND_REFLECTION" },
   "3.1": { rowIndex: 9, area: "PREPARATION_AND_REFLECTION" },
@@ -282,112 +283,9 @@ export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
   "8.5": { rowIndex: 21, area: "PREPARATION_AND_REFLECTION" },
 };
 
-/**
- * Builds the Teacher Export model (no Excel yet) from an observation meta + indicators.
- */
-// export function buildTeacherExportModel(
-//   meta: ObservationMetaForExport,
-//   indicators: IndicatorStateForExport[]
-// ): TeacherExportModel {
-//   const byNumber = new Map(indicators.map((i) => [i.number, i]));
-//   const TRAINER_NAME = "Brian"; // fixed trainer name for now
-
-//   // Human-facing date for the header
-//   const displayDate = meta.date ?? "(not set in app yet)";
-
-//   const rows: TeacherExportRow[] = TEACHER_LAYOUT.map((layout) => {
-//     const src = byNumber.get(layout.indicatorNumber);
-
-//     const good = src?.good ?? false;
-//     const growth = src?.growth ?? false;
-//     const anyMark = good || growth;
-//     const comment = src?.commentText ?? "";
-
-//     // 🔽 Teacher column D dropdown value
-//     // - Good only        → "Good"
-//     // - Growth only      → "Need some work"
-//     // - Good + Growth    → "Good"  (follow Admin: this is "Rất tốt")
-//     // - No mark          → "Not applicable"
-//     let checklist: string;
-//     if (!anyMark) {
-//       checklist = "Not applicable";
-//     } else if (good) {
-//       checklist = "Good";
-//     } else {
-//       checklist = "Need some work";
-//     }
-
-//     // 🔽 Status used only in the preview UI
-//     // - no mark        → ""
-//     // - Growth only    → "Pending"
-//     // - Good only      → "Done"
-//     // - Good + Growth  → "Done" (overall very good)
-//     const status: "" | "Done" | "Pending" =
-//       !anyMark
-//         ? ""
-//         : good && !growth
-//         ? "Done"
-//         : !good && growth
-//         ? "Pending"
-//         : "Done"; // good && growth
-
-//     // 🔽 Decide where the comment goes:
-//     // - Good only        → Strengths
-//     // - Growth only      → Growths
-//     // - Good + Growth    → Strengths only (avoid duplicate text)
-//     let strengths = "";
-//     let growths = "";
-
-//     if (good && !growth) {
-//       strengths = comment;
-//     } else if (!good && growth) {
-//       growths = comment;
-//     } else if (good && growth) {
-//       // Admin: "Rất tốt" → treat as overall strength in Teacher export
-//       strengths = comment;
-//     }
-
-//     return {
-//       rowIndex: layout.rowIndex,
-//       area: layout.area,
-//       indicatorLabel: layout.indicatorLabel,
-//       description: layout.excelDescription,
-//       checklist,
-//       status,
-//       strengths,
-//       growths,
-
-//       // For preview-only UI
-//       goodFlag: good,
-//       growthFlag: growth,
-//     };
-//   });
-
-//   const sheetName = buildMonthYearSheetName(meta.date);
-//   const fileDate = buildFileDateLabel(meta.date);
-
-//   const headerBlock = [
-//     `GrapeSEED Trainer: ${TRAINER_NAME}`,
-//     `School: ${meta.schoolName} – ${meta.campus}`,
-//     `Support type: ${meta.supportType}`,
-//     `Unit ${meta.unit} – Lesson ${meta.lesson}`,
-//     `Teacher: ${meta.teacherName}`,
-//     `Date: ${displayDate}`,
-//   ].join("\n");
-
-//   return {
-//     sheetName,
-//     headerBlock,
-//     rows,
-//     teacherName: meta.teacherName,
-//     schoolName: meta.schoolName,
-//     fileDate,
-//   };
-// }
-
-// src/exportTeacherModel.ts
-
-// ... (imports remain the same) ...
+// -----------------------------------------------------------------
+// 5. Main Export Function
+// -----------------------------------------------------------------
 
 export function buildTeacherExportModel(
   meta: ObservationMetaForExport,
@@ -473,7 +371,6 @@ export function buildTeacherExportModel(
     };
   });
 
-  // ... (rest of function remains the same) ...
   const sheetName = buildMonthYearSheetName(meta.date);
   const fileDate = buildFileDateLabel(meta.date);
 
