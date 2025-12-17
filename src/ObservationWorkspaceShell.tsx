@@ -825,30 +825,31 @@ const handleManualSave = async () => {
 };
 
 const handleAdminReviewSave = async () => {
-  if (!adminPreview) {
-    console.warn("Cannot save admin review: Preview model is missing.");
-    return;
-  }
+    if (!adminPreview) {
+      console.warn("Cannot save admin review: Preview model is missing.");
+      return;
+    }
 
-  // 1. Get the translated summary from the current adminPreview state
-  const translatedSummary = adminPreview.trainerSummary;
+    // 1. Get the translated summary from the current adminPreview state
+    const translatedSummary = adminPreview.trainerSummary;
 
-  try {
-    // 2. Save it to the database
-    await saveAdminSummaryToDb(observationMeta.id, translatedSummary);
+    try {
+      // 2. Save it to the database
+      await saveAdminSummaryToDb(observationMeta.id, translatedSummary);
 
-    // 3. Update the local observation state with the newly saved text
-    // 🔑 FIX: Update the new state variable so the preview remains consistent
-    setAdminSummaryVN(translatedSummary);
-    onSummarySaved(observationMeta.id, translatedSummary);
-    alert("✅ Translated Summary Saved to Database!");
+      // 3. Update the local observation state with the newly saved text
+      // This ensures the preview stays consistent without a reload
+      if (typeof setAdminSummaryVN === 'function') {
+          setAdminSummaryVN(translatedSummary);
+      }
 
-  } catch (err) {
-    console.error("Admin Review Save failed", err);
-    alert("❌ Save failed. Check console for details.");
-  }
-};
-
+      // 4. Success feedback
+      alert("✅ Translated Summary Saved to Database!");
+    } catch (err) {
+      console.error("Admin Review Save failed", err);
+      alert("❌ Save failed. Check console for details.");
+    }
+  };
 
 const handleBackToDashboard = async () => {
   try {

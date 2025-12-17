@@ -175,12 +175,14 @@ function parseAmKey(key: string): { email: string; name: string } {
 
 type SummaryStatus = "none" | "green" | "red";
 
-interface AmSummaryRow {
+// Add adminSummaryVn here
+export interface AmSummaryRow {
   schoolName: string;
   campus: string;
   teacherName: string;
-  status: SummaryStatus;
+  status: "green" | "red" | "none"; // Or 'SummaryStatus' if you have that type defined
   nextSteps: string;
+  adminSummaryVn?: string | null; // <--- ADD THIS LINE
 }
 
 type AmSummarySentMap = Record<string, number>; // key = `${amKey}::${monthKey}`
@@ -228,7 +230,7 @@ async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
     // This prevents the "disappearing badge" bug on fresh loads.
     const { data, error } = await supabase
       .from("observations")
-      .select("meta")
+      .select("id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn")
       .eq("id", obsId)
       .single();
 
@@ -573,6 +575,10 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
       LOAD OBSERVATIONS + SUMMARY META
    --------------------------------- */
    
+/* ------------------------------
+      LOAD OBSERVATIONS + SUMMARY META
+   --------------------------------- */
+   
   React.useEffect(() => {
     if (!user) {
       setObservations([]);
@@ -587,7 +593,8 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
         const { data, error } = await supabase
           .from("observations")
           .select(
-            "id, status, meta, indicators, created_at, updated_at, observation_date"
+            // 🟢 CRITICAL FIX: Added 'admin_summary_vn' to fetch list
+            "id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn"
           )
           .eq("trainer_id", user.id)
           .order("observation_date", { ascending: false })
@@ -677,29 +684,33 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
           }
 
           rows.push({
-          id: parsed.id,
-          teacherName: parsed.meta.teacherName,
-          schoolName: parsed.meta.schoolName,
-          campus: parsed.meta.campus,
-          unit: parsed.meta.unit,
-          lesson: parsed.meta.lesson,
-          supportType: parsed.meta.supportType,
-          dateLabel: displayDate,
-          isoDate,
-          rawDate,
-          status: parsed.status ?? "draft",
-          progress,
-          totalIndicators: total,
-          statusColor,
+            id: parsed.id,
+            teacherName: parsed.meta.teacherName,
+            schoolName: parsed.meta.schoolName,
+            campus: parsed.meta.campus,
+            unit: parsed.meta.unit,
+            lesson: parsed.meta.lesson,
+            supportType: parsed.meta.supportType,
+            dateLabel: displayDate,
+            isoDate,
+            rawDate,
+            status: parsed.status ?? "draft",
+            progress,
+            totalIndicators: total,
+            statusColor,
 
-          // 🔴 FIX: Check BOTH 'teacherWorkbookUrl' and 'teacherSheetUrl'
-          teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? parsed.meta.teacherSheetUrl ?? null,
-          
-          // 🔴 FIX: Do the same for Admin URL just in case
-          adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? parsed.meta.adminSheetUrl ?? null,
+            // Workbook Links (Check both old & new keys)
+            teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? parsed.meta.teacherSheetUrl ?? null,
+            adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? parsed.meta.adminSheetUrl ?? null,
+            
+            // 🟢 FIX: Ensure View-Only URL is mapped so 'enrichObservations' works properly
+            adminViewOnlyUrl: parsed.meta.adminViewOnlyUrl ?? parsed.meta.adminWorkbookViewUrl ?? null,
 
-          meta: parsed.meta ?? {}, 
-        });
+            // 🟢 FIX: Map the translated summary from the DB row
+            admin_summary_vn: dbRow.admin_summary_vn,
+            
+            meta: parsed.meta ?? {},
+          });
         });
       } catch (err) {
         console.error("[Dashboard] unexpected error loading observations", err);
@@ -874,18 +885,18 @@ const handleSummarySaved = React.useCallback(
   }, [observations, summaryMonth]);
 
   // Build summary rows when both month + AM are chosen
-  // Build summary rows when both month + AM are chosen
-React.useEffect(() => {
+// Build summary rows when both month + AM are chosen
+  React.useEffect(() => {
     if (!summaryMonth || !summaryAmKey) {
       setSummaryRows([]);
       return;
     }
 
-    // key: teacher|school|campus
+    // 1. Use the MAIN interface defined at the top of your file.
     const rowMap = new Map<string, AmSummaryRow>();
 
     observations.forEach((o) => {
-      // Assuming 'o' is a type that includes 'admin_summary_vn: string | null | undefined'
+      // Basic filtering
       const mk = monthKeyFromTs(o.rawDate);
       if (mk !== summaryMonth) return;
 
@@ -895,56 +906,47 @@ React.useEffect(() => {
       if (amKey !== summaryAmKey) return;
 
       // -----------------------------------------------------------------
-      // 🔑 FIX: PRIORITIZE SAVED TRANSLATION (admin_summary_vn)
+      // Logic: Determine "Best Available" Summary Text
       // -----------------------------------------------------------------
       let collected = "";
-      
-      // 1. Check if the dedicated translated summary is available (highest priority)
-      // We assume 'o' in the observations array is augmented with data from the DB load.
+
+      // A. Priority: Database translated summary (requires the load fix above!)
       if (o.admin_summary_vn) {
-          collected = o.admin_summary_vn;
+        collected = o.admin_summary_vn;
       } else {
-          // 2. Fallback: If no dedicated translated summary exists, build the
-          //    English/Source summary from local storage (original logic).
-          
-          const storageKey = `${STORAGE_PREFIX}${o.id}`;
-          let details: any = null;
-          try {
-            // Note: This local storage lookup is retained for legacy/offline support
-            const raw = localStorage.getItem(storageKey); 
-            if (raw) details = JSON.parse(raw);
-          } catch (err) {
-            console.error("Failed to load full observation cache:", storageKey, err);
-          }
+        // B. Fallback: Local Storage English indicators
+        const storageKey = `${STORAGE_PREFIX}${o.id}`;
+        let details: any = null;
+        try {
+          const raw = localStorage.getItem(storageKey);
+          if (raw) details = JSON.parse(raw);
+        } catch (err) { /* ignore */ }
 
-          const obsLabel = o.dateLabel || mk;
+        const obsLabel = o.dateLabel || mk;
 
-          if (details && Array.isArray(details.indicators)) {
-            (details.indicators as any[]).forEach((ind) => {
-              const comment = (ind.commentText ?? "").toString().trim();
-              const hasComment = comment.length > 0;
+        if (details && Array.isArray(details.indicators)) {
+          (details.indicators as any[]).forEach((ind) => {
+            const comment = (ind.commentText ?? "").toString().trim();
+            const hasComment = comment.length > 0;
+            const explicitlyFlagged =
+              ind.includeInTrainerSummary === true && hasComment;
+            const legacyFlagged =
+              ind.includeInTrainerSummary === undefined &&
+              !!ind.growth &&
+              hasComment;
 
-              // Prefer explicit trainer-summary checkbox
-              const explicitlyFlagged =
-                ind.includeInTrainerSummary === true && hasComment;
+            if (!explicitlyFlagged && !legacyFlagged) return;
 
-              // Fallback for old observations (no checkbox yet):
-              const legacyFlagged =
-                ind.includeInTrainerSummary === undefined &&
-                !!ind.growth &&
-                hasComment;
-
-              if (!explicitlyFlagged && !legacyFlagged) return;
-
-              const number = ind.number ?? "";
-              const line = `- [${obsLabel}] ${number}: ${comment}`;
-              collected += (collected ? "\n" : "") + line;
-            });
-          }
+            const number = ind.number ?? "";
+            const line = `- [${obsLabel}] ${number}: ${comment}`;
+            collected += (collected ? "\n" : "") + line;
+          });
+        }
       }
+
       // -----------------------------------------------------------------
-
-
+      // Aggregate into Map
+      // -----------------------------------------------------------------
       const key = `${o.teacherName}|${o.schoolName}|${o.campus}`;
 
       if (!rowMap.has(key)) {
@@ -952,24 +954,30 @@ React.useEffect(() => {
           schoolName: o.schoolName,
           campus: o.campus,
           teacherName: o.teacherName,
-          status: "none",
-          nextSteps: collected, // Use the collected (now potentially VN) text
+          // 🛑 FIX: Cast specifically to 'any' or the specific union type to allow "none"
+          status: "none" as any, 
+          
+          // Initial values
+          nextSteps: collected,
+          adminSummaryVn: collected,
         });
       } else {
         const existing = rowMap.get(key)!;
-        
-        // This append logic is retained from original code to merge multiple observations
-        const appended = collected
-          ? [existing.nextSteps, collected].filter(Boolean).join("\n")
-          : existing.nextSteps;
-          
+
+        // Helper to append text safely
+        const appendText = (current: string, newText: string) =>
+          newText ? [current, newText].filter(Boolean).join("\n") : current;
+
         rowMap.set(key, {
           ...existing,
-          nextSteps: appended,
+          nextSteps: appendText(existing.nextSteps, collected),
+          // Append to both so they stay in sync if multiple observations merge
+          adminSummaryVn: appendText(existing.adminSummaryVn || "", collected),
         });
       }
     });
 
+    // Sort by teacher name
     const rows = Array.from(rowMap.values()).sort((a, b) =>
       a.teacherName.localeCompare(b.teacherName)
     );
@@ -977,8 +985,6 @@ React.useEffect(() => {
     setSummaryRows(rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryMonth, summaryAmKey, observations]);
-
-
 
   // Build email body from current table state
   const emailBody = React.useMemo(() => {
@@ -1240,7 +1246,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     }
   };
 
-// ✅ CLIENT-SIDE MERGE ADMIN HANDLER (Fixed UI Update)
+// ✅ CLIENT-SIDE MERGE ADMIN HANDLER (With Translation Fix)
   const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     setMergingAdminId(obs.id);
     setActionModal(null);
@@ -1269,6 +1275,12 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       const exportMeta = toMetaForExport(full, obs);
       const exportIndicators = toIndicatorsForExport(full);
       const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
+
+      // 👇👇 CRITICAL FIX: Inject the Vietnamese summary if it exists 👇👇
+      if (obs.admin_summary_vn) {
+        adminModel.trainerSummary = obs.admin_summary_vn;
+      }
+      
       const sheetName = buildAdminSheetName(obs);
 
       // 🚀 4. RUN CLIENT MERGE
@@ -1281,18 +1293,18 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
       // 5. Success: Update Database
       const mergedAt = new Date().toISOString();
-      const newViewUrl = obs.adminViewOnlyUrl || result.viewUrl; // Capture the URL here
+      const newViewUrl = obs.adminViewOnlyUrl || result.viewUrl; 
 
       const patch = {
         mergedAdmin: { url: result.sheetUrl, sheetName: result.sheetName, mergedAt },
         adminWorkbookUrl,
-        adminWorkbookViewUrl: newViewUrl, // Save to DB
+        adminWorkbookViewUrl: newViewUrl, 
         schoolId,
       };
 
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
-      // 6. Update UI (The Fix is Here)
+      // 6. Update UI
       setObservations((prev) =>
         prev.map((o) => 
           o.id === obs.id 
@@ -1300,7 +1312,6 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                 ...o, 
                 meta: nextMeta, 
                 adminWorkbookUrl, 
-                // ✅ FIX: Explicitly update the view link in local state so the button appears!
                 adminViewOnlyUrl: newViewUrl 
               } 
             : o
@@ -2041,65 +2052,145 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                         <th>School</th>
                         <th>Campus</th>
                         <th>Teacher</th>
-                        <th>Status</th>
-                        <th>Next steps / key issues</th>
+                        <th style={{ width: "100px" }}>Status</th>
+                        {/* Widen this column slightly */}
+                        <th style={{ width: "40%" }}>Next steps / Key issues</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {summaryRows.map((row, idx) => (
-                        <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
-                          <td>{row.schoolName}</td>
-                          <td>{row.campus}</td>
-                          <td>{row.teacherName}</td>
-                          <td>
-                            <select
-                              className="select select-compact"
-                              value={row.status}
-                              onChange={(e) => {
-                                const value = e.target.value as SummaryStatus;
-                                setSummaryRows((prev) =>
-                                  prev.map((r, i) =>
-                                    i === idx ? { ...r, status: value } : r
-                                  )
-                                );
-                              }}
-                            >
-                              <option value="none">–</option>
-                              <option value="green">Green</option>
-                              <option value="red">Red</option>
-                            </select>
-                          </td>
-                          <td>
-                            <textarea
-                              value={row.nextSteps}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                setSummaryRows((prev) =>
-                                  prev.map((r, i) =>
-                                    i === idx ? { ...r, nextSteps: value } : r
-                                  )
-                                );
-                              }}
-                              rows={3}
-                            />
-                          </td>
-                        </tr>
-                      ))}
+                          {summaryRows.map((row, idx) => (
+      <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
+        <td>{row.schoolName}</td>
+        <td>{row.campus}</td>
+        <td>{row.teacherName}</td>
+        <td>
+          <select
+            className="select select-compact"
+            value={row.status}
+            onChange={(e) => {
+              const value = e.target.value as any;
+              setSummaryRows((prev) =>
+                prev.map((r, i) =>
+                  i === idx ? { ...r, status: value } : r
+                )
+              );
+            }}
+          >
+            <option value="none">–</option>
+            <option value="green">Green</option>
+            <option value="red">Red</option>
+          </select>
+        </td>
+        <td>
+          {/* 🟢 LOGIC UPDATE: Only show Blue Box if text DIFFERS from current edit */}
+          {(row as any).adminSummaryVn &&
+            (row as any).adminSummaryVn.trim() !== row.nextSteps.trim() && (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: 8,
+                  background: "rgba(56, 189, 248, 0.1)",
+                  borderRadius: 6,
+                  border: "1px solid rgba(56, 189, 248, 0.3)",
+                  fontSize: 11,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 4,
+                  }}
+                >
+                  <strong style={{ color: "#0ea5e9" }}>
+                    Original (VN):
+                  </strong>
+                  <button
+                    type="button"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#0ea5e9",
+                      fontSize: 10,
+                      textDecoration: "underline",
+                    }}
+                    onClick={() => {
+                      // Reset: overwrite textarea with original VN text
+                      // (This will hide this blue box immediately)
+                      setSummaryRows((prev) =>
+                        prev.map((r, i) =>
+                          i === idx
+                            ? {
+                                ...r,
+                                nextSteps: (row as any).adminSummaryVn,
+                              }
+                            : r
+                        )
+                      );
+                    }}
+                  >
+                    Reset to Original ↓
+                  </button>
+                </div>
+                <div
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {(row as any).adminSummaryVn}
+                </div>
+              </div>
+            )}
+
+          <textarea
+            className="input"
+            style={{ width: "100%", fontSize: 12 }}
+            placeholder="Add notes for AM..."
+            value={row.nextSteps}
+            onChange={(e) => {
+              const value = e.target.value;
+              setSummaryRows((prev) =>
+                prev.map((r, i) =>
+                  i === idx ? { ...r, nextSteps: value } : r
+                )
+              );
+            }}
+            rows={3}
+          />
+        </td>
+      </tr>
+    ))}
                     </tbody>
                   </table>
                 </div>
 
-                {/* NEW: PREVIEW & SEND SECTION */}
+                {/* EMAIL PREVIEW & SEND SECTION */}
                 <div className="am-summary-email-section">
                   <div className="am-summary-email-header">
                     <span>Final Step: Email</span>
                   </div>
 
-                  <div style={{ padding: 16, background: "#f3f4f6", borderRadius: 8, textAlign: "center" }}>
-                    <p style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>
-                      Review the table above. Click below to generate the email, add your message, and send via Outlook.
+                  <div
+                    style={{
+                      padding: 16,
+                      background: "#f3f4f6",
+                      borderRadius: 8,
+                      textAlign: "center",
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "#6b7280",
+                        marginBottom: 12,
+                      }}
+                    >
+                      Review the table above. Click below to generate the email,
+                      add your message, and send via Outlook.
                     </p>
-                    
+
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -2107,7 +2198,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                       disabled={summaryRows.length === 0}
                       onClick={() => {
                         const { email, name } = parseAmKey(summaryAmKey);
-                        
+
                         // Generate Table HTML for the "Sandwich"
                         const tableHtml = `
                           <table style="border-collapse: collapse; width: 100%; font-size: 14px; border: 1px solid #d1d5db;">
@@ -2117,29 +2208,68 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                                 <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Campus</th>
                                 <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Teacher</th>
                                 <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Status</th>
-                                <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Next Steps</th>
+                                <th style="padding: 8px; border: 1px solid #d1d5db; text-align: left;">Next Steps / Summary</th>
                               </tr>
                             </thead>
                             <tbody>
-                              ${summaryRows.map(r => {
-                                const bg = r.status === 'green' ? '#dcfce7' : r.status === 'red' ? '#fee2e2' : '#ffffff';
-                                const text = r.status === 'green' ? '#166534' : r.status === 'red' ? '#991b1b' : '#374151';
-                                const statusLabel = r.status === 'green' ? 'GREEN' : r.status === 'red' ? 'RED' : '-';
-                                return `
+                              ${summaryRows
+                                .map((r) => {
+                                  const bg =
+                                    r.status === "green"
+                                      ? "#dcfce7"
+                                      : r.status === "red"
+                                      ? "#fee2e2"
+                                      : "#ffffff";
+                                  const text =
+                                    r.status === "green"
+                                      ? "#166534"
+                                      : r.status === "red"
+                                      ? "#991b1b"
+                                      : "#374151";
+                                  const statusLabel =
+                                    r.status === "green"
+                                      ? "GREEN"
+                                      : r.status === "red"
+                                      ? "RED"
+                                      : "-";
+
+                                  // Logic: Prefer user-edited 'nextSteps'.
+                                  // If empty, fallback to 'adminSummaryVn'.
+                                  // If both exist and differ, show both (optional logic).
+                                  const vnSum = (r as any).adminSummaryVn || "";
+                                  const notes = r.nextSteps || "";
+                                  let finalContent = "";
+
+                                  if (notes && vnSum && notes !== vnSum) {
+                                    // Show editable notes first, then reference original summary below
+                                    finalContent = `<div>${notes}</div><div style="margin-top:8px; padding-top:8px; border-top:1px dashed #ccc; color:#555; font-size:13px;"><em>Admin Summary:</em><br/>${vnSum}</div>`;
+                                  } else if (notes) {
+                                    finalContent = notes;
+                                  } else {
+                                    finalContent = vnSum;
+                                  }
+
+                                  // Convert newlines to breaks for HTML email
+                                  finalContent = finalContent.replace(
+                                    /\n/g,
+                                    "<br/>"
+                                  );
+
+                                  return `
                                   <tr style="background-color: ${bg};">
                                     <td style="padding:8px; border:1px solid #e5e7eb;">${r.schoolName}</td>
                                     <td style="padding:8px; border:1px solid #e5e7eb;">${r.campus}</td>
                                     <td style="padding:8px; border:1px solid #e5e7eb;">${r.teacherName}</td>
                                     <td style="padding:8px; border:1px solid #e5e7eb; color: ${text}; font-weight: bold;">${statusLabel}</td>
-                                    <td style="padding:8px; border:1px solid #e5e7eb;">${r.nextSteps}</td>
+                                    <td style="padding:8px; border:1px solid #e5e7eb;">${finalContent}</td>
                                   </tr>`;
-                              }).join('')}
+                                })
+                                .join("")}
                             </tbody>
                           </table>
                         `;
 
                         setEmailModalState({
-                      
                           isOpen: true,
                           mode: "sandwich",
                           emailType: "am",
@@ -2149,8 +2279,9 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                           sandwichData: {
                             intro: `Dear ${name},\n\nHere is the GrapeSEED support summary for ${summaryMonth}. Please see the details below.`,
                             tableHtml: tableHtml,
-                            outro: "If you have any questions, please let me know.\n\nBest regards,\nGrapeSEED Trainer"
-                          }
+                            outro:
+                              "If you have any questions, please let me know.\n\nBest regards,\nGrapeSEED Trainer",
+                          },
                         });
                       }}
                     >
@@ -2158,7 +2289,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                     </button>
                   </div>
 
-                  <div className="am-summary-footer" style={{marginTop: 12}}>
+                  <div className="am-summary-footer" style={{ marginTop: 12 }}>
                     <button
                       type="button"
                       className="btn"
