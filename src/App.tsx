@@ -86,6 +86,19 @@ const App: React.FC = () => {
     setScreen("workspace");
   };
 
+// 🟢 NEW: Calculate the trainer name for the Top Bar
+  const trainerName = React.useMemo(() => {
+    if (!session?.user) return null;
+    const u = session.user;
+    // Check Azure/Microsoft fields first, then custom, then fallback to email
+    return (
+      u.user_metadata?.full_name || 
+      u.user_metadata?.name || 
+      u.user_metadata?.display_name || 
+      u.email
+    );
+  }, [session]);
+  
   return (
     <div className="app-root">
       <header className="top-bar">
@@ -94,9 +107,9 @@ const App: React.FC = () => {
         </div>
 
         <div className="top-bar-right">
-          <span className="badge">
-            {session ? `Trainer: ${session.user.email}` : 'Not Signed In'}
-          </span>
+         <span className="badge">
+          {trainerName ? `Trainer: ${trainerName}` : 'Not Signed In'}
+        </span>
 
           <button className="btn-ghost" onClick={goToDashboard}>
             Dashboard
