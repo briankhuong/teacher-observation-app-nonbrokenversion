@@ -1,3 +1,4 @@
+// src/ObservationWorkspaceShell.tsx
 import { exportTeacherExcel } from "./exportTeacherExcel";
 import { CanvasPad } from "./CanvasPad";
 import React, { useEffect, useRef,useState } from "react";
@@ -461,25 +462,32 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
 
 
 // 🚀 Real OCR hook: strokes → PNG base64 → Render Server → Azure
+// src/ObservationWorkspaceShell.tsx
+
+// 🚀 Real OCR hook: strokes → PNG base64 → Render Server → Azure
+// 🛡️ UPDATE: Added AbortController for 15s timeout (Reliable Sync Strategy)
 async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
-  // CRITICAL CHECK: Ensure the base URL is defined before attempting to fetch
   if (!MERGE_SERVER_BASE) {
-      console.error("VITE_MERGE_SERVER_BASE is missing. Cannot perform OCR.");
-      return { text: "Error: Server base URL is not configured.", confidence: 0 };
+    console.error("VITE_MERGE_SERVER_BASE is missing. Cannot perform OCR.");
+    return { text: "Error: Server base URL is not configured.", confidence: 0 };
   }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15-second Circuit Breaker
 
   try {
     const imageBase64 = await strokesToPngBase64(strokes);
 
-    // 🟢 FIX: Explicitly use the Render URL + the API endpoint
     const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-azure`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageBase64 }),
+      signal: controller.signal, // 🔌 Attach signal
     });
 
+    clearTimeout(timeoutId); // ✅ Clear timeout on success
+
     if (!response.ok) {
-      // Try to read the error message from the server if possible
       const errorText = await response.text();
       console.error("Azure OCR HTTP error", response.status, errorText);
       return { text: `Error: Server responded with status ${response.status}`, confidence: 0 };
@@ -491,11 +499,18 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
       text: data.text ?? "",
       confidence: typeof data.confidence === "number" ? data.confidence : 0.7,
     };
-  } catch (err) {
-    console.error("Azure OCR request failed (Network/Fetch error)", err);
+  } catch (err: any) {
+    clearTimeout(timeoutId); // 🧹 Cleanup
+    if (err.name === 'AbortError') {
+      console.error("Azure OCR timed out");
+      return { text: "Error: Network timed out (15s). Handwritng saved locally.", confidence: 0 };
+    }
+    console.error("Azure OCR request failed", err);
     return { text: "Error: Could not reach the API server.", confidence: 0 };
   }
 }
+
+
 
 // Normalize indicators coming from DB or localStorage so we always have an array
 function normalizeIndicators(raw: any): any[] {
@@ -685,34 +700,40 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
 }, [storageKey, observationMeta.id]);
 
 
+// ... inside ObservationWorkspaceShell component ...
 
+  const persistObservation = React.useCallback(
+    async (payload: SavedObservationPayload) => {
+      // 1️⃣ Local cache (SYNCHRONOUS PRIORITY)
+      // This guarantees data safety on the device immediately.
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(payload));
+        // Optimistically update "Saved at" so UI feels instant
+        setLastSavedAt(payload.updatedAt); 
+      } catch (err) {
+        console.error("Failed to write observation to localStorage", err);
+      }
 
-const persistObservation = React.useCallback(
-  async (payload: SavedObservationPayload) => {
-    // 1️⃣ Local cache
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(payload));
-    } catch (err) {
-      console.error("Failed to write observation to localStorage", err);
-    }
-
-    // 2️⃣ Supabase sync
-    try {
-      await saveObservationToDb({
-        id: payload.id,
-        status: payload.status,
-        meta: payload.meta,
-        indicators: payload.indicators,
-      });
-    } catch (err) {
-      console.error(
-        "[Workspace] Failed to sync observation to Supabase",
-        err
-      );
-    }
-  },
-  [storageKey]
-);
+      // 2️⃣ Supabase sync (BACKGROUND ASYNC)
+      // We do NOT await this in critical UI paths anymore.
+      try {
+        await saveObservationToDb({
+          id: payload.id,
+          status: payload.status,
+          meta: payload.meta,
+          indicators: payload.indicators,
+        });
+        setSaveStatus(payload.status === "saved" ? "saved" : "idle");
+      } catch (err) {
+        console.error(
+          "[Workspace] Failed to sync observation to Supabase (Offline?)",
+          err
+        );
+        // Optional: You could set a 'sync-error' state here to show a warning icon
+      }
+    },
+    [storageKey]
+  );
 
 
    useEffect(() => {
@@ -787,42 +808,30 @@ const persistObservation = React.useCallback(
     return hasMark || hasComment || hasInk;
   }).length;
 
-const handleManualSave = async () => {
-  if (canvasDirty) {
-    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-    setCanvasDirty(false);
-  }
 
-  try {
+
+const handleManualSave = async () => { // async keyword kept for compatibility, but logical flow changes
+    if (canvasDirty) {
+      handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+      setCanvasDirty(false);
+    }
+
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
-      meta: {
-        teacherName,
-        schoolName,
-        campus,
-        unit,
-        lesson,
-        supportType,
-        date,
-      },
+      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
       indicators,
       status: observationStatus,
       updatedAt: Date.now(),
-      // ✅ INCLUDE FLAGS
-      isGood,
-      isBad,
-      isFavorite,
+      isGood, isBad, isFavorite,
     };
 
-    // 🟢 NEW: Use persistObservation so it hits the Database
-    await persistObservation(payload);
+    // 🟢 NEW: Fire and forget (LocalStorage handles the safety)
+    persistObservation(payload); 
+    
+    // UI Feedback is now handled inside persistObservation's local step
+  };
 
-    setLastSavedAt(payload.updatedAt);
-    setSaveStatus(observationStatus === "saved" ? "saved" : "idle");
-  } catch (err) {
-    console.error("Manual save failed", err);
-  }
-};
+
 
 const handleAdminReviewSave = async () => {
     if (!adminPreview) {
@@ -851,45 +860,38 @@ const handleAdminReviewSave = async () => {
     }
   };
 
-const handleBackToDashboard = async () => {
-  try {
-    if (canvasDirty) {
-      handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-      setCanvasDirty(false);
+const handleBackToDashboard = () => { // 🟢 Removed 'async' - navigation should be instant
+    try {
+      // 1. Force flush any pending strokes state
+      let finalIndicators = indicators;
+      if (canvasDirty) {
+        // We manually apply the patch here to ensure the payload is fresh
+        // independent of React's next render cycle
+        finalIndicators = indicators.map((ind, i) => 
+          i === activeIndex ? { ...ind, strokes: ind.strokes } : ind
+        );
+        setCanvasDirty(false);
+      }
+
+      const payload: SavedObservationPayload = {
+        id: observationMeta.id,
+        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        indicators: finalIndicators,
+        status: observationStatus,
+        updatedAt: Date.now(),
+        isGood, isBad, isFavorite,
+      };
+
+      // 2. Persist (Local = Instant, Cloud = Background)
+      persistObservation(payload);
+      
+    } catch (err) {
+      console.error("Back-to-dashboard save failed", err);
     }
 
-    const payload: SavedObservationPayload = {
-      id: observationMeta.id,
-      meta: {
-        teacherName,
-        schoolName,
-        campus,
-        unit,
-        lesson,
-        supportType,
-        date,
-      },
-      indicators,
-      status: observationStatus,
-      updatedAt: Date.now(),
-      // ✅ INCLUDE FLAGS
-      isGood,
-      isBad,
-      isFavorite,
-    };
-
-    // 🔴 OLD: localStorage.setItem(...) <-- This was the problem. It ignored Supabase.
-    // 🟢 NEW: Save to BOTH LocalStorage and Supabase before leaving.
-    await persistObservation(payload); 
-    
-    setLastSavedAt(payload.updatedAt);
-    setSaveStatus(observationStatus === "saved" ? "saved" : "idle");
-  } catch (err) {
-    console.error("Back-to-dashboard save failed", err);
-  }
-
-  onBack();
-};
+    // 3. Navigate immediately
+    onBack();
+  };
 
 const handleMarkCompleted = async () => {
   if (isLocked) return;
@@ -1494,41 +1496,31 @@ const toggleIncludeInTrainerSummary = (index: number) => {
       ))}
     </>
   );
-const handleToggleLock = async () => {
-  if (canvasDirty) {
-    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-    setCanvasDirty(false);
-  }
+const handleToggleLock = () => { // 🟢 Removed 'async'
+    if (canvasDirty) {
+      handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+      setCanvasDirty(false);
+    }
 
-  const nextStatus: "draft" | "saved" =
-    observationStatus === "draft" ? "saved" : "draft";
+    const nextStatus: "draft" | "saved" =
+      observationStatus === "draft" ? "saved" : "draft";
 
-  const payload: SavedObservationPayload = {
-    id: observationMeta.id,
-    meta: {
-      teacherName,
-      schoolName,
-      campus,
-      unit,
-      lesson,
-      supportType,
-      date,
-    },
-    indicators,
-    status: nextStatus,
-    updatedAt: Date.now(),
-    scratchpadText,
-    isGood,
-      isBad,
-      isFavorite,
+    const payload: SavedObservationPayload = {
+      id: observationMeta.id,
+      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      indicators,
+      status: nextStatus,
+      updatedAt: Date.now(),
+      scratchpadText,
+      isGood, isBad, isFavorite,
+    };
+
+    // Fire and forget
+    persistObservation(payload);
+
+    setObservationStatus(nextStatus);
+    // lastSavedAt and saveStatus are handled inside persistObservation now
   };
-
-  await persistObservation(payload);
-
-  setObservationStatus(nextStatus);
-  setLastSavedAt(payload.updatedAt);
-  setSaveStatus(nextStatus === "saved" ? "saved" : "idle");
-};
 
 
   return (
@@ -1872,12 +1864,11 @@ const handleToggleLock = async () => {
             </div>
 
             <CanvasPad
+            key={active.id}
             strokes={active.strokes}
             onChange={(s) => handleStrokesChange(activeIndex, s)}
             readOnly={isLocked}
           />
-
-
             {/* 🔤 Manual OCR button */}
             <div
               style={{
@@ -1897,21 +1888,19 @@ const handleToggleLock = async () => {
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={handleConvertHandwritingToText}
-                    disabled={
-  isOcrRunning ||
-  !active.strokes ||
-  !active.strokes.some(s => s.points && s.points.length > 0)
-}
-                  >
-                    {isOcrRunning
-                      ? "Converting…"
-                      : "Convert handwriting to text (OCR)"}
-                  </button>
 
+              <button
+                type="button"
+                className="btn"
+                onClick={handleConvertHandwritingToText}
+                disabled={
+                  isOcrRunning || // 🛡️ This will now reset after 15s thanks to the timeout block
+                  !active.strokes ||
+                  !active.strokes.some(s => s.points && s.points.length > 0)
+                }
+              >
+                {isOcrRunning ? "Converting…" : "Convert handwriting to text (OCR)"}
+              </button>
                   {active.ocrPendingReview && (
                     <span className="ocr-pill ocr-pill-pending">Needs review</span>
                   )}
