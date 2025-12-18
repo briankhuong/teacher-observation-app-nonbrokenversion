@@ -517,6 +517,11 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   onOpenObservation,
 }) => {
   const { user } = useAuth();
+  const trainerName = 
+    user?.user_metadata?.full_name || 
+    user?.user_metadata?.name || 
+    user?.user_metadata?.display_name ||
+    (user?.email ? user.email.split('@')[0] : "GrapeSEED Trainer");
 
   const [observations, setObservations] =
     useState<DashboardObservationRow[]>([]);
@@ -1092,7 +1097,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       teacherName: obs.teacherName,
       schoolName: obs.schoolName,
       campus: obs.campus,
-      trainerName: user?.email || "GrapeSEED Trainer",
+      trainerName: trainerName, // 🟢 UPDATED: Uses real name
       teacherWorkbookUrl: obs.teacherWorkbookUrl,
     });
 
@@ -1115,7 +1120,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       teacherName: obs.teacherName,
       schoolName: obs.schoolName,
       campus: obs.campus,
-      trainerName: user?.email || "GrapeSEED Trainer",
+      trainerName: trainerName, // 🟢 UPDATED: Uses real name
       teacherWorkbookUrl: obs.teacherWorkbookUrl,
     });
 
@@ -1161,7 +1166,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         adminName: "School Admin",
         schoolName: obs.schoolName,
         reportMonth: monthLabel,
-        trainerName: user?.email || "GrapeSEED Trainer",
+        trainerName: trainerName, // 🟢 UPDATED
         adminWorkbookUrl: obs.adminWorkbookUrl,
         viewOnlyUrl: obs.adminViewOnlyUrl,
         teachers: matches.map(m => ({
@@ -1178,7 +1183,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         adminName: "School Admin",
         schoolName: obs.schoolName,
         campus: obs.campus,
-        trainerName: user?.email || "GrapeSEED Trainer",
+        trainerName: trainerName, // 🟢 UPDATED
         teacherName: obs.teacherName,
         adminWorkbookUrl: obs.adminWorkbookUrl,
         viewOnlyUrl: obs.adminViewOnlyUrl
@@ -1805,6 +1810,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       <div className="card">
         <div className="card-header">
           <div>
+            <div className="card-title">Welcome, {trainerName}!</div>
             <div className="card-title">Observations</div>
             <div className="card-subtitle">
               Tap an observation to continue, or create a new one.
