@@ -48,13 +48,13 @@ export function buildAdminUpdateHtml({
     <div style="${body}">
       <p style="margin-top: 0;">Kính gửi anh/chị <strong>${adminName}</strong>,</p>
       
-      <p>Cảm ơn anh/chị đã luôn đồng hành và tạo điều kiện để giáo viên triển khai chương trình GrapeSEED tại trường. Gần đây, chúng tôi đã có buổi làm việc với giáo viên phụ trách:</p>
+      <p>Cảm ơn anh/chị đã luôn đồng hành và tạo điều kiện để giáo viên triển khai chương trình GrapeSEED tại trường một cahcs hiệu quả nhất. Em xin gửi lại một số nhận xét sau khi làm việc với giáo viên ạ!</p>
 
       ${teacherName ? `<div style="background: #eef2ff; padding: 12px 16px; border-radius: 6px; border-left: 4px solid #4f46e5; margin: 15px 0;">
         <p style="margin:0; font-size: 14px; color: #312e81;"><strong>Giáo viên:</strong> ${teacherName}</p>
       </div>` : ""}
 
-      <p>Email này nhằm cập nhật tổng quan về tình hình lớp và kế hoạch hỗ trợ tiếp theo.</p>
+      <p>Email này nhằm cập nhật tổng quan về tình hình lớp, điểm giáo viên đang làm tốt và một số sự điều chỉnh cần được thực hiện trong thời gian tới để lớp học hiệu quả hơn.</p>
 
       ${urlToUse ? `
       <div style="text-align: center; margin: 30px 0;">
@@ -68,13 +68,13 @@ export function buildAdminUpdateHtml({
         <p style="background: #fffbeb; padding: 15px; border-radius: 6px; color: #92400e; margin: 0;">${extraNotesVi}</p>
       </div>` : ""}
 
-      <p style="margin-top: 25px;">Nếu anh/chị cần thêm thông tin chi tiết, em rất sẵn sàng sắp xếp một buổi trao đổi trực tuyến hoặc trực tiếp.</p>
+      <p style="margin-top: 25px;">Nếu anh/chị cần thêm thông tin chi tiết, anh chị vui lòng trả lời mail hoặc liên hệ với em qua số zalo 0912824120 ạ!</p>
 
       <p style="margin-bottom: 0;">Trân trọng,<br><strong>${trainerName}</strong><br><span style="color: #6b7280; font-size: 13px;">GrapeSEED Trainer</span></p>
     </div>
 
     <div style="${footer}">
-      Thông tin nội bộ - GrapeSEED Vietnam Support Team
+      Thông tin nội bộ - GrapeSEED Vietnam Training Team
     </div>
   </div>
 

@@ -94,7 +94,7 @@ export function buildAmSupportSummaryHtml({
     </div>
 
     <div style="${footer}">
-      Internal Use Only • GrapeSEED Support
+      Internal Use Only • GrapeSEED Vietnam Training Team
     </div>
   </div>
 
