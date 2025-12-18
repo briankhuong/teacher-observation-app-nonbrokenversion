@@ -1,9 +1,13 @@
 /**
- * Utility to interact with Google Gemini API (Flash-Lite model)
- * Used for polishing observation notes.
+ * src/utils/gemini.ts
+ * * Utility to interact with Google Gemini API.
+ * Includes "Single Polish" for individual edits and "Batch Polish" for the "Polish All" button.
  */
 
-// 🟢 SINGLE ITEM POLISH (Strict "No-Nonsense" Mode)
+// ==========================================
+// 1. SINGLE ITEM POLISH
+// Used when clicking the "✨ AI Polish" button on a specific indicator
+// ==========================================
 export async function polishTextWithGemini(
   text: string,
   indicatorTitle?: string,
@@ -14,91 +18,80 @@ export async function polishTextWithGemini(
     throw new Error("Missing VITE_GEMINI_API_KEY in environment variables.");
   }
 
-  // 🟢 UPDATED PROMPT: Force single string output & forbid options
+  // Strict prompt to ensure professional, concise output
   const systemInstruction = `
-You are a background text-processing engine. 
-Your ONLY task is to rewrite the user's input to be professional, grammatically correct, and constructive.
+You are a professional pedagogical editor. Rewrite the input to be professional, grammatically correct, and constructive (US English).
 
 CONTEXT:
 - Indicator: "${indicatorTitle || "General"}"
 - Definition: "${indicatorDescription || ""}"
 
-INPUT TEXT:
-"${text}"
+INPUT: "${text}"
 
-STRICT OUTPUT RULES:
-1. Return **ONLY** the polished text. 
-2. Do **NOT** provide options (e.g., "Option 1", "Option 2").
-3. Do **NOT** include conversational filler (e.g., "Here is the polished version", "Reasoning:").
-4. Do **NOT** use Markdown headers or bolding.
-5. Just give the single best result.
-
-CONTENT RULES:
-1. **Maintain Original Sentiment:** If the input is negative (e.g., "teacher is bad", "skipped step"), keep it critical/constructive. Do NOT turn it into praise.
-2. **No Hallucinations:** Do not invent specific details not found in the input.
-3. **Professional Tone:** Rewrite vague/harsh complaints into professional feedback.
-
-Example 1:
-Input: "teacher is bad"
-Output: "The teacher's performance in this area requires significant improvement." (One line only)
-
-Example 2:
-Input: "You skipped the review part"
-Output: "The lesson omitted the planned review section, which is a critical step." (One line only)
+RULES:
+1. Return ONLY the polished text. No conversational filler.
+2. Maintain the original sentiment (if negative, keep it constructive but critical).
+3. Do not invent details not present in the input.
+4. Output must be a single string.
 `;
 
   const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: systemInstruction }],
-      },
-    ],
+    contents: [{ role: "user", parts: [{ text: systemInstruction }] }],
     generationConfig: {
-      temperature: 0.3, // Low temp for consistency
-      maxOutputTokens: 200,
+      temperature: 0.3,
+      maxOutputTokens: 250,
     },
   };
 
-  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
+  // Using the efficient flash-lite model
+  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-preview-02-05:generateContent?key=${apiKey}`;
 
-  const response = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  try {
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(
-      `Gemini API Error: ${response.status} ${errData?.error?.message || ""}`
-    );
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      // Handle the 429 Rate Limit specifically
+      if (response.status === 429) {
+        throw new Error("Too many requests. Please wait a moment before trying again.");
+      }
+      throw new Error(`Gemini API Error: ${response.status} ${errData?.error?.message || ""}`);
+    }
+
+    const data = await response.json();
+    const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    // Safety cleanup
+    if (!result) return text;
+    let finalClean = result.trim();
+    // Remove common AI prefixes just in case
+    finalClean = finalClean.replace(/^Here is (the )?polished.*?:\s*/i, "");
+    
+    return finalClean;
+
+  } catch (err: any) {
+    console.error("AI Polish Error:", err);
+    throw err; // Re-throw so the UI knows it failed
   }
-
-  const data = await response.json();
-  const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  // 🟢 SAFETY CLEANUP: Strip common prefixes if AI disobeys
-  let finalClean = result ? result.trim() : text;
-  
-  // Remove accidental "Here is..." or "Option 1" prefixes
-  finalClean = finalClean.replace(/^Here is (the )?polished.*?:\s*/i, "");
-  finalClean = finalClean.replace(/^Option 1:?\s*/i, "");
-  finalClean = finalClean.replace(/^\*\*Option 1\*\*:\s*/i, "");
-
-  return finalClean;
 }
 
 
-// ------------------------------------------------------------------
+// ==========================================
+// 2. BATCH POLISH (The Fix for 429 Errors)
+// Used when clicking "✨ Polish All"
+// Sends 1 request for ALL items.
+// ==========================================
 
 interface BatchItem {
   id: string;
-  title: string; // Context
-  text: string;  // The user's rough notes
+  title: string;
+  text: string;
 }
 
-// 🟢 BATCH POLISH (Multiple items in one call)
 export async function polishBatchWithGemini(
   items: BatchItem[]
 ): Promise<Record<string, string>> {
@@ -109,76 +102,76 @@ export async function polishBatchWithGemini(
     throw new Error("Missing VITE_GEMINI_API_KEY");
   }
 
-  // 🟢 STRICT BATCH PROMPT
+  // 1. Prepare the data for the prompt
+  // We strip unnecessary fields to save tokens
+  const cleanInput = items.map((i) => ({
+    id: i.id,
+    context: i.title,
+    note: i.text,
+  }));
+
+  // 2. Construct ONE giant prompt
   const systemPrompt = `
-You are a professional editor for GrapeSEED teacher observations. 
-I will provide a JSON array of notes. Your task is to polish the "text" field of each item.
+You are a professional editor for teacher observation reports.
+I will provide a JSON array of raw notes. 
+Your task is to polish each note for grammar and professional tone (US English).
 
-RULES:
-1. Return ONLY a valid JSON object where keys are the IDs and values are the polished text.
-2. **Maintain Sentiment:** Do NOT turn negative notes into positive praise. If a note says "bad", keep it critical (e.g., "needs improvement").
-3. **No Hallucinations:** Do not add specific details unless they are in the input.
-4. **Tone:** Professional, objective, and constructive.
+INPUT DATA:
+${JSON.stringify(cleanInput, null, 2)}
 
-Input Format:
-[
-  { "id": "1", "text": "teacher is bad", "context": "Tech Issues" },
-  { "id": "2", "text": "good energy", "context": "Engagement" }
-]
+INSTRUCTIONS:
+1. Return ONLY a valid JSON object.
+2. The keys must be the "id" from the input.
+3. The values must be the polished version of the "note".
+4. Maintain the original sentiment (do not turn negative feedback into praise).
+5. Do not include markdown code blocks (like \`\`\`json). Just the raw JSON string.
 
-Output Format (Strict JSON):
+EXAMPLE OUTPUT:
 {
-  "1": "The teacher struggled to handle technical issues effectively.",
-  "2": "The teacher displayed high energy and engagement."
+  "ind-1": "The teacher managed the classroom effectively.",
+  "ind-2": "The pacing of the lesson needs adjustment."
 }
 `;
 
-  // We send ID, Text, AND Title (Context)
-  const cleanInput = items.map((i) => ({
-    id: i.id,
-    text: i.text,
-    context: i.title,
-  }));
-
   const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text:
-              systemPrompt + "\n\nInput Data:\n" + JSON.stringify(cleanInput),
-          },
-        ],
-      },
-    ],
+    contents: [{ role: "user", parts: [{ text: systemPrompt }] }],
     generationConfig: {
-      temperature: 0.2, // Very low temperature for consistent JSON
-      responseMimeType: "application/json",
+      temperature: 0.2, // Low temp for reliable JSON
+      // 'responseMimeType' ensures Gemini tries to output valid JSON
+      responseMimeType: "application/json", 
     },
   };
 
-  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
-
-  const response = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Batch Polish Failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!rawText) throw new Error("Empty response from AI");
+  // We use the same Flash-Lite model
+  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-preview-02-05:generateContent?key=${apiKey}`;
 
   try {
-    return JSON.parse(rawText);
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error("System is busy (Rate Limit). Please wait 60 seconds and try again.");
+      }
+      throw new Error(`Batch Polish Failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!rawText) throw new Error("Empty response from AI");
+
+    // 3. Parse the result
+    // Sometimes AI adds backticks even with JSON mode, so we clean it.
+    const cleanedJson = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+    
+    return JSON.parse(cleanedJson);
+
   } catch (e) {
-    console.error("Failed to parse AI JSON", rawText);
-    throw new Error("AI returned invalid JSON format.");
+    console.error("Batch Polish Error:", e);
+    throw new Error("Failed to process batch polish. Please try individual items or wait a minute.");
   }
 }
