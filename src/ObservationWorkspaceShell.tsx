@@ -21,6 +21,7 @@ import type {
 import { buildTeacherExportModel } from "./exportTeacherModel";
 import { buildAdminExportModel } from "./exportAdminModel";
 import type { AdminExportModel, AdminExportRow } from "./exportAdminModel";
+import { polishTextWithGemini, polishBatchWithGemini } from "./utils/gemini";
 
 interface ObservationWorkspaceProps {
   observationMeta: {
@@ -91,6 +92,8 @@ interface IndicatorState {
   ocrLastConfidence?: number | null; // later when we have real OCR
   ocrPendingReview?: boolean;        // true = show yellow highlight
   includeInTrainerSummary?: boolean;  // true = include this indicator in trainer summary
+  // 🤖 AI metadata (NEW)
+  aiPendingReview?: boolean;
 }
 
 // interface SavedObservationPayload {
@@ -530,6 +533,12 @@ export const ObservationWorkspaceShell: React.FC<
   const { teacherName, schoolName, campus, unit, lesson, supportType, date } =
     observationMeta;
 
+
+  // Inside ObservationWorkspaceShell component
+  // Batch Polish State
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
+  const [isAiPolishing, setIsAiPolishing] = useState(false);
   const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
 
   const [indicators, setIndicators] =
@@ -808,6 +817,64 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
     return hasMark || hasComment || hasInk;
   }).length;
 
+// 1. The "Pre-Flight" Check
+  const handleBatchPolishClick = () => {
+    // Find indicators that have text but haven't been polished yet
+    const candidates = indicators
+      .filter(
+        (ind) =>
+          ind.commentText.trim().length > 3 && // Has meaningful text
+          !ind.aiPendingReview &&             // Not already polished
+          !ind.ocrPendingReview               // Not waiting for OCR check
+      )
+      .map(ind => ({
+        id: ind.id,
+        number: ind.number,
+        title: ind.title,
+        text: ind.commentText
+      }));
+
+    if (candidates.length === 0) {
+      alert("No unpolished comments found! (Already polished items are skipped)");
+      return;
+    }
+
+    setBatchCandidates(candidates);
+    setShowBatchModal(true);
+  };
+
+  // 2. The Execution
+  const executeBatchPolish = async () => {
+    setIsAiPolishing(true);
+    setShowBatchModal(false); // Close modal immediately so we see the spinner
+
+    try {
+      const batchItems = batchCandidates.map(c => ({
+        id: c.id,
+        title: c.title,
+        text: c.text
+      }));
+
+      const results = await polishBatchWithGemini(batchItems);
+
+      setIndicators(prev => prev.map(ind => {
+        if (results[ind.id]) {
+          return {
+            ...ind,
+            commentText: results[ind.id],
+            aiPendingReview: true // 🟣 Flag all of them
+          };
+        }
+        return ind;
+      }));
+      
+    } catch (err: any) {
+      console.error("Batch polish failed", err);
+      alert("Batch polish failed. Please try doing them individually.");
+    } finally {
+      setIsAiPolishing(false);
+    }
+  };
 
 
 const handleManualSave = async () => { // async keyword kept for compatibility, but logical flow changes
@@ -830,8 +897,6 @@ const handleManualSave = async () => { // async keyword kept for compatibility, 
     
     // UI Feedback is now handled inside persistObservation's local step
   };
-
-
 
 const handleAdminReviewSave = async () => {
     if (!adminPreview) {
@@ -1215,6 +1280,36 @@ const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
 };
 
 
+const handlePolishWithAi = async () => {
+    // 1. Safety Checks
+    const currentText = active.commentText.trim();
+    if (!currentText) return;
+    if (isAiPolishing) return;
+
+    setIsAiPolishing(true);
+
+    try {
+      // 2. Call Gemini
+      const polished = await polishTextWithGemini({
+        text: currentText,
+        indicatorTitle: active.title,
+        indicatorDescription: active.description,
+      });
+
+      // 3. Update State (Purple Highlight)
+      updateIndicator(activeIndex, {
+        commentText: polished,
+        aiPendingReview: true, // 🟣 Flags it for review
+      });
+
+    } catch (err: any) {
+      console.error("AI Polish failed", err);
+      alert(err.message || "Could not polish text. Please try again.");
+    } finally {
+      setIsAiPolishing(false);
+    }
+  };
+
 const handleConvertHandwritingToText = async () => {
   setOcrError(null);
 
@@ -1438,6 +1533,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
   let patch: Partial<IndicatorState> = {
     commentText: value,
     ocrPendingReview: false, // user edited → no yellow highlight
+    aiPendingReview: false, // 🟢 NEW: Clear AI flag on manual edit
   };
 
   // If OCR was previously used but no [OCR] tag remains → reset OCR state
@@ -1549,6 +1645,21 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                 disabled={isLocked}
               >
                 Save
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={handleBatchPolishClick}
+                disabled={isLocked || isAiPolishing}
+                style={{
+                  background: "linear-gradient(135deg, #6366f1, #a855f7)",
+                  border: "none",
+                  color: "white",
+                  marginLeft: 8,
+                  fontWeight: 500
+                }}
+              >
+                {isAiPolishing ? "✨ Polishing..." : "✨ Polish All"}
               </button>
 
               <button
@@ -1901,6 +2012,17 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               >
                 {isOcrRunning ? "Converting…" : "Convert handwriting to text (OCR)"}
               </button>
+              {/* ✨ NEW: AI Polish Button */}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={handlePolishWithAi}
+                    disabled={isAiPolishing || active.commentText.trim().length < 5}
+                    title="Polish grammar and tone with Gemini AI"
+                    style={{ marginLeft: 8 }}
+                  >
+                    {isAiPolishing ? "✨ Polishing..." : "✨ AI Polish"}
+                  </button>
                   {active.ocrPendingReview && (
                     <span className="ocr-pill ocr-pill-pending">Needs review</span>
                   )}
@@ -1930,42 +2052,54 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               )}
             </div>
 
-                      <div style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 10 }}>
             <div
               style={{
                 fontSize: 12,
                 marginBottom: 4,
-                color: active.ocrPendingReview ? "#facc15" : "var(--text-muted)",
+                // 🟣 Update color logic: Purple if AI, Yellow if OCR, Gray if neither
+                color: active.aiPendingReview 
+                  ? "#c084fc" // Purple-400
+                  : active.ocrPendingReview 
+                    ? "#facc15" // Yellow-400
+                    : "var(--text-muted)",
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
                 justifyContent: "space-between",
               }}
             >
-              {active.ocrPendingReview ? (
+              {active.aiPendingReview ? (
+                 /* 🟣 AI Feedback Header */
                 <>
-                  <span>
-                    OCR text added – please review. Yellow highlight will disappear
-                    once you confirm it looks good.
-                  </span>
+                  <span>✨ AI polished this text. Please review.</span>
                   <button
                     type="button"
                     className="btn"
-                    style={{
-                      padding: "2px 8px",
-                      fontSize: 11,
-                      lineHeight: 1.4,
-                    }}
+                    style={{ padding: "2px 8px", fontSize: 11 }}
+                    onClick={() => updateIndicator(activeIndex, { aiPendingReview: false })}
+                  >
+                    ✅ Accept
+                  </button>
+                </>
+              ) : active.ocrPendingReview ? (
+                 /* 🟡 OCR Feedback Header */
+                <>
+                  <span>OCR text added – please review.</span>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ padding: "2px 8px", fontSize: 11 }}
                     onClick={handleMarkOcrReviewed}
                   >
                     ✅ Mark as reviewed
                   </button>
                 </>
               ) : (
+                 /* ⚪ Default Header */
                 "Comments for this indicator"
               )}
             </div>
-
             <textarea
               value={active.commentText}
               onChange={(e) => handleCommentChange(activeIndex, e.target.value)}
@@ -1998,8 +2132,13 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
             const unreviewedOcrIndicators = indicators.filter(
               (ind) => ind.ocrUsed && ind.ocrPendingReview
             );
-            const hasUnreviewedOcr = unreviewedOcrIndicators.length > 0;
 
+            const hasUnreviewedOcr = unreviewedOcrIndicators.length > 0;
+            // 🟢 NEW: Detect unreviewed AI (Add this block)
+                  const unreviewedAiIndicators = indicators.filter(
+                    (ind) => ind.aiPendingReview
+                  );
+                  const hasUnreviewedAi = unreviewedAiIndicators.length > 0;
                 // 2️⃣ Build warning buckets from the live indicators state
                 const growthWithoutComment = indicators.filter((ind) => {
                   const hasComment = ind.commentText.trim().length > 0;
@@ -2052,6 +2191,18 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                       ⚠ This preview includes OCR text that hasn&apos;t been marked as reviewed yet in:{" "}
                       {renderIndicatorLinks(unreviewedOcrIndicators.map((ind) => ind.number))}
                       . Please double-check those comments before sending to the teacher.
+                    </div>
+                     )}
+                     {/* 🟢 NEW: AI banner (Add this block) */}
+                  {hasUnreviewedAi && (
+                    <div className="export-ocr-banner" style={{ 
+                      backgroundColor: "rgba(147, 51, 234, 0.2)", // Purple tint
+                      border: "1px solid rgba(147, 51, 234, 0.5)",
+                      color: "#e9d5ff" 
+                    }}>
+                      ✨ This preview includes AI-polished text that hasn&apos;t been marked as accepted yet in:{" "}
+                      {renderIndicatorLinks(unreviewedAiIndicators.map((ind) => ind.number))}
+                      . Please review them.
                     </div>
                   )}
 
@@ -2421,6 +2572,73 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                 fontSize: 13,
               }}
             />
+          </div>
+        </div>
+      )}
+      {/* 🟣 BATCH POLISH MODAL */}
+      {showBatchModal && (
+        <div className="scratchpad-backdrop">
+          <div className="scratchpad-modal" style={{ maxWidth: 500, height: "auto", maxHeight: "80vh" }}>
+            <div className="scratchpad-header">
+              <div>
+                <div className="scratchpad-title">Batch AI Polish</div>
+                <div className="scratchpad-sub">
+                  Found {batchCandidates.length} items to polish.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: 16, overflowY: "auto", flex: 1 }}>
+              <p style={{ fontSize: 13, marginBottom: 12, color: "var(--text-muted)" }}>
+                The following indicators will be processed by Gemini AI to improve grammar and tone:
+              </p>
+              
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {batchCandidates.map(c => (
+                  <div key={c.id} style={{ 
+                    background: "#1e293b", 
+                    padding: "4px 8px", 
+                    borderRadius: 4, 
+                    fontSize: 12,
+                    border: "1px solid #334155"
+                  }}>
+                    <strong>{c.number}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: 20, fontSize: 12, color: "#94a3b8", fontStyle: "italic" }}>
+                Note: Only indicators with unpolished text are listed here. Empty or already polished items are skipped.
+              </div>
+            </div>
+
+            <div style={{ 
+              padding: 16, 
+              borderTop: "1px solid rgba(51,65,85,0.5)", 
+              display: "flex", 
+              justifyContent: "flex-end", 
+              gap: 8 
+            }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowBatchModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={executeBatchPolish}
+                style={{
+                  background: "#a855f7",
+                  color: "white",
+                  border: "none"
+                }}
+              >
+                ✨ Polish {batchCandidates.length} Items
+              </button>
+            </div>
           </div>
         </div>
       )}
