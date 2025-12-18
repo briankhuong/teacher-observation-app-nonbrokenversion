@@ -3,7 +3,7 @@
  * Used for polishing observation notes.
  */
 
-// 🟢 SINGLE ITEM POLISH
+// 🟢 SINGLE ITEM POLISH (Strict "No-Nonsense" Mode)
 export async function polishTextWithGemini(
   text: string,
   indicatorTitle?: string,
@@ -14,10 +14,10 @@ export async function polishTextWithGemini(
     throw new Error("Missing VITE_GEMINI_API_KEY in environment variables.");
   }
 
-  // 🟢 STRICT PROMPT LOGIC
+  // 🟢 UPDATED PROMPT: Force single string output & forbid options
   const systemInstruction = `
-You are a professional editor for teacher observation notes.
-Your goal is to improve grammar, clarity, and tone (making it professional and constructive), BUT you must remain faithful to the original meaning.
+You are a background text-processing engine. 
+Your ONLY task is to rewrite the user's input to be professional, grammatically correct, and constructive.
 
 CONTEXT:
 - Indicator: "${indicatorTitle || "General"}"
@@ -26,20 +26,25 @@ CONTEXT:
 INPUT TEXT:
 "${text}"
 
-STRICT RULES:
-1. **Maintain Original Sentiment:** If the input is negative (e.g., "teacher is bad", "failed to do X"), the output MUST remain critical/constructive. Do NOT turn it into praise.
-2. **No Hallucinations:** Do not invent specific actions (like "using the Pointer" or "resolving tech issues") unless the INPUT TEXT explicitly mentions them.
-3. **Professional Tone:** If the input is vague/harsh (e.g., "bad"), rewrite it as professional feedback (e.g., "The teacher struggled with this aspect" or "Performance in this area requires improvement").
-4. **Length:** Keep the output length relatively similar to the input length. Do not write a long paragraph for a 3-word input.
+STRICT OUTPUT RULES:
+1. Return **ONLY** the polished text. 
+2. Do **NOT** provide options (e.g., "Option 1", "Option 2").
+3. Do **NOT** include conversational filler (e.g., "Here is the polished version", "Reasoning:").
+4. Do **NOT** use Markdown headers or bolding.
+5. Just give the single best result.
 
-Example 1 (Negative Input):
-Input: "teacher is bad" (Context: Tech Issues)
-Output: "The teacher struggled to manage technical issues effectively." (CORRECT)
-Bad Output: "The teacher proactively resolved all technical issues." (INCORRECT - changes meaning)
+CONTENT RULES:
+1. **Maintain Original Sentiment:** If the input is negative (e.g., "teacher is bad", "skipped step"), keep it critical/constructive. Do NOT turn it into praise.
+2. **No Hallucinations:** Do not invent specific details not found in the input.
+3. **Professional Tone:** Rewrite vague/harsh complaints into professional feedback.
 
-Example 2 (Positive Input):
-Input: "good job with kids"
-Output: "The teacher demonstrated strong rapport with the students."
+Example 1:
+Input: "teacher is bad"
+Output: "The teacher's performance in this area requires significant improvement." (One line only)
+
+Example 2:
+Input: "You skipped the review part"
+Output: "The lesson omitted the planned review section, which is a critical step." (One line only)
 `;
 
   const payload = {
@@ -50,7 +55,7 @@ Output: "The teacher demonstrated strong rapport with the students."
       },
     ],
     generationConfig: {
-      temperature: 0.3, // 🟢 Lower temperature = Less creativity/hallucination
+      temperature: 0.3, // Low temp for consistency
       maxOutputTokens: 200,
     },
   };
@@ -73,7 +78,15 @@ Output: "The teacher demonstrated strong rapport with the students."
   const data = await response.json();
   const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
-  return result ? result.trim() : text;
+  // 🟢 SAFETY CLEANUP: Strip common prefixes if AI disobeys
+  let finalClean = result ? result.trim() : text;
+  
+  // Remove accidental "Here is..." or "Option 1" prefixes
+  finalClean = finalClean.replace(/^Here is (the )?polished.*?:\s*/i, "");
+  finalClean = finalClean.replace(/^Option 1:?\s*/i, "");
+  finalClean = finalClean.replace(/^\*\*Option 1\*\*:\s*/i, "");
+
+  return finalClean;
 }
 
 
@@ -104,7 +117,7 @@ I will provide a JSON array of notes. Your task is to polish the "text" field of
 RULES:
 1. Return ONLY a valid JSON object where keys are the IDs and values are the polished text.
 2. **Maintain Sentiment:** Do NOT turn negative notes into positive praise. If a note says "bad", keep it critical (e.g., "needs improvement").
-3. **No Hallucinations:** Do not add specific details (like specific props or actions) unless they are in the input.
+3. **No Hallucinations:** Do not add specific details unless they are in the input.
 4. **Tone:** Professional, objective, and constructive.
 
 Input Format:
@@ -120,7 +133,7 @@ Output Format (Strict JSON):
 }
 `;
 
-  // We send ID, Text, AND Title (Context) to help the AI understand what "bad" applies to
+  // We send ID, Text, AND Title (Context)
   const cleanInput = items.map((i) => ({
     id: i.id,
     text: i.text,
@@ -140,7 +153,7 @@ Output Format (Strict JSON):
       },
     ],
     generationConfig: {
-      temperature: 0.2, // 🟢 Very low temperature for consistent JSON
+      temperature: 0.2, // Very low temperature for consistent JSON
       responseMimeType: "application/json",
     },
   };
