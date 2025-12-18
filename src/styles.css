@@ -2568,3 +2568,31 @@ input[type="date"].input {
   background: rgba(30, 64, 175, 0.65);
   color: var(--text-strong, #e5e7eb);
 }
+
+/* src/styles.css */
+
+/* Green Badge (Online) */
+.badge-success {
+  background-color: #064e3b; /* Dark Green */
+  color: #6ee7b7;           /* Light Green Text */
+  border: 1px solid #059669;
+}
+
+/* Orange Badge (Offline) */
+.badge-warning {
+  background-color: #451a03; /* Dark Orange/Brown */
+  color: #fcd34d;           /* Yellow Text */
+  border: 1px solid #d97706;
+}
+
+.sync-spinner {
+  display: inline-block;
+  animation: spin 2s linear infinite;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

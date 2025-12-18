@@ -8,6 +8,7 @@ import { SchoolsScreen } from "./SchoolsScreen";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
 
+
 // --- Types ---
 type Screen = "dashboard" | "workspace" | "teachers" | "schools";
 type SupportType = "Training" | "LVA" | "Visit";
@@ -32,29 +33,41 @@ const App: React.FC = () => {
   const { signOut } = useAuth();
   
   // Local state for session handling (The Login Fix)
-  const [session, setSession] = useState<any>(null);
-  
+
   const [showNewObservationForm, setShowNewObservationForm] = useState(false);
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [selectedObservation, setSelectedObservation] =
     useState<SelectedObservationMeta | null>(null);
 
-  // 1. AUTH LISTENER (Critical for Microsoft Login)
+
+// 1. AUTH & NETWORK LISTENERS
+  const [isOnline, setIsOnline] = useState(navigator.onLine); // 🟢 New state
+  const [session, setSession] = useState<any>(null);
+  const [isSyncing, setIsSyncing] = useState(false); // 🟢 NEW
+  
   useEffect(() => {
-    // Check active session immediately on load
+    // --- Auth Logic ---
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
     });
 
-    // Listen for the redirect token
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
 
-    return () => subscription.unsubscribe();
+    // --- Network Logic (Fixes the "sticky" badge) ---
+    const handleStatusChange = () => setIsOnline(navigator.onLine);
+    window.addEventListener('online', handleStatusChange);
+    window.addEventListener('offline', handleStatusChange);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('online', handleStatusChange);
+      window.removeEventListener('offline', handleStatusChange);
+    };
   }, []);
+
+
 
   const goToDashboard = () => setScreen("dashboard");
   const goToTeachers = () => setScreen("teachers");
@@ -98,7 +111,9 @@ const App: React.FC = () => {
       u.email
     );
   }, [session]);
-  
+
+
+
   return (
     <div className="app-root">
       <header className="top-bar">
@@ -110,7 +125,12 @@ const App: React.FC = () => {
          <span className="badge">
           {trainerName ? `Trainer: ${trainerName}` : 'Not Signed In'}
         </span>
-
+        {/* 🟢 NEW: Offline/Online Indicator */}
+          <span className={`badge ${isOnline ? 'badge-success' : 'badge-warning'}`}>
+          {isOnline ? '🟢 Online' : '🟠 Offline Mode'}
+          {/* 🟢 NEW: Sync Spinner */}
+          {isSyncing && <span className="sync-spinner"> 🔄 Syncing...</span>}
+        </span>
           <button className="btn-ghost" onClick={goToDashboard}>
             Dashboard
           </button>
@@ -146,6 +166,9 @@ const App: React.FC = () => {
           <ObservationWorkspaceShell
             observationMeta={selectedObservation}
             onBack={goToDashboard}
+            isOnline={isOnline} // 🟢 Pass the state down as a prop
+            isSyncing={isSyncing}       // 🟢 PASS DOWN
+            setIsSyncing={setIsSyncing} // 🟢 PASS DOWN
           />
         )}
 

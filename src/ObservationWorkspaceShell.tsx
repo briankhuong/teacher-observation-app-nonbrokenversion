@@ -35,6 +35,10 @@ interface ObservationWorkspaceProps {
      date: string; // NEW: actual observation date "YYYY-MM-DD"
   };
   onBack: () => void;
+ isOnline: boolean;
+  // 🟢 ADD THESE TWO LINES TO FIX THE ERRORS
+  isSyncing: boolean;
+  setIsSyncing: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 // OCR result from handwriting conversionfv
@@ -526,12 +530,23 @@ function normalizeIndicators(raw: any): any[] {
   return [];
 }
 
+// 🛡️ Helper: Determine if the workspace has ACTUAL user progress
+function hasUserProgress(indicators: IndicatorState[]): boolean {
+  return indicators.some(ind => {
+    const hasMark = ind.good || ind.growth || ind.favorite;
+    const hasComment = ind.commentText.trim().length > 0;
+    const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
+    return hasMark || hasComment || hasInk;
+  });
+}
+
 
 export const ObservationWorkspaceShell: React.FC<
   ObservationWorkspaceProps
-> = ({ observationMeta, onBack }) => {
+> = ({ observationMeta, onBack, isOnline, isSyncing, setIsSyncing }) => {
   const { teacherName, schoolName, campus, unit, lesson, supportType, date } =
     observationMeta;
+
 
 
   // Inside ObservationWorkspaceShell component
@@ -589,226 +604,164 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
   const active =
   indicators[activeIndex] ?? indicators[0] ?? INITIAL_INDICATORS[0];
 
-    // Load from localStorage when opening this observation
-  useEffect(() => {
+
+// @reference: src/ObservationWorkspaceShell.tsx (Replace the load useEffect)
+
+// @reference: src/ObservationWorkspaceShell.tsx
+
+// 🟢 EFFECT A: Standard Offline-First Loading
+useEffect(() => {
   let cancelled = false;
 
   async function load() {
-    // 1️⃣ Try localStorage first (fast / offline)
-    // 1️⃣ Try localStorage first (fast / offline)
-      try {
-    const raw = localStorage.getItem(storageKey);
-    if (raw) {
-      const parsed: SavedObservationPayload = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.indicators)) {
-        if (cancelled) return;
+    // 1️⃣ Get Local Data (Fastest)
+    let localData: SavedObservationPayload | null = null;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) localData = JSON.parse(raw);
+    } catch (err) { console.error("Local read error", err); }
 
-        const normalized = normalizeIndicators(parsed.indicators);
-        const finalIndicators =
-          normalized.length > 0
-            ? (normalized as IndicatorState[])
-            : INITIAL_INDICATORS;
+    try {
+      // 2️⃣ Get Cloud Data
+      const row = await loadObservationFromDb(observationMeta.id);
+      if (cancelled) return;
 
-        setIndicators(finalIndicators);
-        // 🔐 restore observation status (draft / saved)
-        setObservationStatus(parsed.status ?? "draft");
-        setSaveStatus(parsed.status === "saved" ? "saved" : "idle");
-        setLastSavedAt(parsed.updatedAt ?? null);
-        setScratchpadText(parsed.scratchpadText ?? "");
+      const dbUpdatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+      const localUpdatedAt = localData?.updatedAt ?? 0;
 
-        // ✅ RESTORE FLAGS FROM LOCAL STORAGE
-            setIsGood(parsed.isGood ?? false);
-            setIsBad(parsed.isBad ?? false);
-            setIsFavorite(parsed.isFavorite ?? false);
-
-        //return; // ✅ done, no need to hit Supabase
+      // 3️⃣ Conflict Resolution: Trust whichever is NEWER
+      if (localData && localUpdatedAt > dbUpdatedAt) {
+        console.log("Using newer local data.");
+        setIndicators(localData.indicators);
+        setObservationStatus(localData.status ?? "draft");
+        setIsGood(localData.isGood ?? false);
+        setIsBad(localData.isBad ?? false);
+        setIsFavorite(localData.isFavorite ?? false);
+        setScratchpadText(localData.scratchpadText ?? "");
+        return; 
       }
-    }
-  } catch (err) {
-    console.error("Failed to load observation from storage", err);
-  }
 
-      try {
-        // NOTE: row is now correctly typed as ObservationRecord
-        const row = await loadObservationFromDb(observationMeta.id);
-    
-        if (cancelled) return;
+      // Otherwise, use Cloud Data
+      const normalizedFromDb = normalizeIndicators(row.indicators);
+      setIndicators(normalizedFromDb.length > 0 ? normalizedFromDb : INITIAL_INDICATORS);
+      setObservationStatus(row.status ?? "draft");
+      setAdminSummaryVN(row.admin_summary_vn ?? null);
+      setIsGood(row.is_good ?? false);
+      setIsBad(row.is_bad ?? false);
+      setIsFavorite(row.is_favorite ?? false);
 
-        // 🔑 LOAD THE NEW FIELD HERE (No longer errors if type is updated)
-        const dbAdminSummaryVN = row.admin_summary_vn ?? null; 
-        const metaFromDb = (row.meta ?? {}) as any;
-
-        // 1️⃣ Normalize DB indicators & fall back to INITIAL_INDICATORS if empty
-        const normalizedFromDb = normalizeIndicators(row.indicators);
-        const finalIndicators =
-          normalizedFromDb.length > 0
-            ? (normalizedFromDb as IndicatorState[])
-            : INITIAL_INDICATORS;
-
-        const dbIsGood = row.is_good ?? false;
-        const dbIsBad = row.is_bad ?? false;
-        const dbIsFavorite = row.is_favorite ?? false;
-
-        const payload: SavedObservationPayload = {
-          id: row.id,
-          meta: {
-            teacherName: metaFromDb.teacherName ?? observationMeta.teacherName,
-            schoolName: metaFromDb.schoolName ?? observationMeta.schoolName,
-            campus: metaFromDb.campus ?? observationMeta.campus,
-            unit: metaFromDb.unit ?? observationMeta.unit,
-            lesson: metaFromDb.lesson ?? observationMeta.lesson,
-            supportType: metaFromDb.supportType ?? observationMeta.supportType,
-            date: metaFromDb.date ?? observationMeta.date,
-          },
-          indicators: finalIndicators,
-          status: row.status ?? "draft",
-          updatedAt: Date.now(),
-          scratchpadText: "", // we don't store this in DB (yet)
-        };
-
-        // cache for next time
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(payload));
-        } catch (err) {
-          console.error("Failed to cache observation to localStorage", err);
-        }
-
-        setIndicators(finalIndicators);
-        // 🔐 restore observation status from DB
-        setObservationStatus(payload.status ?? "draft");
-        setSaveStatus(payload.status === "saved" ? "saved" : "idle");
-        setLastSavedAt(payload.updatedAt);
-        setScratchpadText(payload.scratchpadText ?? "");
-
-        // 🔑 SET THE NEW STATE FIELD
-        setAdminSummaryVN(dbAdminSummaryVN);
-
-        // ✅ SET STATE FROM DB
-        setIsGood(dbIsGood);
-        setIsBad(dbIsBad);
-        setIsFavorite(dbIsFavorite);
-      } catch (err) {
-        console.error("[Workspace] Could not load observation from DB", err);
-      if (!cancelled) {
-        // fall back to fresh blank observation
+    } catch (err) {
+      // ❌ Offline Fallback: If cloud fails, use local
+      console.warn("Offline: Using local backup.");
+      if (localData && !cancelled) {
+        setIndicators(localData.indicators);
+        setObservationStatus(localData.status ?? "draft");
+        setIsGood(localData.isGood ?? false);
+        setIsBad(localData.isBad ?? false);
+        setIsFavorite(localData.isFavorite ?? false);
+        setScratchpadText(localData.scratchpadText ?? "");
+      } else if (!cancelled) {
         setIndicators(INITIAL_INDICATORS);
-        setObservationStatus("draft");
-        setSaveStatus("idle");
-        setLastSavedAt(null);
-        setScratchpadText("");
       }
     }
   }
-
   load();
-  return () => {
-    cancelled = true;
-  };
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return () => { cancelled = true; };
 }, [storageKey, observationMeta.id]);
 
-
-// ... inside ObservationWorkspaceShell component ...
-
-  const persistObservation = React.useCallback(
-    async (payload: SavedObservationPayload) => {
-      // 1️⃣ Local cache (SYNCHRONOUS PRIORITY)
-      // This guarantees data safety on the device immediately.
+// 🟢 EFFECT: Auto-Sync when Internet Returns (Simple & Robust)
+useEffect(() => {
+  if (isOnline && observationMeta.id) {
+    const performSync = async () => {
       try {
-        localStorage.setItem(storageKey, JSON.stringify(payload));
-        // Optimistically update "Saved at" so UI feels instant
-        setLastSavedAt(payload.updatedAt); 
-      } catch (err) {
-        console.error("Failed to write observation to localStorage", err);
-      }
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return; // Nothing locally to sync
 
-      // 2️⃣ Supabase sync (BACKGROUND ASYNC)
-      // We do NOT await this in critical UI paths anymore.
-      try {
+        const localData: SavedObservationPayload = JSON.parse(raw);
+        
+        // 🚀 SIMPLE SYNC: No complex checks. If data exists, sync it.
+        setIsSyncing(true); 
+        
         await saveObservationToDb({
-          id: payload.id,
-          status: payload.status,
-          meta: payload.meta,
-          indicators: payload.indicators,
+          id: localData.id,
+          status: localData.status,
+          meta: localData.meta,
+          indicators: localData.indicators,
         });
-        setSaveStatus(payload.status === "saved" ? "saved" : "idle");
+
+        console.log("✅ Auto-sync successful!");
+        setSaveStatus("saved"); 
       } catch (err) {
-        console.error(
-          "[Workspace] Failed to sync observation to Supabase (Offline?)",
-          err
-        );
-        // Optional: You could set a 'sync-error' state here to show a warning icon
+        console.error("❌ Auto-sync failed", err);
+      } finally {
+        setIsSyncing(false); 
       }
-    },
-    [storageKey]
-  );
+    };
 
+    performSync();
+  }
+}, [isOnline, observationMeta.id, storageKey, setIsSyncing]);
 
-   useEffect(() => {
+const persistObservation = React.useCallback(
+  async (payload: SavedObservationPayload) => {
+    // 1️⃣ Local Save (Always safe)
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(payload));
+      setLastSavedAt(payload.updatedAt); 
+    } catch (err) {
+      console.error("Failed to write to localStorage", err);
+    }
+
+    // 2️⃣ Cloud Sync (Attempt if online)
+    try {
+      await saveObservationToDb({
+        id: payload.id,
+        status: payload.status,
+        meta: payload.meta,
+        indicators: payload.indicators,
+      });
+      setSaveStatus("saved");
+    } catch (err) {
+      console.error("[Workspace] Sync failed", err);
+    }
+  },
+  [storageKey]
+);
+
+// @reference: src/ObservationWorkspaceShell.tsx
+
+useEffect(() => {
   if (!observationMeta.id) return;
 
-  // Cancel any pending save
   if (saveTimeoutRef.current) {
     window.clearTimeout(saveTimeoutRef.current);
   }
 
-  // Debounce: save ~800ms after the last change
   saveTimeoutRef.current = window.setTimeout(() => {
-  const payload: SavedObservationPayload = {
-    id: observationMeta.id,
-    meta: {
-      teacherName,
-      schoolName,
-      campus,
-      unit,
-      lesson,
-      supportType,
-      date,
-    },
-    indicators,
-    status: observationStatus,       // 🔒 now respects lock status
-    updatedAt: Date.now(),
-    scratchpadText,
-    // ✅ SYNC CURRENT STATE
-        isGood,
-        isBad,
-        isFavorite,
-  };
+    const payload: SavedObservationPayload = {
+      id: observationMeta.id,
+      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      indicators,
+      status: observationStatus,
+      updatedAt: Date.now(),
+      scratchpadText,
+      isGood, isBad, isFavorite,
+    };
 
-  persistObservation(payload);
-
-  setLastSavedAt(payload.updatedAt);
-  setSaveStatus(
-    observationStatus === "saved" ? "saved" : "idle"
-  );
-
-  setCanvasDirty(false);
-}, 800);
-
+    persistObservation(payload);
+    setCanvasDirty(false);
+  }, 800);
 
   return () => {
-    if (saveTimeoutRef.current) {
-      window.clearTimeout(saveTimeoutRef.current);
-    }
+    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [
-  indicators,
-  scratchpadText,
-  observationMeta.id,
-  teacherName,
-  schoolName,
-  campus,
-  unit,
-  lesson,
-  supportType,
-  // ✅ DEPENDENCIES
-    isGood,
-    isBad,
-    isFavorite,
+  indicators, scratchpadText, observationMeta, teacherName, schoolName, 
+  campus, unit, lesson, supportType, observationStatus, 
+  isGood, isBad, isFavorite, persistObservation
 ]);
-  
+
+
   // How many indicators have any value (good/growth/comment/strokes)
     const progressCount = indicators.filter((ind) => {
     const hasMark = ind.good || ind.growth;
@@ -925,39 +878,23 @@ const handleAdminReviewSave = async () => {
     }
   };
 
-const handleBackToDashboard = () => { // 🟢 Removed 'async' - navigation should be instant
-    try {
-      // 1. Force flush any pending strokes state
-      let finalIndicators = indicators;
-      if (canvasDirty) {
-        // We manually apply the patch here to ensure the payload is fresh
-        // independent of React's next render cycle
-        finalIndicators = indicators.map((ind, i) => 
-          i === activeIndex ? { ...ind, strokes: ind.strokes } : ind
-        );
-        setCanvasDirty(false);
-      }
+// @reference: src/ObservationWorkspaceShell.tsx
 
-      const payload: SavedObservationPayload = {
-        id: observationMeta.id,
-        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
-        indicators: finalIndicators,
-        status: observationStatus,
-        updatedAt: Date.now(),
-        isGood, isBad, isFavorite,
-      };
+const handleBackToDashboard = () => {
+    // Simple Save & Exit
+    const payload: SavedObservationPayload = {
+      id: observationMeta.id,
+      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      indicators,
+      status: observationStatus,
+      updatedAt: Date.now(),
+      isGood, isBad, isFavorite,
+      scratchpadText
+    };
 
-      // 2. Persist (Local = Instant, Cloud = Background)
-      persistObservation(payload);
-      
-    } catch (err) {
-      console.error("Back-to-dashboard save failed", err);
-    }
-
-    // 3. Navigate immediately
+    persistObservation(payload);
     onBack();
-  };
-
+};
 const handleMarkCompleted = async () => {
   if (isLocked) return;
 

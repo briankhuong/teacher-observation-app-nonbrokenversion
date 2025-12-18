@@ -49,10 +49,9 @@ interface DashboardObservationRow {
   teacherWorkbookUrl?: string | null;
   adminWorkbookUrl?: string | null;
   adminViewOnlyUrl?: string | null; // ✅ Added to interface
-
-  // IMPORTANT: keep meta available on dashboard rows
   meta?: any;
   admin_summary_vn?: string | null;
+  isSynced: boolean; // 🟢 NEW
 }
 
 type RecentMergePanel =
@@ -604,49 +603,74 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
       LOAD OBSERVATIONS + SUMMARY META
    --------------------------------- */
    
-  React.useEffect(() => {
+React.useEffect(() => {
     if (!user) {
       setObservations([]);
       return;
     }
 
     const load = async () => {
-      const rows: DashboardObservationRow[] = [];
-
+      let dbData: any[] = [];
+      
+      // 🟢 PHASE 1: FETCH DATA (Network First -> Cache Fallback)
       try {
-        // 1) Load observations from Supabase for this trainer
         const { data, error } = await supabase
           .from("observations")
           .select(
-            // 🟢 CRITICAL FIX: Added 'admin_summary_vn' to fetch list
             "id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn"
           )
           .eq("trainer_id", user.id)
           .order("observation_date", { ascending: false })
           .order("created_at", { ascending: false });
 
-        if (error) {
-          console.error("[DB] load observations error", error);
-        }
+        if (error) throw error;
 
-        (data ?? []).forEach((dbRow: any) => {
+        // ✅ SUCCESS: Save fresh data to the "Backpack" (Backup)
+        dbData = data ?? [];
+        localStorage.setItem("dashboard_backup_list", JSON.stringify(dbData));
+        
+      } catch (err) {
+        // ❌ FAIL: Network Error? Load from "Backpack"
+        console.warn("[Dashboard] Offline mode detected. Loading backup...", err);
+        const backup = localStorage.getItem("dashboard_backup_list");
+        
+        if (backup) {
+          dbData = JSON.parse(backup);
+        } else {
+          console.error("[Dashboard] No offline backup found.");
+        }
+      }
+
+      // 🟢 PHASE 2: PROCESS ROWS (Merge with Local Edits)
+      // Even if we loaded 'dbData' from an old backup, this logic 
+      // ensures we still see the latest "Local Edits" (Drafts) 
+      // because it checks 'STORAGE_PREFIX' for every item.
+      const rows: DashboardObservationRow[] = [];
+
+      try {
+        dbData.forEach((dbRow: any) => {
           // Prefer full data from localStorage (workspace), fallback to DB meta
           const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
           let parsed: any = null;
+          let isSynced = true; // 🟢 NEW: Default to synced
 
           try {
             const rawLocal = localStorage.getItem(storageKey);
             if (rawLocal) {
               parsed = JSON.parse(rawLocal);
+              
+              // 🟢 NEW: Compare local vs DB update times
+              const localUpdatedAt = parsed.updatedAt || 0;
+              const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
+
+              // If local is 2 seconds newer, it's not synced yet
+              if (localUpdatedAt > dbUpdatedAt + 2000) {
+                isSynced = false;
+              }
             }
           } catch (err) {
-            console.error(
-              "Error parsing stored observation from localStorage:",
-              storageKey,
-              err
-            );
+            console.error("Error parsing local storage", err);
           }
-
           if (!parsed) {
             parsed = {
               id: dbRow.id,
@@ -661,16 +685,14 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
             };
           }
 
-          // Normalize indicators into an array no matter what shape old data has
+          // Normalize indicators
           const indicatorsArray = Array.isArray(parsed.indicators)
             ? parsed.indicators
             : Array.isArray(parsed.indicators?.indicators)
             ? parsed.indicators.indicators
             : [];
 
-          // total indicators = length of normalized array
           const total = indicatorsArray.length;
-
           let good = 0;
           let growth = 0;
           let progress = 0;
@@ -678,8 +700,7 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
           indicatorsArray.forEach((ind: any) => {
             const hasMark = ind.good || ind.growth;
             const hasComment = ind.commentText?.trim().length > 0;
-            const hasInk =
-              Array.isArray(ind.strokes) && ind.strokes.length > 0;
+            const hasInk = Array.isArray(ind.strokes) && ind.strokes.length > 0;
 
             if (hasMark || hasComment || hasInk) progress++;
             if (ind.good) good++;
@@ -723,29 +744,27 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
             progress,
             totalIndicators: total,
             statusColor,
-
-            // Workbook Links (Check both old & new keys)
+            
+            // Workbook Links
             teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? parsed.meta.teacherSheetUrl ?? null,
             adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? parsed.meta.adminSheetUrl ?? null,
-            
-            // 🟢 FIX: Ensure View-Only URL is mapped so 'enrichObservations' works properly
             adminViewOnlyUrl: parsed.meta.adminViewOnlyUrl ?? parsed.meta.adminWorkbookViewUrl ?? null,
-
-            // 🟢 FIX: Map the translated summary from the DB row
-            admin_summary_vn: dbRow.admin_summary_vn,
             
+            // Summary
+            admin_summary_vn: dbRow.admin_summary_vn,
+            isSynced, // 🟢 NEW: Pass this to the UI
             meta: parsed.meta ?? {},
           });
         });
       } catch (err) {
-        console.error("[Dashboard] unexpected error loading observations", err);
+        console.error("[Dashboard] unexpected error processing observations", err);
       }
 
       // ✅ ENRICH: Bulk fetch defaults for schools/teachers
       const enrichedRows = await enrichObservationsWithDefaults(rows);
       setObservations(enrichedRows);
 
-      // Load AM summary "sent" markers (unchanged)
+      // Load AM summary "sent" markers
       try {
         const raw = localStorage.getItem(SUMMARY_STATE_KEY);
         if (raw) {
@@ -1508,8 +1527,14 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
           }`}
         />
 
-        <div className="obs-row-left">
-          <div className="obs-row-header">
+        <div className="obs-row-left" style={{ width: '100%' }}>
+          <div className="obs-row-header"style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              width: '100%',
+              marginBottom: '4px' 
+            }}>
             <div className="obs-teacher">{obs.teacherName}</div>
           </div>
 
