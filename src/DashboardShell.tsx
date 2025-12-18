@@ -1810,7 +1810,6 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       <div className="card">
         <div className="card-header">
           <div>
-            <div className="card-title">Welcome, {trainerName}!</div>
             <div className="card-title">Observations</div>
             <div className="card-subtitle">
               Tap an observation to continue, or create a new one.
