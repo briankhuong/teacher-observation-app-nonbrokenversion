@@ -1290,11 +1290,11 @@ const handlePolishWithAi = async () => {
 
     try {
       // 2. Call Gemini
-      const polished = await polishTextWithGemini({
-        text: currentText,
-        indicatorTitle: active.title,
-        indicatorDescription: active.description,
-      });
+  const polished = await polishTextWithGemini(
+    currentText,
+    active.title,
+    active.description
+  );
 
       // 3. Update State (Purple Highlight)
       updateIndicator(activeIndex, {

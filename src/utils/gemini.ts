@@ -1,154 +1,152 @@
-// src/utils/gemini.ts
-
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-//const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
-interface PolishRequest {
-  text: string;
-  indicatorTitle: string;
-  indicatorDescription: string;
-}
-
 /**
- * Sends a teacher observation note to Gemini for polishing.
- * Uses a "Circuit Breaker" timeout to prevent hanging on bad connections.
+ * Utility to interact with Google Gemini API (Flash-Lite model)
+ * Used for polishing observation notes.
  */
-export async function polishTextWithGemini({
-  text,
-  indicatorTitle,
-  indicatorDescription,
-}: PolishRequest): Promise<string> {
-  if (!GEMINI_API_KEY) {
-    throw new Error("VITE_GEMINI_API_KEY is missing in .env file");
+
+// 🟢 SINGLE ITEM POLISH
+export async function polishTextWithGemini(
+  text: string,
+  indicatorTitle?: string,
+  indicatorDescription?: string
+): Promise<string> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing VITE_GEMINI_API_KEY in environment variables.");
   }
 
-  // 1. The Prompt Engineering
-  // We give the AI a specific persona: Expert Supervisor.
-  const systemPrompt = `
-You are an expert English Language Trainer Supervisor for the GrapeSEED curriculum.
-Your task is to polish the following observation notes written by a trainer.
+  // 🟢 STRICT PROMPT LOGIC
+  const systemInstruction = `
+You are a professional editor for teacher observation notes.
+Your goal is to improve grammar, clarity, and tone (making it professional and constructive), BUT you must remain faithful to the original meaning.
 
-Rules:
-1. Fix grammar, spelling, and awkward phrasing.
-2. Maintain a professional, supportive, and constructive tone.
-3. Keep specific GrapeSEED terminology (e.g., "Memory Mode", "REP", "TGL", "Pointer").
-4. Do NOT change the core meaning of the observation.
-5. Return ONLY the polished text. No conversational filler ("Here is the polished version...").
+CONTEXT:
+- Indicator: "${indicatorTitle || "General"}"
+- Definition: "${indicatorDescription || ""}"
 
-Context:
-Indicator: ${indicatorTitle}
-Description: ${indicatorDescription}
-Original Note: "${text}"
+INPUT TEXT:
+"${text}"
+
+STRICT RULES:
+1. **Maintain Original Sentiment:** If the input is negative (e.g., "teacher is bad", "failed to do X"), the output MUST remain critical/constructive. Do NOT turn it into praise.
+2. **No Hallucinations:** Do not invent specific actions (like "using the Pointer" or "resolving tech issues") unless the INPUT TEXT explicitly mentions them.
+3. **Professional Tone:** If the input is vague/harsh (e.g., "bad"), rewrite it as professional feedback (e.g., "The teacher struggled with this aspect" or "Performance in this area requires improvement").
+4. **Length:** Keep the output length relatively similar to the input length. Do not write a long paragraph for a 3-word input.
+
+Example 1 (Negative Input):
+Input: "teacher is bad" (Context: Tech Issues)
+Output: "The teacher struggled to manage technical issues effectively." (CORRECT)
+Bad Output: "The teacher proactively resolved all technical issues." (INCORRECT - changes meaning)
+
+Example 2 (Positive Input):
+Input: "good job with kids"
+Output: "The teacher demonstrated strong rapport with the students."
 `;
-
-  // 2. The Payload
-  const payload = {
-    contents: [
-      {
-        parts: [{ text: systemPrompt }],
-      },
-    ],
-    generationConfig: {
-      temperature: 0.3, // Low temperature = more consistent/focused, less creative
-      maxOutputTokens: 500,
-    },
-  };
-
-  // 3. The Fetch with Timeout (Reliable Sync Strategy)
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
-
-  try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || `Gemini API Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const polishedText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!polishedText) {
-      throw new Error("Gemini returned an empty response.");
-    }
-
-    return polishedText.trim();
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (err.name === "AbortError") {
-      throw new Error("Request timed out. Please check your internet connection.");
-    }
-    throw err;
-  }
-}
-
-// src/utils/gemini.ts
-
-// ... existing code ...
-
-interface BatchItem {
-  id: string;
-  title: string;
-  text: string;
-}
-
-/**
- * Polishes multiple indicators in a SINGLE API call to save quota.
- */
-export async function polishBatchWithGemini(items: BatchItem[]): Promise<Record<string, string>> {
-  if (items.length === 0) return {};
-
-  const systemPrompt = `
-You are an expert GrapeSEED Supervisor. 
-I will provide a JSON array of observation notes. 
-Your task is to polish the "text" field of each item.
-
-Rules:
-1. Return ONLY a valid JSON object where keys are the IDs and values are the polished text.
-2. Fix grammar and tone (professional, supportive).
-3. Keep GrapeSEED terminology intact.
-4. Do not change the meaning.
-
-Input Format:
-[
-  { "id": "1", "text": "teacher use good gesture" },
-  ...
-]
-
-Output Format (Strict JSON):
-{
-  "1": "The teacher used effective gestures.",
-  ...
-}
-`;
-
-  // Simplify the payload to just ID and Text to save tokens
-  const cleanInput = items.map(i => ({ id: i.id, text: i.text }));
 
   const payload = {
     contents: [
       {
         role: "user",
-        parts: [{ text: systemPrompt + "\n\nInput:\n" + JSON.stringify(cleanInput) }],
+        parts: [{ text: systemInstruction }],
       },
     ],
     generationConfig: {
-      temperature: 0.3,
-      responseMimeType: "application/json", // 🟢 Forces Gemini to return perfect JSON
+      temperature: 0.3, // 🟢 Lower temperature = Less creativity/hallucination
+      maxOutputTokens: 200,
     },
   };
 
-  // Use the reliable, free model
-  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`;
-  
+  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
+
+  const response = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(
+      `Gemini API Error: ${response.status} ${errData?.error?.message || ""}`
+    );
+  }
+
+  const data = await response.json();
+  const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  return result ? result.trim() : text;
+}
+
+
+// ------------------------------------------------------------------
+
+interface BatchItem {
+  id: string;
+  title: string; // Context
+  text: string;  // The user's rough notes
+}
+
+// 🟢 BATCH POLISH (Multiple items in one call)
+export async function polishBatchWithGemini(
+  items: BatchItem[]
+): Promise<Record<string, string>> {
+  if (items.length === 0) return {};
+
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing VITE_GEMINI_API_KEY");
+  }
+
+  // 🟢 STRICT BATCH PROMPT
+  const systemPrompt = `
+You are a professional editor for GrapeSEED teacher observations. 
+I will provide a JSON array of notes. Your task is to polish the "text" field of each item.
+
+RULES:
+1. Return ONLY a valid JSON object where keys are the IDs and values are the polished text.
+2. **Maintain Sentiment:** Do NOT turn negative notes into positive praise. If a note says "bad", keep it critical (e.g., "needs improvement").
+3. **No Hallucinations:** Do not add specific details (like specific props or actions) unless they are in the input.
+4. **Tone:** Professional, objective, and constructive.
+
+Input Format:
+[
+  { "id": "1", "text": "teacher is bad", "context": "Tech Issues" },
+  { "id": "2", "text": "good energy", "context": "Engagement" }
+]
+
+Output Format (Strict JSON):
+{
+  "1": "The teacher struggled to handle technical issues effectively.",
+  "2": "The teacher displayed high energy and engagement."
+}
+`;
+
+  // We send ID, Text, AND Title (Context) to help the AI understand what "bad" applies to
+  const cleanInput = items.map((i) => ({
+    id: i.id,
+    text: i.text,
+    context: i.title,
+  }));
+
+  const payload = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text:
+              systemPrompt + "\n\nInput Data:\n" + JSON.stringify(cleanInput),
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.2, // 🟢 Very low temperature for consistent JSON
+      responseMimeType: "application/json",
+    },
+  };
+
+  const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
+
   const response = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
