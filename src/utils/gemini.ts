@@ -1,14 +1,13 @@
 /**
  * src/utils/gemini.ts
  * Utility to interact with Google Gemini API.
- * Includes "Single Polish" for individual edits and "Batch Polish" for the "Polish All" button.
  */
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-// ⚡ Switch to 1.5-Flash (Stable) for higher rate limits than the Preview model
+// 🟢 CRITICAL FIX: Use 1.5-Flash. 
+// 2.5-Flash-Lite is limited to 20/day. 1.5-Flash is 1,500/day.
 const MODEL_NAME = "gemini-1.5-flash"; 
 
 if (!API_KEY) {
@@ -19,41 +18,39 @@ const genAI = new GoogleGenerativeAI(API_KEY);
 const model = genAI.getGenerativeModel({ 
   model: MODEL_NAME,
   generationConfig: {
-    temperature: 0.2, // Lower temperature = strictly follows instructions
+    temperature: 0.2, // Low temp = strict adherence to rules
   }
 });
 
 // ==========================================
 // 1. SINGLE ITEM POLISH
-// Used when clicking the "✨ AI Polish" button on a specific indicator
 // ==========================================
 export async function polishTextWithGemini(
   text: string,
   indicatorTitle?: string,
   indicatorDescription?: string
 ): Promise<string> {
-  if (!text) return "";
+  if (!text || text.trim().length === 0) return "";
 
-  // 🛡️ STRICT PROMPT: Uses XML tags to separate "Reference" from "Work"
   const systemInstruction = `
 You are a professional pedagogical editor. 
-Your task is to rewrite the text inside <user_input> to be professional, constructive, and grammatically correct (US English).
+Your ONLY task is to rewrite the user's raw notes to be professional, constructive, and grammatically correct (US English).
 
-<reference_material>
+<reference_context>
   Indicator: ${indicatorTitle || "General"}
   Definition: ${indicatorDescription || ""}
-  (INSTRUCTION: This is context ONLY. Do NOT paraphrase or output this text.)
-</reference_material>
+  (INSTRUCTION: Ignore this text for output. Do NOT paraphrase this.)
+</reference_context>
 
-<user_input>
+<user_raw_input>
   ${text}
-</user_input>
+</user_raw_input>
 
 RULES:
-1. Rewrite ONLY the content found inside <user_input>.
-2. If <user_input> is extremely short (e.g., "bad", "good"), expand it slightly into a professional sentence, but DO NOT simply copy the <reference_material>.
-3. Maintain the original sentiment. If the input is negative, keep the critique but make it professional.
-4. Return ONLY the final polished string. No quotes, no headers.
+1. Rewrite ONLY the content inside <user_raw_input>.
+2. Do NOT use the <reference_context> to generate your answer. Only use it to understand what the user is talking about.
+3. If <user_raw_input> is negative (e.g. "bad", "boring"), keep it critical but make the tone professional.
+4. Output specific feedback based ONLY on the user's input.
 `;
 
   try {
@@ -61,30 +58,23 @@ RULES:
     const response = await result.response;
     const polished = response.text();
 
-    // Safety cleanup
     if (!polished) return text;
     
-    // Strip common AI conversational prefixes
+    // Clean up common AI prefixes
     let finalClean = polished.trim();
-    finalClean = finalClean.replace(/^Here is (the )?polished.*?:\s*/i, "");
-    finalClean = finalClean.replace(/^Option 1:?\s*/i, "");
-    finalClean = finalClean.replace(/^Revised:?\s*/i, "");
+    finalClean = finalClean.replace(/^Here is.*?:\s*/i, "").replace(/^Revised.*?:\s*/i, "");
 
     return finalClean;
 
   } catch (err: any) {
     console.error("AI Polish Error:", err);
-    // Graceful fallback
-    throw new Error("AI busy. Please wait a moment."); 
+    throw new Error("AI Service Busy. Please try again."); 
   }
 }
 
-
 // ==========================================
-// 2. BATCH POLISH (1 Request for ALL items)
-// Used when clicking "✨ Polish All"
+// 2. BATCH POLISH (1 Request = 18 Items)
 // ==========================================
-
 interface BatchItem {
   id: string;
   title: string;
@@ -96,36 +86,28 @@ export async function polishBatchWithGemini(
 ): Promise<Record<string, string>> {
   if (items.length === 0) return {};
 
-  // 1. Prepare data 
-  // 🟢 RENAMED FIELDS: helps the AI distinguish "Reference" vs "Input"
   const cleanInput = items.map((i) => ({
     id: i.id,
-    topic_reference: i.title, // Passive context
-    user_raw_input: i.text,   // Active input to rewrite
+    topic_reference: i.title, // Context only
+    user_input_to_rewrite: i.text,   // The actual text to change
   }));
 
-  // 2. Strict JSON Prompt
   const systemPrompt = `
-You are a professional editor for teacher observation reports.
-I will provide a JSON array of raw notes. 
-Your task is to polish the "user_raw_input" field for grammar and professional tone (US English).
+You are a professional editor for teacher observations.
+I will provide a JSON array. You must polish the "user_input_to_rewrite" field.
 
 INPUT DATA:
 ${JSON.stringify(cleanInput, null, 2)}
 
 INSTRUCTIONS:
-1. Return ONLY a valid JSON object.
-2. Keys must match the "id" from input.
-3. Values must be the polished version of "user_raw_input".
-4. 🛑 CRITICAL: Do NOT use the "topic_reference" as your output. You must rewrite the "user_raw_input". 
-5. If "user_raw_input" is very short (e.g. "poor"), write "The performance in this area needs improvement" instead of copying the topic definition.
-6. Maintain original sentiment (do not turn negatives into praise).
+1. Return ONLY valid JSON.
+2. Keys = "id". Values = Polished version of "user_input_to_rewrite".
+3. 🛑 CRITICAL: Do NOT use "topic_reference" in your output. That is just context.
+4. Rewrite the user's text to be professional and constructive.
 
-EXAMPLE OUTPUT:
-{
-  "ind-1": "The teacher managed the classroom effectively.",
-  "ind-2": "The pacing of the lesson needs adjustment."
-}
+EXAMPLE:
+Input: { "id": "1", "topic_reference": "Classroom Management", "user_input_to_rewrite": "kids running around" }
+Output: { "1": "The teacher needs to establish better control over student movement in the classroom." }
 `;
 
   try {
@@ -139,20 +121,13 @@ EXAMPLE OUTPUT:
     const response = await result.response;
     const rawText = response.text();
 
-    if (!rawText) throw new Error("Empty response from AI");
+    if (!rawText) throw new Error("Empty response");
 
-    // 3. Parse JSON
-    // Sometimes AI adds Markdown code blocks even in JSON mode, so we strip them
     const cleanedJson = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-    
     return JSON.parse(cleanedJson);
 
   } catch (e) {
     console.error("Batch Polish Error:", e);
-    // Handle the 429 specifically for user clarity
-    if (String(e).includes("429")) {
-      throw new Error("Quota exceeded. Please wait 60 seconds.");
-    }
-    throw new Error("Failed to process batch. Try polishing individual items.");
+    throw new Error("Batch processing failed. Try individual items.");
   }
 }
