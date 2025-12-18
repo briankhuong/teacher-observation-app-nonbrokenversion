@@ -56,7 +56,7 @@ export function buildTeacherPreCallHtml({
     </div>
 
     <div style="${footer}">
-      GrapeSEED Support Team • Together we grow
+      GrapeSEED Vietnam Training Team
     </div>
   </div>
 

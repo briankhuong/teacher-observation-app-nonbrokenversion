@@ -61,7 +61,7 @@ export function buildAdminUpdateBulkHtml({
     <div style="${body}">
       <p style="margin-top: 0;">Kính gửi anh/chị <strong>${adminName}</strong>,</p>
       
-      <p>Cảm ơn anh/chị đã tạo điều kiện để chúng tôi hoàn thành đợt hỗ trợ vừa qua. Dưới đây là danh sách các lớp học chúng tôi đã làm việc trong tháng <strong>${reportMonth}</strong>:</p>
+      <p>Cảm ơn anh/chị đã tạo điều kiện em hoàn thành đợt hỗ trợ vừa qua. Dưới đây là danh sách giáo viên em đã hỗ trợ<strong>${reportMonth}</strong>:</p>
 
       <div style="border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; margin: 20px 0;">
         <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
@@ -90,7 +90,7 @@ export function buildAdminUpdateBulkHtml({
     </div>
 
     <div style="${footer}">
-      Thông tin nội bộ - GrapeSEED Vietnam Support Team
+      Thông tin nội bộ - GrapeSEED Vietnam Training Team
     </div>
   </div>
 
