@@ -1,8 +1,3 @@
-/**
- * src/utils/gemini.ts
- * Utility to interact with Google Gemini (Gemini Developer API) via the GA Google GenAI SDK.
- */
-
 import { GoogleGenAI } from "@google/genai";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
@@ -11,10 +6,10 @@ if (!API_KEY) {
   console.error("Missing VITE_GEMINI_API_KEY in environment variables.");
 }
 
-// Pick a CURRENT stable model.
-// - gemini-2.5-flash: great quality/speed for text polishing
-// - gemini-2.5-flash-lite: fastest/cheapest for high throughput
-const MODEL_NAME = "gemini-2.5-flash"; // or "gemini-2.5-flash-lite"
+// 🟢 FIX: Use "gemini-1.5-flash" (Current Stable & Cheapest)
+// "gemini-2.0-flash-exp" exists but is experimental. 
+// "gemini-2.5" does not exist yet.
+const MODEL_NAME = "gemini-1.5-flash"; 
 
 const ai = new GoogleGenAI({ apiKey: API_KEY ?? "" });
 
