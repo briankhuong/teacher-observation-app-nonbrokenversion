@@ -1,7 +1,7 @@
 /**
  * src/utils/gemini.ts
  * Utility to interact with Google Gemini API.
- * Uses gemini-1.5-flash (Stable Alias) to avoid 404 errors.
+ * Uses "gemini-1.5-flash" (Standard Alias) to ensure stability and avoid 404 errors.
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -9,7 +9,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 // 🟢 FINAL FIX: Use the standard alias "gemini-1.5-flash".
-// This auto-resolves to the latest stable version and avoids 404s.
+// This auto-resolves to the latest stable version and prevents "Model Not Found" errors.
 const MODEL_NAME = "gemini-1.5-flash"; 
 
 if (!API_KEY) {
