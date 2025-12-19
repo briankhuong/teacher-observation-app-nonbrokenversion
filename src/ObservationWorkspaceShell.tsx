@@ -391,7 +391,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
   },
 ];
 
-// Helper: convert strokes → PNG → base64 string
+// 🟢 UPDATED: Uses JPEG compression (0.7) to significantly reduce payload size and prevent timeouts.
 async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
   if (!strokes.length) {
     throw new Error("No strokes to convert");
@@ -404,10 +404,7 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
   }
 
   // Compute bounds so we don’t create a huge blank image
-  let minX = Infinity,
-    minY = Infinity,
-    maxX = -Infinity,
-    maxY = -Infinity;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
   for (const stroke of strokes) {
     for (const p of stroke.points) {
@@ -429,7 +426,7 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
   canvas.width = width;
   canvas.height = height;
 
-  // Dark-ish background, white lines (similar to your UI)
+  // 🛡️ BACKGROUND: Must be solid for JPEG (JPEG doesn't support transparency)
   ctx.fillStyle = "#020617";
   ctx.fillRect(0, 0, width, height);
 
@@ -449,74 +446,82 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
     ctx.stroke();
   }
 
-  // Canvas → blob → base64
-  const blob: Blob = await new Promise((resolve, reject) => {
-    canvas.toBlob((b) => {
-      if (!b) return reject(new Error("Failed to create PNG blob"));
-      resolve(b);
-    }, "image/png");
-  });
-
-  const arrayBuffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  const base64 = btoa(binary);
+  /**
+   * 🟢 FINAL FIX: PERFORMANCE OPTIMIZATION
+   * Old: canvas.toBlob(..., "image/png") -> Very slow, large file.
+   * New: canvas.toDataURL(..., 0.7) -> Instant, tiny file (JPEG).
+   */
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+  
+  // Remove the "data:image/jpeg;base64," prefix to get raw base64
+  const base64 = dataUrl.split(",")[1];
+  
   return base64;
 }
 
-
-// 🚀 Real OCR hook: strokes → PNG base64 → Render Server → Azure
-// src/ObservationWorkspaceShell.tsx
-
-// 🚀 Real OCR hook: strokes → PNG base64 → Render Server → Azure
-// 🛡️ UPDATE: Added AbortController for 15s timeout (Reliable Sync Strategy)
+/**
+ * 🟢 REVISED: runOcrOnStrokes with Automatic Retry logic
+ * Handles the "Cold Start" by trying again if the first connection fails.
+ */
 async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
   if (!MERGE_SERVER_BASE) {
     console.error("VITE_MERGE_SERVER_BASE is missing. Cannot perform OCR.");
     return { text: "Error: Server base URL is not configured.", confidence: 0 };
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15-second Circuit Breaker
+  const MAX_RETRIES = 2;
+  let lastError = "";
 
-  try {
-    const imageBase64 = await strokesToPngBase64(strokes);
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    // 15s timeout for first attempt, 20s for the second
+    const timeoutDuration = attempt === 1 ? 15000 : 20000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
 
-    const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-azure`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64 }),
-      signal: controller.signal, // 🔌 Attach signal
-    });
+    try {
+      console.log(`OCR Attempt ${attempt}/${MAX_RETRIES}...`);
+      const imageBase64 = await strokesToPngBase64(strokes);
 
-    clearTimeout(timeoutId); // ✅ Clear timeout on success
+      const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-azure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64 }),
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Azure OCR HTTP error", response.status, errorText);
-      return { text: `Error: Server responded with status ${response.status}`, confidence: 0 };
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const data: { text?: string; confidence?: number } = await response.json();
+      return {
+        text: data.text ?? "",
+        confidence: typeof data.confidence === "number" ? data.confidence : 0.7,
+      };
+
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      lastError = err.name === 'AbortError' ? "Network Timeout" : err.message;
+      
+      console.warn(`OCR Attempt ${attempt} failed: ${lastError}`);
+      
+      // If it's the last attempt, don't wait, just exit the loop
+      if (attempt < MAX_RETRIES) {
+        // Small 1-second delay before trying again to let the server breathe
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
-
-    const data: { text?: string; confidence?: number } = await response.json();
-
-    return {
-      text: data.text ?? "",
-      confidence: typeof data.confidence === "number" ? data.confidence : 0.7,
-    };
-  } catch (err: any) {
-    clearTimeout(timeoutId); // 🧹 Cleanup
-    if (err.name === 'AbortError') {
-      console.error("Azure OCR timed out");
-      return { text: "Error: Network timed out (15s). Handwritng saved locally.", confidence: 0 };
-    }
-    console.error("Azure OCR request failed", err);
-    return { text: "Error: Could not reach the API server.", confidence: 0 };
   }
-}
 
+  // If we reach here, all retries failed
+  return { 
+    text: `Error: OCR failed after ${MAX_RETRIES} attempts. (${lastError})`, 
+    confidence: 0 
+  };
+}
 
 
 // Normalize indicators coming from DB or localStorage so we always have an array
