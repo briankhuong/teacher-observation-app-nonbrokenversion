@@ -1,16 +1,16 @@
 /**
  * src/utils/gemini.ts
  * Utility to interact with Google Gemini API.
- * Uses gemini-1.5-flash-001 (Stable) for high rate limits on the free tier.
+ * Uses gemini-1.5-flash (Stable Alias) to avoid 404 errors.
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-// 🟢 STABLE MODEL: High limits (1,500/day), fast, and cheap.
-// We use the specific version "-001" to avoid "Model not found" errors.
-const MODEL_NAME = "gemini-1.5-flash-001"; 
+// 🟢 FINAL FIX: Use the standard alias "gemini-1.5-flash".
+// This auto-resolves to the latest stable version and avoids 404s.
+const MODEL_NAME = "gemini-1.5-flash"; 
 
 if (!API_KEY) {
   console.error("Missing VITE_GEMINI_API_KEY in environment variables.");
@@ -20,7 +20,7 @@ const genAI = new GoogleGenerativeAI(API_KEY);
 const model = genAI.getGenerativeModel({ 
   model: MODEL_NAME,
   generationConfig: {
-    temperature: 0.3, // Keep it slightly creative but grounded
+    temperature: 0.3, 
   }
 });
 
@@ -29,15 +29,11 @@ const model = genAI.getGenerativeModel({
 // ==========================================
 export async function polishTextWithGemini(
   text: string,
-  // We keep these arguments to avoid breaking your component code,
-  // BUT we will NOT use them in the prompt to prevent confusion.
   _unusedTitle?: string,
   _unusedDescription?: string
 ): Promise<string> {
   if (!text || text.trim().length === 0) return "";
 
-  // 🛡️ SIMPLIFIED PROMPT: Focus ONLY on the user's text.
-  // We do not send the indicator description, so the AI cannot accidentally paraphrase it.
   const systemInstruction = `
 You are a professional copy editor for teacher observation reports.
 Your task is to polish the draft text below to be professional, grammatically correct, and constructive (US English).
@@ -59,10 +55,9 @@ RULES:
 
     if (!polished) return text;
     
-    // Clean up common AI prefixes just in case
+    // Clean up common AI prefixes
     let finalClean = polished.trim();
     finalClean = finalClean.replace(/^Here is.*?:\s*/i, "").replace(/^Revised.*?:\s*/i, "");
-    // Remove quotes if the AI added them around the whole string
     finalClean = finalClean.replace(/^"(.*)"$/, "$1");
 
     return finalClean;
@@ -75,7 +70,7 @@ RULES:
 
 
 // ==========================================
-// 2. BATCH POLISH (1 Request for ALL items)
+// 2. BATCH POLISH
 // ==========================================
 
 interface BatchItem {
@@ -89,14 +84,11 @@ export async function polishBatchWithGemini(
 ): Promise<Record<string, string>> {
   if (items.length === 0) return {};
 
-  // 1. Prepare data 
-  // We ONLY send the ID and the TEXT. We strip the title/context completely.
   const cleanInput = items.map((i) => ({
     id: i.id,
     draft_text: i.text, 
   }));
 
-  // 2. Strict JSON Prompt
   const systemPrompt = `
 You are a professional editor. I will provide a JSON array of raw draft notes.
 Your task is to polish the "draft_text" field for professional tone (US English).
@@ -116,7 +108,6 @@ Output: {"1": "The students were noisy and required redirection."}
 `;
 
   try {
-    // Force JSON mode for reliability
     const jsonModel = genAI.getGenerativeModel({ 
       model: MODEL_NAME,
       generationConfig: { responseMimeType: "application/json" } 
