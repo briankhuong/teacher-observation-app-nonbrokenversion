@@ -55,6 +55,21 @@ const App: React.FC = () => {
       setSession(session);
     });
 
+    // --- 🟢 NEW: Warm-up Logic (Fixes OCR Cold Start) ---
+  const warmUpServices = async () => {
+    try {
+      const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
+      if (MERGE_SERVER_BASE) {
+        // Send a lightweight HEAD request to wake up the Render server
+        fetch(`${MERGE_SERVER_BASE}/api/ocr-azure`, { method: "HEAD" }).catch(() => {});
+        console.log("🚀 OCR Server warm-up signaled...");
+      }
+    } catch (e) {
+      // Silently fail, it's just a background optimization
+    }
+  };
+  warmUpServices();
+
     // --- Network Logic (Fixes the "sticky" badge) ---
     const handleStatusChange = () => setIsOnline(navigator.onLine);
     window.addEventListener('online', handleStatusChange);
