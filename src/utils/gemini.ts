@@ -1,28 +1,22 @@
 /**
  * src/utils/gemini.ts
- * Utility to interact with Google Gemini API.
- * Uses "gemini-1.5-flash" (Standard Alias) to ensure stability and avoid 404 errors.
+ * Utility to interact with Google Gemini (Gemini Developer API) via the GA Google GenAI SDK.
  */
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-
-// 🟢 FINAL FIX: Use the standard alias "gemini-1.5-flash".
-// This auto-resolves to the latest stable version and prevents "Model Not Found" errors.
-const MODEL_NAME = "gemini-1.5-flash"; 
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
 
 if (!API_KEY) {
   console.error("Missing VITE_GEMINI_API_KEY in environment variables.");
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({ 
-  model: MODEL_NAME,
-  generationConfig: {
-    temperature: 0.3, 
-  }
-});
+// Pick a CURRENT stable model.
+// - gemini-2.5-flash: great quality/speed for text polishing
+// - gemini-2.5-flash-lite: fastest/cheapest for high throughput
+const MODEL_NAME = "gemini-2.5-flash"; // or "gemini-2.5-flash-lite"
+
+const ai = new GoogleGenAI({ apiKey: API_KEY ?? "" });
 
 // ==========================================
 // 1. SINGLE ITEM POLISH
@@ -32,42 +26,46 @@ export async function polishTextWithGemini(
   _unusedTitle?: string,
   _unusedDescription?: string
 ): Promise<string> {
-  if (!text || text.trim().length === 0) return "";
+  const draft = (text ?? "").trim();
+  if (!draft) return "";
 
   const systemInstruction = `
 You are a professional copy editor for teacher observation reports.
-Your task is to polish the draft text below to be professional, grammatically correct, and constructive (US English).
+Polish the user's draft to be professional, grammatically correct, and constructive (US English).
 
-INPUT TEXT:
-"${text}"
-
-RULES:
-1. Fix grammar, spelling, and professional tone.
-2. Maintain the original sentiment (do not change "bad" to "good", just make it professional).
-3. Do not add any conversational filler like "Here is the rewritten text".
-4. Return ONLY the polished string.
-`;
+Rules:
+1) Fix grammar, spelling, clarity, and professional tone.
+2) Preserve the original meaning and sentiment (do not change negative to positive).
+3) Do not add filler like "Here is the rewritten text".
+4) Return ONLY the polished text (no quotes, no markdown).
+`.trim();
 
   try {
-    const result = await model.generateContent(systemInstruction);
-    const response = await result.response;
-    const polished = response.text();
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: draft, // user content stays here
+      config: {
+        systemInstruction, // system behavior goes here
+        temperature: 0.3,
+      },
+    });
 
-    if (!polished) return text;
-    
-    // Clean up common AI prefixes
-    let finalClean = polished.trim();
-    finalClean = finalClean.replace(/^Here is.*?:\s*/i, "").replace(/^Revised.*?:\s*/i, "");
-    finalClean = finalClean.replace(/^"(.*)"$/, "$1");
+    const polished = (response.text ?? "").trim();
+    if (!polished) return draft;
 
-    return finalClean;
+    // (Optional) extra cleanup in case the model still adds a label
+    return polished
+      .replace(/^Here is.*?:\s*/i, "")
+      .replace(/^Revised.*?:\s*/i, "")
+      .replace(/^"(.*)"$/, "$1")
+      .trim();
 
   } catch (err: any) {
     console.error("AI Polish Error:", err);
-    throw new Error("AI Service Busy. Please try again."); 
+    // keep your UX-friendly error
+    throw new Error("AI Service Busy. Please try again.");
   }
 }
-
 
 // ==========================================
 // 2. BATCH POLISH
@@ -82,45 +80,41 @@ interface BatchItem {
 export async function polishBatchWithGemini(
   items: BatchItem[]
 ): Promise<Record<string, string>> {
-  if (items.length === 0) return {};
+  if (!items || items.length === 0) return {};
 
   const cleanInput = items.map((i) => ({
     id: i.id,
-    draft_text: i.text, 
+    draft_text: (i.text ?? "").trim(),
   }));
 
-  const systemPrompt = `
-You are a professional editor. I will provide a JSON array of raw draft notes.
-Your task is to polish the "draft_text" field for professional tone (US English).
+  const systemInstruction = `
+You are a professional editor. You will receive a JSON array of objects.
+Polish each object's "draft_text" for professional tone (US English) while preserving meaning.
 
-INPUT DATA:
-${JSON.stringify(cleanInput, null, 2)}
-
-INSTRUCTIONS:
-1. Return ONLY valid JSON.
-2. The output keys must match the "id" from the input.
-3. The output values must be the polished version of "draft_text".
-4. Do not paraphrase. Just fix grammar and tone.
-
-EXAMPLE:
-Input: [{"id":"1", "draft_text":"kids noisy"}]
-Output: {"1": "The students were noisy and required redirection."}
-`;
+Return ONLY valid JSON:
+- keys: must match each input "id"
+- values: polished "draft_text"
+No markdown fences.
+`.trim();
 
   try {
-    const jsonModel = genAI.getGenerativeModel({ 
+    const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      generationConfig: { responseMimeType: "application/json" } 
+      contents: JSON.stringify(cleanInput),
+      config: {
+        systemInstruction,
+        temperature: 0.3,
+        responseMimeType: "application/json",
+      },
     });
 
-    const result = await jsonModel.generateContent(systemPrompt);
-    const response = await result.response;
-    const rawText = response.text();
+    const raw = (response.text ?? "").trim();
+    if (!raw) throw new Error("Empty response from AI");
 
-    if (!rawText) throw new Error("Empty response from AI");
+    // Defensive cleanup (some gateways/models may still wrap output)
+    const cleaned = raw.replace(/```json/g, "").replace(/```/g, "").trim();
 
-    const cleanedJson = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-    return JSON.parse(cleanedJson);
+    return JSON.parse(cleaned) as Record<string, string>;
 
   } catch (e) {
     console.error("Batch Polish Error:", e);
