@@ -30,15 +30,16 @@ export async function polishTextWithGemini(
   if (!draft) return "";
 
   const systemInstruction = `
-You are a professional copy editor for teacher observation reports.
-Polish the user's draft to be professional, grammatically correct, and constructive (US English).
-
-Rules:
-1) Fix grammar, spelling, clarity, and professional tone.
-2) Preserve the original meaning and sentiment (do not change negative to positive).
-3) Do not add filler like "Here is the rewritten text".
-4) Return ONLY the polished text (no quotes, no markdown).
-`.trim();
+ You are a professional copy editor for teacher observation reports.
+ Polish the user's draft to be professional, grammatically correct, and constructive (US English).
+ 
+ Rules:
+ 1) Fix grammar, spelling, clarity, and professional tone.
+ 2) Preserve the original meaning and sentiment (do not change negative to positive).
+ 3) Crucially, **DO NOT remove or alter any special markers like hyphens (-) or "(GA)" at the beginning of a line.** These are important identifiers.
+ 4) Do not add filler like "Here is the rewritten text".
+ 5) Return ONLY the polished text (no quotes, no markdown).
+ `.trim();
 
   try {
     const response = await ai.models.generateContent({
@@ -88,14 +89,16 @@ export async function polishBatchWithGemini(
   }));
 
   const systemInstruction = `
-You are a professional editor. You will receive a JSON array of objects.
-Polish each object's "draft_text" for professional tone (US English) while preserving meaning.
-
-Return ONLY valid JSON:
-- keys: must match each input "id"
-- values: polished "draft_text"
-No markdown fences.
-`.trim();
+ You are a professional editor. You will receive a JSON array of objects.
+ Polish each object's "draft_text" for professional tone (US English) while preserving meaning.
+ 
+ Crucially, **DO NOT remove or alter any special markers like hyphens (-) or "(GA)" at the beginning of a line.** These are important identifiers.
+ 
+ Return ONLY valid JSON:
+ - keys: must match each input "id"
+ - values: polished "draft_text"
+ No markdown fences.
+ `.trim();
 
   try {
     const response = await ai.models.generateContent({
