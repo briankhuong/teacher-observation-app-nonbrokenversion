@@ -1,5 +1,5 @@
 // src/DashboardShell.tsx
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
 // import { ObservationCard } from "./components/ObservationCard"; // Unused in this file, commenting out
@@ -17,6 +17,7 @@ import { buildAdminUpdateHtml } from "./emailTemplates/adminUpdate";
 import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
 // Update the import to include the Admin function
 import { clientMergeTeacherSheet, clientMergeAdminSheet } from './utils/clientExcelMerge';
+import { EditObservationModal } from './components/EditObservationModal';
 
 
 // ✅ CORRECT (Matches your screenshots & Vercel settings)
@@ -29,7 +30,7 @@ type StatusColor = "good" | "mixed" | "growth";
 type GroupMode = "none" | "month" | "school" | "campus";
 type SortMode = "newest" | "oldest" | "teacher-az" | "teacher-za";
 
-interface DashboardObservationRow {
+export interface DashboardObservationRow {
   id: string;
   teacherName: string;
   schoolName: string;
@@ -533,6 +534,10 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
 const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
 
+  // NEW: State for Edit Observation Modal
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingObservation, setEditingObservation] = useState<DashboardObservationRow | null>(null);
+
   // NEW: central modal state for Teacher/Admin actions
   const [actionModal, setActionModal] = useState<{
     obsId: string;
@@ -839,8 +844,47 @@ const handleSummarySaved = React.useCallback(
             )
         );
     },
-    [setObservations] 
+    [setObservations]
 );
+
+// Handler for saving edited metadata
+const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: Partial<DashboardObservationRow['meta']>) => {
+  // 1. Update the local state (optimistic UI update)
+  setObservations(prev =>
+    prev.map(obs =>
+      obs.id === id
+        ? { ...obs,
+            teacherName: updatedMeta.teacherName ?? obs.teacherName,
+            schoolName: updatedMeta.schoolName ?? obs.schoolName,
+            campus: updatedMeta.campus ?? obs.campus,
+            unit: updatedMeta.unit ?? obs.unit,
+            lesson: updatedMeta.lesson ?? obs.lesson,
+            supportType: updatedMeta.supportType ?? obs.supportType,
+            isoDate: updatedMeta.date ?? obs.isoDate,
+            dateLabel: updatedMeta.date ? new Date(updatedMeta.date).toLocaleDateString() : obs.dateLabel,
+            meta: { ...obs.meta, ...updatedMeta }
+          }
+        : obs
+    )
+  );
+
+  // 2. Persist to DB (and local storage via persistMergedLinkToObservationMeta)
+  // We need to construct the patch carefully, as persistMergedLinkToObservationMeta expects
+  // the keys to be directly under 'meta'
+  const patchForPersistence = {
+    teacherName: updatedMeta.teacherName,
+    schoolName: updatedMeta.schoolName,
+    campus: updatedMeta.campus,
+    unit: updatedMeta.unit,
+    lesson: updatedMeta.lesson,
+    supportType: updatedMeta.supportType,
+    date: updatedMeta.date, // Use 'date' for ISO date string in meta
+  };
+  await persistMergedLinkToObservationMeta(id, patchForPersistence);
+
+  setEditingObservation(null);
+  setShowEditModal(false);
+}, [setObservations]);
 
 // --- Now, continue with the rest of your component's code ---
 
@@ -1625,6 +1669,27 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
                 <i className="fa fa-trash" style={{ marginRight: '4px' }}></i>
                 Delete
               </button>
+              {/* 🟢 NEW: EDIT METADATA BUTTON */}
+              <button
+                type="button"
+                className="obs-pill-button"
+                style={{
+                  marginLeft: '8px',
+                  color: '#007bff',
+                  borderColor: '#007bff',
+                  backgroundColor: 'transparent'
+                }}
+                title="Edit Observation Details"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingObservation(obs);
+                  setShowEditModal(true);
+                }}
+              >
+                <i className="fa fa-edit" style={{ marginRight: '4px' }}></i>
+                Edit
+              </button>
+              {/* 🟢 END EDIT METADATA BUTTON */}
               {/* 🟢 END NEW BUTTON */}
             </div>
           </div>
@@ -2373,6 +2438,14 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         sandwichData={emailModalState.sandwichData}
       />
       {/* 👆 MAKE SURE THIS IS HERE 👆 */}
+
+      {/* ---------- EDIT OBSERVATION MODAL ---------- */}
+      <EditObservationModal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        observation={editingObservation}
+        onSave={handleSaveEditedObservation}
+      />
     </>
   );
 };
