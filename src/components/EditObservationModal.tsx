@@ -1,5 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { DashboardObservationRow } from '../DashboardShell';
+import { supabase } from '../supabaseClient';
+import { useAuth } from '../auth/AuthContext';
+import { SCHOOL_MASTER_LIST } from '../schoolMaster';
+
+interface SchoolRow {
+  id: string;
+  trainer_id: string;
+  school_name: string;
+  campus_name: string;
+  am_name: string | null;
+  am_email: string | null;
+  admin_name: string | null;
+  admin_email: string | null;
+  admin_phone: string | null;
+  address_line1: string | null;
+  city: string | null;
+}
 
 interface EditObservationModalProps {
   isOpen: boolean;
@@ -14,6 +31,7 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
   observation,
   onSave,
 }) => {
+  const { user } = useAuth();
   const [teacherName, setTeacherName] = useState('');
   const [schoolName, setSchoolName] = useState('');
   const [campus, setCampus] = useState('');
@@ -21,6 +39,10 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
   const [lesson, setLesson] = useState('');
   const [supportType, setSupportType] = useState<DashboardObservationRow['supportType']>('Visit');
   const [date, setDate] = useState(''); // ISO date string YYYY-MM-DD
+
+  const [schools, setSchools] = useState<SchoolRow[]>([]);
+  const [schoolsLoading, setSchoolsLoading] = useState(true);
+  const [schoolsError, setSchoolsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && observation) {
@@ -33,6 +55,62 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
       setDate(observation.isoDate || '');
     }
   }, [isOpen, observation]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+
+    async function loadSchools() {
+      try {
+        setSchoolsLoading(true);
+        setSchoolsError(null);
+
+        const { data, error } = await supabase
+          .from("schools")
+          .select("school_name, campus_name")
+          .eq("trainer_id", user!.id)
+          .order("school_name", { ascending: true })
+          .order("campus_name", { ascending: true });
+
+        if (error) {
+          console.error("[DB] load schools error", error);
+          if (!cancelled) setSchoolsError(error.message);
+          return;
+        }
+
+        if (!cancelled && data) {
+          setSchools(data as SchoolRow[]);
+        }
+      } finally {
+        if (!cancelled) setSchoolsLoading(false);
+      }
+    }
+
+    loadSchools();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const schoolOptions = useMemo(() => {
+    const names = (schools.length
+      ? schools.map((s) => s.school_name)
+      : SCHOOL_MASTER_LIST.map((s) => s.schoolName)
+    ).filter(Boolean);
+    return Array.from(new Set(names)).sort();
+  }, [schools]);
+
+  const campusOptions = useMemo(() => {
+    if (!schoolName) return [];
+    if (schools.length) {
+      const campuses = schools
+        .filter((s) => s.school_name === schoolName)
+        .map((s) => s.campus_name)
+        .filter(Boolean);
+      return Array.from(new Set(campuses));
+    }
+    return SCHOOL_MASTER_LIST.filter((s) => s.schoolName === schoolName)
+      .map((s) => s.campusName)
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+  }, [schoolName, schools]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,11 +146,36 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
           </div>
           <div className="form-row">
             <label>School Name:</label>
-            <input type="text" value={schoolName} onChange={(e) => setSchoolName(e.target.value)} className="input" required />
+            <select
+              className="select"
+              value={schoolName}
+              onChange={(e) => { setSchoolName(e.target.value); setCampus(''); }}
+              required
+            >
+              <option value="">Select school…</option>
+              {schoolOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            {schoolsError && <div className="field-error">Could not load schools ({schoolsError}).</div>}
           </div>
           <div className="form-row">
             <label>Campus:</label>
-            <input type="text" value={campus} onChange={(e) => setCampus(e.target.value)} className="input" />
+            <select
+              className="select"
+              value={campus}
+              onChange={(e) => setCampus(e.target.value)}
+              disabled={!schoolName || campusOptions.length === 0}
+            >
+              <option value="">Select campus…</option>
+              {campusOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-row">
             <label>Unit:</label>
