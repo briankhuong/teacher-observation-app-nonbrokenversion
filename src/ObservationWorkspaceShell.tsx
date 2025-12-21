@@ -802,49 +802,43 @@ useEffect(() => {
   };
 
   // 2. The Execution
+// @reference: src/ObservationWorkspaceShell.tsx -> executeBatchPolish
+
 const executeBatchPolish = async () => {
   setIsAiPolishing(true);
   setShowBatchModal(false); 
 
   try {
-    // 1. Prepare data for the single API call
+    // 🟢 REVISED: Map only the ID and the TEXT.
+    // By removing 'title: c.title', the AI has no context to paraphrase.
     const batchItems = batchCandidates.map(c => ({
       id: c.id,
-      title: c.title,
-      text: c.text
+      text: c.text 
     }));
 
-    // 2. Call the updated Groq utility function
+    // 2. Call the updated Groq utility
     const results = await polishBatchWithGroq(batchItems);
 
-    // 3. Update indicators based on the returned JSON IDs
+    // 3. Update indicators
     setIndicators(prev => prev.map(ind => {
       const polishedText = results[ind.id];
       if (polishedText) {
         return {
           ...ind,
           commentText: polishedText,
-          aiPendingReview: true // 🟣 Mark for teacher review
+          aiPendingReview: true 
         };
       }
       return ind;
     }));
     
-    console.log("✅ Batch polish complete via Groq");
-
   } catch (err: any) {
     console.error("Batch polish failed", err);
-    // @cite: 3.1, 3.2
-    const errorMsg = err?.status === 429 
-      ? "Rate limit reached. Please wait a minute before polishing more notes." 
-      : "Batch polish failed. Please try doing them individually.";
-    alert(errorMsg);
+    alert("Batch polish failed. Please try doing them individually.");
   } finally {
     setIsAiPolishing(false);
   }
 };
-
-
 const handleManualSave = async () => { // async keyword kept for compatibility, but logical flow changes
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -1232,6 +1226,8 @@ const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
 };
 
 
+// @reference: src/ObservationWorkspaceShell.tsx
+
 const handlePolishWithAi = async () => {
   // 1. Safety Checks
   const currentText = active.commentText.trim();
@@ -1241,26 +1237,21 @@ const handlePolishWithAi = async () => {
   setIsAiPolishing(true);
 
   try {
-    // 2. Call Groq (Llama 3.3 70B)
-    // We pass the title and description to give the AI context of WHAT it is polishing
-    const polished = await polishTextWithGroq(
-      currentText,
-      active.title,
-      active.description
-    );
+    // 🟢 REVISED: Only pass currentText. 
+    // Do NOT pass active.title or active.description anymore.
+    const polished = await polishTextWithGroq(currentText);
 
-    // 3. Update State (Purple Highlight)
+    // 3. Update State
     updateIndicator(activeIndex, {
       commentText: polished,
-      aiPendingReview: true, // 🟣 Flags it for review
+      aiPendingReview: true,
     });
 
   } catch (err: any) {
     console.error("Groq Single Polish failed", err);
-    // Friendly error for rate limits
-    const errorMsg = err.status === 429 
-      ? "Groq is a bit busy. Please wait a few seconds and try again." 
-      : "Could not polish text. Please check your connection.";
+    const errorMsg = err?.status === 429 
+      ? "Groq is busy. Wait a few seconds." 
+      : "Could not polish text.";
     alert(errorMsg);
   } finally {
     setIsAiPolishing(false);
