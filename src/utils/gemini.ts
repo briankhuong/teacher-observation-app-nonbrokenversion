@@ -1,126 +1,70 @@
+import Groq from "groq-sdk";
+
+const groq = new Groq({
+  apiKey: import.meta.env.VITE_GROQ_API_KEY,
+  dangerouslyAllowBrowser: true // @cite: 3.2
+});
+
 /**
- * src/utils/gemini.ts
- * Utility to interact with Google Gemini (Gemini Developer API) via the GA Google GenAI SDK.
+ * Polish a single note using Groq
  */
+// src/utils/gemini.ts
 
-import { GoogleGenAI } from "@google/genai";
-
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
-
-if (!API_KEY) {
-  console.error("Missing VITE_GEMINI_API_KEY in environment variables.");
-}
-
-// Pick a CURRENT stable model.
-// - gemini-2.5-flash: great quality/speed for text polishing
-// - gemini-2.5-flash-lite: fastest/cheapest for high throughput
-const MODEL_NAME = "gemini-2.5-flash"; // or "gemini-2.5-flash-lite"
-
-const ai = new GoogleGenAI({ apiKey: API_KEY ?? "" });
-
-// ==========================================
-// 1. SINGLE ITEM POLISH
-// ==========================================
-export async function polishTextWithGemini(
-  text: string,
-  _unusedTitle?: string,
-  _unusedDescription?: string
-): Promise<string> {
-  const draft = (text ?? "").trim();
-  if (!draft) return "";
-
-  const systemInstruction = `
- You are a professional copy editor for teacher observation reports.
- Polish the user's draft to be professional, grammatically correct, and constructive (US English).
- 
- Rules:
- 1) Fix grammar, spelling, clarity, and professional tone.
- 2) Preserve the original meaning and sentiment (do not change negative to positive).
- 3) Crucially, **DO NOT remove or alter any special markers like hyphens (-) or "(GA)" at the beginning of a line.** These are important identifiers.
- 4) Do not add filler like "Here is the rewritten text".
- 5) Return ONLY the polished text (no quotes, no markdown).
- `.trim();
-
+export async function polishTextWithGroq(text: string, title?: string, description?: string): Promise<string> {
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: draft, // user content stays here
-      config: {
-        systemInstruction, // system behavior goes here
-        temperature: 0.3,
-      },
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `You are a professional educational consultant. Polish the teacher's observation note. 
+          Context: This note is for the indicator "${title || 'General'}". 
+          Indicator Goal: ${description || 'N/A'}. 
+          Keep the polish concise, professional, and do not change the core meaning.`
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.5,
     });
 
-    const polished = (response.text ?? "").trim();
-    if (!polished) return draft;
-
-    // (Optional) extra cleanup in case the model still adds a label
-    return polished
-      .replace(/^Here is.*?:\s*/i, "")
-      .replace(/^Revised.*?:\s*/i, "")
-      .replace(/^"(.*)"$/, "$1")
-      .trim();
-
-  } catch (err: any) {
-    console.error("AI Polish Error:", err);
-    // keep your UX-friendly error
-    throw new Error("AI Service Busy. Please try again.");
+    return chatCompletion.choices[0]?.message?.content || text;
+  } catch (error) {
+    console.error("Groq Polish Error:", error);
+    throw error;
   }
 }
 
-// ==========================================
-// 2. BATCH POLISH
-// ==========================================
+/**
+ * 🟢 Batch Polish with Groq (Llama 3.3 70B)
+ * Processes all indicators in one request using JSON Mode
+ */
+export async function polishBatchWithGroq(items: { id: string; title: string; text: string }[]) {
+  // @cite: 2.1, 2.2
+  const systemPrompt = `You are a professional educational consultant. 
+  Polish the following teacher observation notes for grammar and professional tone.
+  Return ONLY a valid JSON object where keys are the IDs and values are the polished text.
+  JSON format: { "id": "polished text" }`;
 
-interface BatchItem {
-  id: string;
-  title: string;
-  text: string;
-}
-
-export async function polishBatchWithGemini(
-  items: BatchItem[]
-): Promise<Record<string, string>> {
-  if (!items || items.length === 0) return {};
-
-  const cleanInput = items.map((i) => ({
-    id: i.id,
-    draft_text: (i.text ?? "").trim(),
-  }));
-
-  const systemInstruction = `
- You are a professional editor. You will receive a JSON array of objects.
- Polish each object's "draft_text" for professional tone (US English) while preserving meaning.
- 
- Crucially, **DO NOT remove or alter any special markers like hyphens (-) or "(GA)" at the beginning of a line.** These are important identifiers.
- 
- Return ONLY valid JSON:
- - keys: must match each input "id"
- - values: polished "draft_text"
- No markdown fences.
- `.trim();
+  const userPrompt = `Notes to polish: ${JSON.stringify(items)}`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: JSON.stringify(cleanInput),
-      config: {
-        systemInstruction,
-        temperature: 0.3,
-        responseMimeType: "application/json",
-      },
+    const response = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      model: "llama-3.3-70b-versatile", // @cite: 2.2
+      response_format: { type: "json_object" }, // @cite: 1.2, 4.3
+      temperature: 0.2,
     });
 
-    const raw = (response.text ?? "").trim();
-    if (!raw) throw new Error("Empty response from AI");
-
-    // Defensive cleanup (some gateways/models may still wrap output)
-    const cleaned = raw.replace(/```json/g, "").replace(/```/g, "").trim();
-
-    return JSON.parse(cleaned) as Record<string, string>;
-
-  } catch (e) {
-    console.error("Batch Polish Error:", e);
-    throw new Error("Batch processing failed. Try individual items.");
+    const content = response.choices[0]?.message?.content;
+    return content ? JSON.parse(content) : {};
+  } catch (error) {
+    console.error("Groq Batch Error:", error);
+    throw error;
   }
 }

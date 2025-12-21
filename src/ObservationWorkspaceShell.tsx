@@ -21,7 +21,7 @@ import type {
 import { buildTeacherExportModel } from "./exportTeacherModel";
 import { buildAdminExportModel } from "./exportAdminModel";
 import type { AdminExportModel, AdminExportRow } from "./exportAdminModel";
-import { polishTextWithGemini, polishBatchWithGemini } from "./utils/gemini";
+import { polishTextWithGroq, polishBatchWithGroq } from "./utils/gemini";
 
 interface ObservationWorkspaceProps {
   observationMeta: {
@@ -802,37 +802,47 @@ useEffect(() => {
   };
 
   // 2. The Execution
-  const executeBatchPolish = async () => {
-    setIsAiPolishing(true);
-    setShowBatchModal(false); // Close modal immediately so we see the spinner
+const executeBatchPolish = async () => {
+  setIsAiPolishing(true);
+  setShowBatchModal(false); 
 
-    try {
-      const batchItems = batchCandidates.map(c => ({
-        id: c.id,
-        title: c.title,
-        text: c.text
-      }));
+  try {
+    // 1. Prepare data for the single API call
+    const batchItems = batchCandidates.map(c => ({
+      id: c.id,
+      title: c.title,
+      text: c.text
+    }));
 
-      const results = await polishBatchWithGemini(batchItems);
+    // 2. Call the updated Groq utility function
+    const results = await polishBatchWithGroq(batchItems);
 
-      setIndicators(prev => prev.map(ind => {
-        if (results[ind.id]) {
-          return {
-            ...ind,
-            commentText: results[ind.id],
-            aiPendingReview: true // 🟣 Flag all of them
-          };
-        }
-        return ind;
-      }));
-      
-    } catch (err: any) {
-      console.error("Batch polish failed", err);
-      alert("Batch polish failed. Please try doing them individually.");
-    } finally {
-      setIsAiPolishing(false);
-    }
-  };
+    // 3. Update indicators based on the returned JSON IDs
+    setIndicators(prev => prev.map(ind => {
+      const polishedText = results[ind.id];
+      if (polishedText) {
+        return {
+          ...ind,
+          commentText: polishedText,
+          aiPendingReview: true // 🟣 Mark for teacher review
+        };
+      }
+      return ind;
+    }));
+    
+    console.log("✅ Batch polish complete via Groq");
+
+  } catch (err: any) {
+    console.error("Batch polish failed", err);
+    // @cite: 3.1, 3.2
+    const errorMsg = err?.status === 429 
+      ? "Rate limit reached. Please wait a minute before polishing more notes." 
+      : "Batch polish failed. Please try doing them individually.";
+    alert(errorMsg);
+  } finally {
+    setIsAiPolishing(false);
+  }
+};
 
 
 const handleManualSave = async () => { // async keyword kept for compatibility, but logical flow changes
@@ -1223,34 +1233,39 @@ const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
 
 
 const handlePolishWithAi = async () => {
-    // 1. Safety Checks
-    const currentText = active.commentText.trim();
-    if (!currentText) return;
-    if (isAiPolishing) return;
+  // 1. Safety Checks
+  const currentText = active.commentText.trim();
+  if (!currentText) return;
+  if (isAiPolishing) return;
 
-    setIsAiPolishing(true);
+  setIsAiPolishing(true);
 
-    try {
-      // 2. Call Gemini
-  const polished = await polishTextWithGemini(
-    currentText,
-    active.title,
-    active.description
-  );
+  try {
+    // 2. Call Groq (Llama 3.3 70B)
+    // We pass the title and description to give the AI context of WHAT it is polishing
+    const polished = await polishTextWithGroq(
+      currentText,
+      active.title,
+      active.description
+    );
 
-      // 3. Update State (Purple Highlight)
-      updateIndicator(activeIndex, {
-        commentText: polished,
-        aiPendingReview: true, // 🟣 Flags it for review
-      });
+    // 3. Update State (Purple Highlight)
+    updateIndicator(activeIndex, {
+      commentText: polished,
+      aiPendingReview: true, // 🟣 Flags it for review
+    });
 
-    } catch (err: any) {
-      console.error("AI Polish failed", err);
-      alert(err.message || "Could not polish text. Please try again.");
-    } finally {
-      setIsAiPolishing(false);
-    }
-  };
+  } catch (err: any) {
+    console.error("Groq Single Polish failed", err);
+    // Friendly error for rate limits
+    const errorMsg = err.status === 429 
+      ? "Groq is a bit busy. Please wait a few seconds and try again." 
+      : "Could not polish text. Please check your connection.";
+    alert(errorMsg);
+  } finally {
+    setIsAiPolishing(false);
+  }
+};
 
 const handleConvertHandwritingToText = async () => {
   setOcrError(null);
