@@ -2526,7 +2526,7 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
       {/* 🟣 BATCH POLISH MODAL */}
       {showBatchModal && (
         <div className="scratchpad-backdrop">
-          <div className="scratchpad-modal" style={{ maxWidth: 500, height: "auto", maxHeight: "80vh" }}>
+          <div className="scratchpad-modal" style={{ maxWidth: 500, display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
             <div className="scratchpad-header">
               <div>
                 <div className="scratchpad-title">Batch AI Polish</div>
@@ -2536,7 +2536,7 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               </div>
             </div>
 
-            <div style={{ padding: 16, overflowY: "auto", flex: 1 }}>
+            <div style={{ padding: 16, overflowY: "auto", flexGrow: 1 }}>
               <p style={{ fontSize: 13, marginBottom: 12, color: "var(--text-muted)" }}>
                 The following indicators will be processed by Gemini AI to improve grammar and tone:
               </p>

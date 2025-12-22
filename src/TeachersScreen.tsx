@@ -72,7 +72,7 @@ const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-panel">
+      <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
         <div className="modal-header">
           <div className="modal-title">Teacher Details</div>
           <button type="button" className="btn" onClick={onCancel}>
@@ -80,7 +80,7 @@ const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
           </button>
         </div>
 
-        <div className="modal-body">
+        <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="detail-row">
             <label>Name</label>
             <span>{row.name}</span>
@@ -198,7 +198,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-panel">
+      <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
         <div className="modal-header">
           <div className="modal-title">
             {mode === "create" ? "Add teacher" : "Edit teacher"}
@@ -208,7 +208,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
           </button>
         </div>
 
-        <form className="modal-body" onSubmit={handleSubmit}>
+        <form className="modal-body" onSubmit={handleSubmit} style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="form-row">
             <label>Teacher name *</label>
             <input

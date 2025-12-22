@@ -103,7 +103,7 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
 
   return (
     <div className="obs-action-modal-backdrop" style={{ zIndex: 9999, backdropFilter: "blur(2px)", backgroundColor: "rgba(0,0,0,0.5)" }}>
-      <div className="obs-action-modal" style={{ width: 800, maxWidth: "95vw", height: "85vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)" }}>
+      <div className="obs-action-modal" style={{ width: 800, maxWidth: "95vw", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)" }}>
         
         {/* HEADER */}
         <div style={{ padding: "16px 24px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#ffffff" }}>

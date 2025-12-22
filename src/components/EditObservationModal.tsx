@@ -132,14 +132,14 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
         <div className="modal-header">
           <div className="modal-title">Edit Observation Metadata</div>
           <div className="modal-subtitle">
             {observation?.teacherName} – {observation?.schoolName}
           </div>
         </div>
-        <form onSubmit={handleSubmit} className="modal-body">
+        <form onSubmit={handleSubmit} className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="form-row">
             <label>Teacher Name:</label>
             <input type="text" value={teacherName} onChange={(e) => setTeacherName(e.target.value)} className="input" required />

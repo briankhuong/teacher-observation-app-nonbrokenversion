@@ -94,7 +94,7 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-panel">
+      <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
         <div className="modal-header">
           <div className="modal-title">School / Campus Details</div>
           <button type="button" className="btn" onClick={onCancel}>
@@ -102,7 +102,7 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           </button>
         </div>
 
-        <div className="modal-body">
+        <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="detail-row">
             <label>School Name</label>
             <span>{row.school_name}</span>
@@ -227,7 +227,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal-panel">
+      <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
         <div className="modal-header">
           <div className="modal-title">
             {mode === "create" ? "Add school / campus" : "Edit school / campus"}
@@ -237,7 +237,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           </button>
         </div>
 
-        <form className="modal-body" onSubmit={handleSubmit}>
+        <form className="modal-body" onSubmit={handleSubmit} style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="form-row">
             <label>School name *</label>
             <input
