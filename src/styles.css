@@ -2592,41 +2592,7 @@ input[type="date"].input {
   font-size: 12px;
 }
 
-/* ----------------------------
-   TANSTACK TABLE RESIZER
------------------------------ */
 
-/* Set table header to relative for resizer positioning */
-.simple-table th {
-  position: relative;
-}
-
-/* The grab handle */
-.resizer {
-  position: absolute;
-  right: -5px; /* Half of its width */
-  top: 0;
-  height: 100%;
-  width: 10px;
-  cursor: col-resize;
-  z-index: 10;
-  /* Visual feedback */
-  background: transparent;
-  transition: background 0.1s ease;
-}
-
-.resizer:hover {
-  background: rgba(56, 189, 248, 0.4);
-}
-
-.resizer.isResizing {
-  background: var(--accent);
-  opacity: 0.8;
-}
-
-/* ----------------------------
-   MODAL DETAIL VIEW STYLES
------------------------------ */
 
 .detail-row {
   display: flex;

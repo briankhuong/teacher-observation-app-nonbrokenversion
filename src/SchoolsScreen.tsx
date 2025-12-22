@@ -10,7 +10,12 @@ import {
   getSortedRowModel,
   flexRender,
 } from "@tanstack/react-table";
-import type { ColumnDef, SortingState, ColumnResizeMode } from "@tanstack/react-table";
+import type {
+  ColumnDef,
+  SortingState,
+  ColumnResizeMode,
+  VisibilityState, // NEW
+} from "@tanstack/react-table";
 
 export interface SchoolRow {
   id: string;
@@ -404,14 +409,25 @@ export const SchoolsScreen: React.FC = () => {
   const [viewingRow, setViewingRow] = useState<SchoolRow | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
 
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // TanStack Table State
+  // NEW: Table State
+  const [refreshKey, setRefreshKey] = useState(0); // To trigger data reload
   const [sorting, setSorting] = useState<SortingState>([
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
   ]);
-  const [columnResizeMode] = useState<ColumnResizeMode>("onEnd");
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
+    campus_name: false,
+    admin_phone: false,
+    am_email: false,
+    address: false,
+    district: false,
+    city: false,
+    notes: false,
+    admin_workbook_url: false,
+    created_at: false,
+    updated_at: false,
+  });
+  const [showColumnMenu, setShowColumnMenu] = useState(false); // For column visibility modal
 
   // Define Columns
   const columns = useMemo<ColumnDef<SchoolRow>[]>(
@@ -425,17 +441,23 @@ export const SchoolsScreen: React.FC = () => {
             <div className="entity-cell-sub">{info.row.original.campus_name}</div>
           </>
         ),
-        id: "school_name", // accessorKey and id must match for sorting
+        id: "school_name",
         minSize: 150,
         size: 250,
       },
       {
+        accessorKey: "campus_name",
+        header: "Campus Name",
+        minSize: 100,
+        size: 150,
+      },
+      {
         accessorKey: "admin_name",
-        header: "Admin",
+        header: "Admin Name",
         cell: (info) => (
           <>
             <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
-            <div className="entity-cell-sub">{info.row.original.admin_email || ""}</div>
+            <div className="entity-cell-sub">{info.row.original.admin_phone || ""}</div>
           </>
         ),
         id: "admin_name",
@@ -443,8 +465,20 @@ export const SchoolsScreen: React.FC = () => {
         size: 200,
       },
       {
+        accessorKey: "admin_email",
+        header: "Admin Email",
+        minSize: 150,
+        size: 200,
+      },
+      {
+        accessorKey: "admin_phone",
+        header: "Admin Phone",
+        minSize: 100,
+        size: 150,
+      },
+      {
         accessorKey: "am_name",
-        header: "AM",
+        header: "AM Name",
         cell: (info) => (
           <>
             <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
@@ -456,15 +490,70 @@ export const SchoolsScreen: React.FC = () => {
         size: 150,
       },
       {
+        accessorKey: "am_email",
+        header: "AM Email",
+        minSize: 150,
+        size: 200,
+      },
+      {
+        accessorKey: "address",
+        header: "Address",
+        minSize: 200,
+        size: 250,
+      },
+      {
+        accessorKey: "district",
+        header: "District",
+        minSize: 100,
+        size: 150,
+      },
+      {
         accessorKey: "city",
-        header: "Location",
-        cell: (info) => (
-          <>
-            <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
-            <div className="entity-cell-sub">{info.row.original.district || ""}</div>
-          </>
-        ),
+        header: "City",
         id: "city",
+        minSize: 100,
+        size: 150,
+      },
+      {
+        accessorKey: "notes",
+        header: "Notes",
+        enableSorting: false,
+        minSize: 100,
+        size: 200,
+      },
+      {
+        accessorKey: "admin_workbook_url",
+        header: "Admin Workbook",
+        enableSorting: false,
+        cell: (info) => (
+          info.getValue() ? (
+            <a
+              href={info.getValue() as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="link-button"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Open Link
+            </a>
+          ) : (
+            <span>—</span>
+          )
+        ),
+        minSize: 120,
+        size: 180,
+      },
+      {
+        accessorKey: "created_at",
+        header: "Created At",
+        cell: (info) => new Date(info.getValue() as string).toLocaleDateString(),
+        minSize: 100,
+        size: 150,
+      },
+      {
+        accessorKey: "updated_at",
+        header: "Updated At",
+        cell: (info) => new Date(info.getValue() as string).toLocaleDateString(),
         minSize: 100,
         size: 150,
       },
@@ -474,7 +563,6 @@ export const SchoolsScreen: React.FC = () => {
         size: 100,
         minSize: 100,
         enableSorting: false,
-        enableResizing: false,
         cell: (info) => (
           <div
             className="table-actions"
@@ -500,9 +588,10 @@ export const SchoolsScreen: React.FC = () => {
     state: {
       sorting,
       globalFilter: search,
+      columnVisibility, // NEW
     },
     onSortingChange: setSorting,
-    columnResizeMode,
+    onColumnVisibilityChange: setColumnVisibility, // NEW
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -805,7 +894,54 @@ export const SchoolsScreen: React.FC = () => {
               />
             </div>
 
-            {/* --- ADD THIS NEW GROUP --- */}
+            <div className="toolbar-group" style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowColumnMenu(prev => !prev)}
+              >
+                New column ({table.getVisibleLeafColumns().length} of {table.getAllLeafColumns().length})
+              </button>
+              {showColumnMenu && (
+                <div 
+                  className="modal-panel" 
+                  style={{ 
+                    position: "absolute", 
+                    top: "100%", 
+                    right: 0, 
+                    zIndex: 10, 
+                    marginTop: "8px", 
+                    padding: "10px", 
+                    width: "250px",
+                    maxWidth: "none",
+                  }}
+                  onMouseLeave={() => setShowColumnMenu(false)}
+                >
+                  <div className="modal-body" style={{ marginTop: 0, gap: "6px" }}>
+                    {table.getAllLeafColumns().map((column) => (
+                      <div key={column.id} className="form-row" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                        <label style={{ fontSize: "13px", color: "var(--text)" }}>
+                          {/* Use the column header text or a capitalized ID if header is a component */}
+                          {typeof column.columnDef.header === 'string'
+                            ? column.columnDef.header
+                            : column.id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                          }
+                        </label>
+                        <input
+                          {...{
+                            type: 'checkbox',
+                            checked: column.getIsVisible(),
+                            onChange: column.getToggleVisibilityHandler(),
+                            style: { margin: 0, width: 'auto' }
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="toolbar-group">
                <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
             </div>
@@ -874,26 +1010,6 @@ export const SchoolsScreen: React.FC = () => {
                                 desc: " ↓",
                               }[header.column.getIsSorted() as string] ?? null}
                             </div>
-                          )}
-                          {header.column.getCanResize() && (
-                            <div
-                              {...{
-                                onMouseDown: header.getResizeHandler(),
-                                onTouchStart: header.getResizeHandler(),
-                                className: `resizer ${
-                                  header.column.getIsResizing() ? "isResizing" : ""
-                                }`,
-                                style: {
-                                  transform:
-                                    columnResizeMode === "onEnd" &&
-                                    header.column.getIsResizing()
-                                      ? `translateX(${
-                                          table.getState().columnSizingInfo.deltaOffset
-                                        }px)`
-                                      : "",
-                                },
-                              }}
-                            />
                           )}
                         </th>
                       ))}

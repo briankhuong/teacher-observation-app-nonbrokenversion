@@ -10,7 +10,7 @@ import {
   getSortedRowModel,
   flexRender,
 } from "@tanstack/react-table";
-import type { ColumnDef, SortingState, ColumnResizeMode } from "@tanstack/react-table";
+import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState } from "@tanstack/react-table";
 
 export interface TeacherRow {
   id: string;
@@ -312,11 +312,18 @@ export const TeachersScreen: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0);
 
   // TanStack Table State
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
+    email: false,
+    worksheet_url: false,
+  });
+  const [showColumnMenu, setShowColumnMenu] = useState(false); // For column visibility modal
+
   const [sorting, setSorting] = useState<SortingState>([
     { id: "school_campus", desc: false }, // Custom ID for combined column
     { id: "name", desc: false },
   ]);
-  const [columnResizeMode] = useState<ColumnResizeMode>("onEnd");
+  // const [columnResizeMode] = useState<ColumnResizeMode>("onEnd"); // REMOVED
+  // const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({}); // REMOVED
 
   // Define Columns
   const columns = useMemo<ColumnDef<TeacherRow>[]>(
@@ -428,9 +435,10 @@ export const TeachersScreen: React.FC = () => {
     state: {
       sorting,
       globalFilter: search,
+      columnVisibility,
     },
     onSortingChange: setSorting,
-    columnResizeMode,
+    onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -697,6 +705,54 @@ export const TeachersScreen: React.FC = () => {
               />
             </div>
 
+            <div className="toolbar-group" style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowColumnMenu(prev => !prev)}
+              >
+                New column ({table.getVisibleLeafColumns().length} of {table.getAllLeafColumns().length})
+              </button>
+              {showColumnMenu && (
+                <div 
+                  className="modal-panel" 
+                  style={{ 
+                    position: "absolute", 
+                    top: "100%", 
+                    right: 0, 
+                    zIndex: 10, 
+                    marginTop: "8px", 
+                    padding: "10px", 
+                    width: "250px",
+                    maxWidth: "none",
+                  }}
+                  onMouseLeave={() => setShowColumnMenu(false)}
+                >
+                  <div className="modal-body" style={{ marginTop: 0, gap: "6px" }}>
+                    {table.getAllLeafColumns().map((column) => (
+                      <div key={column.id} className="form-row" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                        <label style={{ fontSize: "13px", color: "var(--text)" }}>
+                          {/* Use the column header text or a capitalized ID if header is a component */}
+                          {typeof column.columnDef.header === 'string'
+                            ? column.columnDef.header
+                            : column.id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                          }
+                        </label>
+                        <input
+                          {...{
+                            type: 'checkbox',
+                            checked: column.getIsVisible(),
+                            onChange: column.getToggleVisibilityHandler(),
+                            style: { margin: 0, width: 'auto' }
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* --- ADD THIS NEW GROUP --- */}
             <div className="toolbar-group">
                <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
@@ -766,26 +822,6 @@ export const TeachersScreen: React.FC = () => {
                                 desc: " ↓",
                               }[header.column.getIsSorted() as string] ?? null}
                             </div>
-                          )}
-                          {header.column.getCanResize() && (
-                            <div
-                              {...{
-                                onMouseDown: header.getResizeHandler(),
-                                onTouchStart: header.getResizeHandler(),
-                                className: `resizer ${
-                                  header.column.getIsResizing() ? "isResizing" : ""
-                                }`,
-                                style: {
-                                  transform:
-                                    columnResizeMode === "onEnd" &&
-                                    header.column.getIsResizing()
-                                      ? `translateX(${
-                                          table.getState().columnSizingInfo.deltaOffset
-                                        }px)`
-                                      : "",
-                                },
-                              }}
-                            />
                           )}
                         </th>
                       ))}
