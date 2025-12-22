@@ -3,6 +3,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
 import ImportTeachersBtn from "./components/ImportTeachersBtn";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  flexRender,
+} from "@tanstack/react-table";
+import type { ColumnDef, SortingState, ColumnResizeMode } from "@tanstack/react-table";
 
 export interface TeacherRow {
   id: string;
@@ -39,6 +47,114 @@ interface TeacherFormModalProps {
   onCancel: () => void;
   onSubmit: (values: TeacherFormState) => Promise<void>;
 }
+
+interface TeacherViewModalProps {
+  open: boolean;
+  row: TeacherRow | null;
+  onCancel: () => void;
+  onEdit: (row: TeacherRow) => void;
+  onDelete: (row: TeacherRow) => Promise<void>;
+}
+
+const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
+  open,
+  row,
+  onCancel,
+  onEdit,
+  onDelete,
+}) => {
+  if (!open || !row) return null;
+
+  const handleOpenWorksheet = (r: TeacherRow) => {
+    if (!r.worksheet_url) return;
+    window.open(r.worksheet_url, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-panel">
+        <div className="modal-header">
+          <div className="modal-title">Teacher Details</div>
+          <button type="button" className="btn" onClick={onCancel}>
+            ×
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="detail-row">
+            <label>Name</label>
+            <span>{row.name}</span>
+          </div>
+          <div className="detail-row">
+            <label>Email</label>
+            <span>{row.email || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>School</label>
+            <span>{row.school_name}</span>
+          </div>
+          <div className="detail-row">
+            <label>Campus</label>
+            <span>{row.campus}</span>
+          </div>
+
+          <div className="detail-row">
+            <label>Worksheet Link</label>
+            {row.worksheet_url ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => handleOpenWorksheet(row)}
+                >
+                  Open Worksheet
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  title="Copy workbook link"
+                  onClick={() => {
+                    const url = row.worksheet_url;
+                    if (!url) return;
+                    navigator.clipboard.writeText(url).catch((err) => console.error("Copy failed", err));
+                  }}
+                >
+                  📋
+                </button>
+              </div>
+            ) : (
+              <span>—</span>
+            )}
+          </div>
+          <div className="detail-row">
+            <label>Created At</label>
+            <span>{new Date(row.created_at).toLocaleString()}</span>
+          </div>
+          <div className="detail-row">
+            <label>Last Updated</label>
+            <span>{new Date(row.updated_at).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn" onClick={onCancel}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => onEdit(row)}>
+            Edit Details
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-danger"
+            onClick={() => onDelete(row)}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
   open,
@@ -189,9 +305,137 @@ export const TeachersScreen: React.FC = () => {
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingRow, setEditingRow] = useState<TeacherRow | null>(null);
 
-  // NEW: active row highlight
-  const [activeTeacherId, setActiveTeacherId] = useState<string | null>(null);
+  // NEW: View Modal state
+  const [viewingRow, setViewingRow] = useState<TeacherRow | null>(null);
+  const [showViewModal, setShowViewModal] = useState(false);
+
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // TanStack Table State
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "school_campus", desc: false }, // Custom ID for combined column
+    { id: "name", desc: false },
+  ]);
+  const [columnResizeMode] = useState<ColumnResizeMode>("onEnd");
+
+  // Define Columns
+  const columns = useMemo<ColumnDef<TeacherRow>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Teacher",
+        cell: (info) => (
+          <>
+            <div className="entity-cell-main">{info.getValue() as string}</div>
+            <div className="entity-cell-sub">{info.row.original.email || "—"}</div>
+          </>
+        ),
+        id: "name",
+        minSize: 150,
+        size: 200,
+      },
+      {
+        id: "school_campus",
+        header: "School & Campus",
+        accessorFn: (row) => `${row.school_name} ${row.campus}`,
+        cell: (info) => (
+          <>
+            <div className="entity-cell-main">{info.row.original.school_name}</div>
+            <div className="entity-cell-sub">{info.row.original.campus}</div>
+          </>
+        ),
+        minSize: 200,
+        size: 300,
+      },
+      {
+        accessorKey: "email",
+        header: "Email",
+        cell: (info) => (
+          <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
+        ),
+        id: "email",
+        minSize: 150,
+        size: 200,
+      },
+      {
+        accessorKey: "worksheet_url",
+        header: "Worksheet",
+        enableSorting: false,
+        cell: (info) => {
+          const url = info.getValue() as string | null;
+          if (!url) {
+            return <span className="entity-cell-sub">Not set</span>;
+          }
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                type="button"
+                className="link-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(url, "_blank", "noopener,noreferrer");
+                }}
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                title="Copy workbook link"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(url).catch((err) => console.error("Copy failed", err));
+                }}
+              >
+                📋
+              </button>
+            </div>
+          );
+        },
+        id: "worksheet_url",
+        minSize: 100,
+        size: 140,
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        size: 100,
+        minSize: 100,
+        enableSorting: false,
+        enableResizing: false,
+        cell: (info) => (
+          <div
+            className="table-actions"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => openEdit(info.row.original)}
+            >
+              Edit
+            </button>
+          </div>
+        ),
+      },
+    ],
+    []
+  );
+
+  const table = useReactTable({
+    data: rows,
+    columns,
+    state: {
+      sorting,
+      globalFilter: search,
+    },
+    onSortingChange: setSorting,
+    columnResizeMode,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
 
   if (!user) {
     return (
@@ -233,6 +477,7 @@ export const TeachersScreen: React.FC = () => {
           `
           )
           .eq("trainer_id", trainerId)
+          // Initial sorting is now handled by TanStack Table state
           .order("school_name", { ascending: true })
           .order("campus", { ascending: true })
           .order("name", { ascending: true });
@@ -257,33 +502,52 @@ export const TeachersScreen: React.FC = () => {
     };
   }, [trainerId, refreshKey]);
 
-  // Search
-  const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
-      return (
-        r.name.toLowerCase().includes(q) ||
-        r.school_name.toLowerCase().includes(q) ||
-        r.campus.toLowerCase().includes(q) ||
-        (r.email ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [rows, search]);
+  // Search/filtering is now handled by TanStack Table (getFilteredRowModel)
+  // const filteredRows = useMemo(() => {
+  //   const q = search.trim().toLowerCase();
+  //   if (!q) return rows;
+  //   return rows.filter((r) => {
+  //     return (
+  //       r.name.toLowerCase().includes(q) ||
+  //       r.school_name.toLowerCase().includes(q) ||
+  //       r.campus.toLowerCase().includes(q) ||
+  //       (r.email ?? "").toLowerCase().includes(q)
+  //     );
+  //   });
+  // }, [rows, search]);
 
   // UI helpers
   const openCreate = () => {
     setFormMode("create");
     setEditingRow(null);
     setShowForm(true);
-    setActiveTeacherId(null);
+    setViewingRow(null);
+    setShowViewModal(false);
   };
+
+  const openView = (row: TeacherRow) => {
+    setViewingRow(row);
+    setShowViewModal(true);
+    // Ensure form is closed
+    setShowForm(false);
+  }
 
   const openEdit = (row: TeacherRow) => {
     setFormMode("edit");
     setEditingRow(row);
     setShowForm(true);
-    setActiveTeacherId(row.id);
+    setViewingRow(null);
+    setShowViewModal(false);
+  };
+
+  // Re-define openEdit for view modal usage (allows seamless transition)
+  const openEditFromView = (row: TeacherRow) => {
+    setFormMode("edit");
+    setEditingRow(row);
+    setShowForm(true);
+    // Close view modal
+    setViewingRow(null);
+    setShowViewModal(false);
   };
 
   const handleDelete = async (row: TeacherRow) => {
@@ -305,8 +569,9 @@ export const TeachersScreen: React.FC = () => {
     }
 
     setRows((prev) => prev.filter((t) => t.id !== row.id));
-    if (activeTeacherId === row.id) {
-      setActiveTeacherId(null);
+    if (viewingRow?.id === row.id) {
+      setViewingRow(null);
+      setShowViewModal(false);
     }
   };
 
@@ -345,7 +610,7 @@ export const TeachersScreen: React.FC = () => {
 
       const newRow = data as TeacherRow;
       setRows((prev) => [...prev, newRow]);
-      setActiveTeacherId(newRow.id);
+      openView(newRow); // Open View Modal on creation
       setShowForm(false);
       return;
     }
@@ -389,7 +654,7 @@ export const TeachersScreen: React.FC = () => {
     setRows((prev) =>
       prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
-    setActiveTeacherId(updated.id);
+    openView(updated); // Open View Modal after update
     setShowForm(false);
   };
 
@@ -404,11 +669,11 @@ export const TeachersScreen: React.FC = () => {
         }
       : undefined;
 
-  // Open worksheet link
-  const handleOpenWorksheet = (row: TeacherRow) => {
-    if (!row.worksheet_url) return;
-    window.open(row.worksheet_url, "_blank", "noopener,noreferrer");
-  };
+  // Open worksheet link is now handled in the View Modal
+  // const handleOpenWorksheet = (row: TeacherRow) => {
+  //   if (!row.worksheet_url) return;
+  //   window.open(row.worksheet_url, "_blank", "noopener,noreferrer");
+  // };
 
   return (
     <>
@@ -457,7 +722,7 @@ export const TeachersScreen: React.FC = () => {
             </div>
           )}
 
-          {!loading && filteredRows.length === 0 && !loadError && (
+          {!loading && table.getRowModel().rows.length === 0 && !loadError && (
             <div className="empty-state">
               <p>No teachers yet.</p>
               <button
@@ -470,21 +735,66 @@ export const TeachersScreen: React.FC = () => {
             </div>
           )}
 
-          {!loading && filteredRows.length > 0 && (
+          {!loading && table.getRowModel().rows.length > 0 && (
             <div className="table-wrapper">
-              <table className="simple-table">
+              <table className="simple-table" style={{ width: table.getTotalSize() }}>
                 <thead>
-                  <tr>
-                    <th>Teacher</th>
-                    <th>School & campus</th>
-                    <th>Email</th>
-                    <th>Worksheet</th>
-                    <th style={{ width: 140 }}>Actions</th>
-                  </tr>
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <tr key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => (
+                        <th
+                          key={header.id}
+                          colSpan={header.colSpan}
+                          style={{ width: header.getSize() }}
+                          className={header.column.getCanSort() ? "sortable-header" : ""}
+                        >
+                          {header.isPlaceholder ? null : (
+                            <div
+                              {...{
+                                className: header.column.getCanSort()
+                                  ? "cursor-pointer select-none"
+                                  : "",
+                                onClick: header.column.getToggleSortingHandler(),
+                              }}
+                            >
+                              {flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )}
+                              {{
+                                asc: " ↑",
+                                desc: " ↓",
+                              }[header.column.getIsSorted() as string] ?? null}
+                            </div>
+                          )}
+                          {header.column.getCanResize() && (
+                            <div
+                              {...{
+                                onMouseDown: header.getResizeHandler(),
+                                onTouchStart: header.getResizeHandler(),
+                                className: `resizer ${
+                                  header.column.getIsResizing() ? "isResizing" : ""
+                                }`,
+                                style: {
+                                  transform:
+                                    columnResizeMode === "onEnd" &&
+                                    header.column.getIsResizing()
+                                      ? `translateX(${
+                                          table.getState().columnSizingInfo.deltaOffset
+                                        }px)`
+                                      : "",
+                                },
+                              }}
+                            />
+                          )}
+                        </th>
+                      ))}
+                    </tr>
+                  ))}
                 </thead>
                 <tbody>
-                  {filteredRows.map((row) => {
-                    const isActive = row.id === activeTeacherId;
+                  {table.getRowModel().rows.map((row) => {
+                    const isActive = row.original.id === viewingRow?.id;
                     return (
                       <tr
                         key={row.id}
@@ -492,84 +802,19 @@ export const TeachersScreen: React.FC = () => {
                           "simple-table-row" +
                           (isActive ? " simple-table-row--active" : "")
                         }
-                        onClick={() => setActiveTeacherId(row.id)}
+                        onClick={() => openView(row.original)}
                       >
-                        <td>
-                          <div className="entity-cell-main">{row.name}</div>
-                          <div className="entity-cell-sub">
-                            {row.email || "—"}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="entity-cell-main">
-                            {row.school_name}
-                          </div>
-                          <div className="entity-cell-sub">{row.campus}</div>
-                        </td>
-                        <td>
-                          <div className="entity-cell-main">
-                            {row.email || "—"}
-                          </div>
-                        </td>
-                          <td>
-                              {row.worksheet_url ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  {/* Open button */}
-                                  <button
-                                    type="button"
-                                    className="link-button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleOpenWorksheet(row);
-                                    }}
-                                  >
-                                    Open
-                                  </button>
-
-                                  {/* Copy button */}
-                                  <button
-                                    type="button"
-                                    className="icon-button"
-                                    title="Copy workbook link"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const url = row.worksheet_url;
-                                      if (!url) return; // TS: now narrowed to string
-
-                                      navigator.clipboard
-                                        .writeText(url)
-                                        .catch((err) => console.error("Copy failed", err));
-                                    }}
-                                  >
-                                    📋
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="entity-cell-sub">Not set</span>
-                              )}
-                            </td>
-                                                  
-                        <td>
-                          <div
-                            className="table-actions"
-                            onClick={(e) => e.stopPropagation()}
+                        {row.getVisibleCells().map((cell) => (
+                          <td
+                            key={cell.id}
+                            style={{ width: cell.column.getSize() }}
                           >
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={() => openEdit(row)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={() => handleDelete(row)}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
+                          </td>
+                        ))}
                       </tr>
                     );
                   })}
@@ -586,6 +831,14 @@ export const TeachersScreen: React.FC = () => {
         initial={formInitial}
         onCancel={() => setShowForm(false)}
         onSubmit={submitForm}
+      />
+      
+      <TeacherViewModal
+        open={showViewModal}
+        row={viewingRow}
+        onCancel={() => setShowViewModal(false)}
+        onEdit={openEditFromView}
+        onDelete={handleDelete}
       />
     </>
   );
