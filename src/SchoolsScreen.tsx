@@ -14,7 +14,8 @@ import type {
   ColumnDef,
   SortingState,
   ColumnResizeMode,
-  VisibilityState, // NEW
+  VisibilityState,
+  Table, // NEW
 } from "@tanstack/react-table";
 
 export interface SchoolRow {
@@ -415,17 +416,26 @@ export const SchoolsScreen: React.FC = () => {
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
   ]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
-    campus_name: false,
-    admin_phone: false,
-    am_email: false,
-    address: false,
-    district: false,
-    city: false,
-    notes: false,
-    admin_workbook_url: false,
-    created_at: false,
-    updated_at: false,
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+    try {
+      const saved = localStorage.getItem("schoolsColumnVisibility");
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error("Failed to load column visibility from local storage", e);
+    }
+    // Default hidden columns
+    return {
+      campus_name: false,
+      admin_phone: false,
+      am_email: false,
+      address: false,
+      district: false,
+      city: false,
+      notes: false,
+      admin_workbook_url: false,
+      created_at: false,
+      updated_at: false,
+    };
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false); // For column visibility modal
 
@@ -559,7 +569,23 @@ export const SchoolsScreen: React.FC = () => {
       },
       {
         id: "actions",
-        header: "Actions",
+        header: () => (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+            <span>Actions</span>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: '0 4px', fontSize: '18px', fontWeight: 'bold', lineHeight: 1 }}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent row click/view modal from opening
+                setShowColumnMenu(prev => !prev);
+              }}
+              title={`Toggle Columns`}
+            >
+              +
+            </button>
+          </div>
+        ),
         size: 100,
         minSize: 100,
         enableSorting: false,
@@ -579,7 +605,7 @@ export const SchoolsScreen: React.FC = () => {
         ),
       },
     ],
-    []
+    [setShowColumnMenu]
   );
 
   const table = useReactTable({
@@ -597,6 +623,15 @@ export const SchoolsScreen: React.FC = () => {
     getSortedRowModel: getSortedRowModel(),
   });
 
+  // Effect to persist column visibility
+  useEffect(() => {
+    try {
+      localStorage.setItem("schoolsColumnVisibility", JSON.stringify(columnVisibility));
+    } catch (e) {
+      console.error("Failed to save column visibility to local storage", e);
+    }
+  }, [columnVisibility]);
+
   if (!user) {
     // AuthGate should prevent this, but just in case
     return (
@@ -604,7 +639,7 @@ export const SchoolsScreen: React.FC = () => {
         <div className="card-header">
           <div className="card-title">Schools</div>
         </div>
-        <div className="card-body">
+        <div className="card-body" style={{ position: "relative" }}>
           <p>You must be signed in to manage schools.</p>
         </div>
       </div>
@@ -894,54 +929,6 @@ export const SchoolsScreen: React.FC = () => {
               />
             </div>
 
-            <div className="toolbar-group" style={{ position: "relative" }}>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setShowColumnMenu(prev => !prev)}
-              >
-                New column ({table.getVisibleLeafColumns().length} of {table.getAllLeafColumns().length})
-              </button>
-              {showColumnMenu && (
-                <div 
-                  className="modal-panel" 
-                  style={{ 
-                    position: "absolute", 
-                    top: "100%", 
-                    right: 0, 
-                    zIndex: 10, 
-                    marginTop: "8px", 
-                    padding: "10px", 
-                    width: "250px",
-                    maxWidth: "none",
-                  }}
-                  onMouseLeave={() => setShowColumnMenu(false)}
-                >
-                  <div className="modal-body" style={{ marginTop: 0, gap: "6px" }}>
-                    {table.getAllLeafColumns().map((column) => (
-                      <div key={column.id} className="form-row" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-                        <label style={{ fontSize: "13px", color: "var(--text)" }}>
-                          {/* Use the column header text or a capitalized ID if header is a component */}
-                          {typeof column.columnDef.header === 'string'
-                            ? column.columnDef.header
-                            : column.id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-                          }
-                        </label>
-                        <input
-                          {...{
-                            type: 'checkbox',
-                            checked: column.getIsVisible(),
-                            onChange: column.getToggleVisibilityHandler(),
-                            style: { margin: 0, width: 'auto' }
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
             <div className="toolbar-group">
                <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
             </div>
@@ -958,7 +945,7 @@ export const SchoolsScreen: React.FC = () => {
           </div>
         </div>
 
-        <div className="card-body">
+        <div className="card-body" style={{ position: "relative" }}>
           {loading && <div>Loading schools…</div>}
           {loadError && (
             <div className="field-error">
@@ -980,8 +967,58 @@ export const SchoolsScreen: React.FC = () => {
           )}
 
           {!loading && table.getRowModel().rows.length > 0 && (
-            <div className="table-wrapper">
-              <table className="simple-table" style={{ width: table.getTotalSize() }}>
+            <>
+              <div
+                style={{
+                  position: "absolute",
+                  top: "1px", // Adjust to align with table header row
+                  right: "8px",
+                  zIndex: 10, // Ensure it's above table
+                }}
+              >
+                {showColumnMenu && (
+                  <div
+                    className="modal-panel"
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      right: 0,
+                      zIndex: 20,
+                      marginTop: "8px",
+                      padding: "10px",
+                      width: "250px",
+                      maxWidth: "none",
+                    }}
+                    onMouseLeave={() => setShowColumnMenu(false)}
+                  >
+                    <div className="modal-body" style={{ marginTop: 0, gap: "6px" }}>
+                      {table.getAllLeafColumns().map((column) => (
+                        column.id !== "actions" && ( // Exclude the actions column from the toggle list
+                          <div key={column.id} className="form-row" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                            <label style={{ fontSize: "13px", color: "var(--text)" }}>
+                              {/* Use the column header text or a capitalized ID if header is a component */}
+                              {typeof column.columnDef.header === 'string'
+                                ? column.columnDef.header
+                                : column.id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                              }
+                            </label>
+                            <input
+                              {...{
+                                type: 'checkbox',
+                                checked: column.getIsVisible(),
+                                onChange: column.getToggleVisibilityHandler(),
+                                style: { margin: 0, width: 'auto' }
+                              }}
+                            />
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="table-wrapper">
+              <table className="simple-table">
                 <thead>
                   {table.getHeaderGroups().map((headerGroup) => (
                     <tr key={headerGroup.id}>
@@ -1045,6 +1082,7 @@ export const SchoolsScreen: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
       </div>
