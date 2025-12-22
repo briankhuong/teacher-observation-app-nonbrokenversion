@@ -3,6 +3,14 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
 import ImportSchoolsBtn from "./components/ImportSchoolsBtn";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  flexRender,
+} from "@tanstack/react-table";
+import type { ColumnDef, SortingState, ColumnResizeMode } from "@tanstack/react-table";
 
 export interface SchoolRow {
   id: string;
@@ -18,6 +26,7 @@ export interface SchoolRow {
   district: string | null;
   city: string | null;
   notes: string | null;
+  admin_workbook_url: string | null; // NEW: Admin workbook link
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +43,7 @@ type SchoolFormState = {
   district: string;
   city: string;
   notes: string;
+  admin_workbook_url: string; // NEW: Admin workbook link
 };
 
 const emptyForm: SchoolFormState = {
@@ -48,6 +58,7 @@ const emptyForm: SchoolFormState = {
   district: "",
   city: "",
   notes: "",
+  admin_workbook_url: "", // NEW
 };
 
 interface SchoolFormModalProps {
@@ -57,6 +68,116 @@ interface SchoolFormModalProps {
   onCancel: () => void;
   onSubmit: (values: SchoolFormState) => Promise<void>;
 }
+
+interface SchoolViewModalProps {
+  open: boolean;
+  row: SchoolRow | null;
+  onCancel: () => void;
+  onEdit: (row: SchoolRow) => void;
+  onDelete: (row: SchoolRow) => Promise<void>;
+}
+
+const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
+  open,
+  row,
+  onCancel,
+  onEdit,
+  onDelete,
+}) => {
+  if (!open || !row) return null;
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-panel">
+        <div className="modal-header">
+          <div className="modal-title">School / Campus Details</div>
+          <button type="button" className="btn" onClick={onCancel}>
+            ×
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="detail-row">
+            <label>School Name</label>
+            <span>{row.school_name}</span>
+          </div>
+          <div className="detail-row">
+            <label>Campus Name</label>
+            <span>{row.campus_name}</span>
+          </div>
+
+          <div className="detail-row">
+            <label>Admin Name</label>
+            <span>{row.admin_name || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>Admin Email</label>
+            <span>{row.admin_email || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>Admin Phone</label>
+            <span>{row.admin_phone || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>Account Manager Name</label>
+            <span>{row.am_name || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>Account Manager Email</label>
+            <span>{row.am_email || "—"}</span>
+          </div>
+
+          <div className="detail-row">
+            <label>Address</label>
+            <span>{row.address || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>District</label>
+            <span>{row.district || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>City</label>
+            <span>{row.city || "—"}</span>
+          </div>
+          
+          <div className="detail-row">
+            <label>Admin Workbook URL</label>
+            {row.admin_workbook_url ? (
+              <a href={row.admin_workbook_url} target="_blank" rel="noopener noreferrer" className="link-button">
+                Open Workbook
+              </a>
+            ) : (
+              <span>—</span>
+            )}
+          </div>
+
+          {row.notes && (
+            <div className="detail-row detail-row--notes">
+              <label>Notes</label>
+              <pre>{row.notes}</pre>
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn" onClick={onCancel}>
+            Close
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => onEdit(row)}>
+            Edit Details
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-danger"
+            onClick={() => onDelete(row)}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   open,
@@ -227,6 +348,17 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
             />
           </div>
 
+          <div className="form-row">
+            <label>Admin Workbook URL</label>
+            <input
+              className="input"
+              type="url"
+              value={form.admin_workbook_url}
+              onChange={handleChange("admin_workbook_url")}
+              placeholder="Paste Admin workbook URL (e.g., OneDrive/SharePoint link)…"
+            />
+          </div>
+
           <div className="modal-footer">
             <button
               type="button"
@@ -268,9 +400,113 @@ export const SchoolsScreen: React.FC = () => {
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingRow, setEditingRow] = useState<SchoolRow | null>(null);
 
-  // NEW: active row id
-  const [activeSchoolId, setActiveSchoolId] = useState<string | null>(null);
+  // NEW: View Modal state
+  const [viewingRow, setViewingRow] = useState<SchoolRow | null>(null);
+  const [showViewModal, setShowViewModal] = useState(false);
+
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // TanStack Table State
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "school_name", desc: false },
+    { id: "campus_name", desc: false },
+  ]);
+  const [columnResizeMode] = useState<ColumnResizeMode>("onEnd");
+
+  // Define Columns
+  const columns = useMemo<ColumnDef<SchoolRow>[]>(
+    () => [
+      {
+        accessorKey: "school_name",
+        header: "School & Campus",
+        cell: (info) => (
+          <>
+            <div className="entity-cell-main">{info.row.original.school_name}</div>
+            <div className="entity-cell-sub">{info.row.original.campus_name}</div>
+          </>
+        ),
+        id: "school_name", // accessorKey and id must match for sorting
+        minSize: 150,
+        size: 250,
+      },
+      {
+        accessorKey: "admin_name",
+        header: "Admin",
+        cell: (info) => (
+          <>
+            <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
+            <div className="entity-cell-sub">{info.row.original.admin_email || ""}</div>
+          </>
+        ),
+        id: "admin_name",
+        minSize: 150,
+        size: 200,
+      },
+      {
+        accessorKey: "am_name",
+        header: "AM",
+        cell: (info) => (
+          <>
+            <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
+            <div className="entity-cell-sub">{info.row.original.am_email || ""}</div>
+          </>
+        ),
+        id: "am_name",
+        minSize: 150,
+        size: 150,
+      },
+      {
+        accessorKey: "city",
+        header: "Location",
+        cell: (info) => (
+          <>
+            <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
+            <div className="entity-cell-sub">{info.row.original.district || ""}</div>
+          </>
+        ),
+        id: "city",
+        minSize: 100,
+        size: 150,
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        size: 100,
+        minSize: 100,
+        enableSorting: false,
+        enableResizing: false,
+        cell: (info) => (
+          <div
+            className="table-actions"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => openEdit(info.row.original)}
+            >
+              Edit
+            </button>
+          </div>
+        ),
+      },
+    ],
+    []
+  );
+
+  const table = useReactTable({
+    data: rows,
+    columns,
+    state: {
+      sorting,
+      globalFilter: search,
+    },
+    onSortingChange: setSorting,
+    columnResizeMode,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
 
   if (!user) {
     // AuthGate should prevent this, but just in case
@@ -314,6 +550,7 @@ export const SchoolsScreen: React.FC = () => {
             district,
             city,
             notes,
+            admin_workbook_url,
             created_at,
             updated_at
           `
@@ -342,32 +579,54 @@ export const SchoolsScreen: React.FC = () => {
     };
   }, [trainerId, refreshKey]);
 
-  const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
-      return (
-        r.school_name.toLowerCase().includes(q) ||
-        r.campus_name.toLowerCase().includes(q) ||
-        (r.city ?? "").toLowerCase().includes(q) ||
-        (r.district ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [rows, search]);
+  // Search/filtering is now handled by TanStack Table (getFilteredRowModel)
+  // const filteredRows = useMemo(() => {
+  //   const q = search.trim().toLowerCase();
+  //   if (!q) return rows;
+  //   return rows.filter((r) => {
+  //     return (
+  //       r.school_name.toLowerCase().includes(q) ||
+  //       r.campus_name.toLowerCase().includes(q) ||
+  //       (r.city ?? "").toLowerCase().includes(q) ||
+  //       (r.district ?? "").toLowerCase().includes(q)
+  //     );
+  //   });
+  // }, [rows, search]);
 
   const openCreate = () => {
     setFormMode("create");
     setEditingRow(null);
     setShowForm(true);
-    setActiveSchoolId(null);
+    setViewingRow(null); // Close view modal if open
+    setShowViewModal(false);
   };
+
+  const openView = (row: SchoolRow) => {
+    setViewingRow(row);
+    setShowViewModal(true);
+    // Ensure form is closed
+    setShowForm(false);
+  }
 
   const openEdit = (row: SchoolRow) => {
     setFormMode("edit");
     setEditingRow(row);
     setShowForm(true);
-    setActiveSchoolId(row.id);
+    // Ensure view is closed
+    setViewingRow(null);
+    setShowViewModal(false);
   };
+
+  // Re-define openEdit for view modal usage (allows seamless transition)
+  const openEditFromView = (row: SchoolRow) => {
+    setFormMode("edit");
+    setEditingRow(row);
+    setShowForm(true);
+    // Close view modal
+    setViewingRow(null);
+    setShowViewModal(false);
+  };
+
 
   const handleDelete = async (row: SchoolRow) => {
     const ok = window.confirm(
@@ -388,8 +647,9 @@ export const SchoolsScreen: React.FC = () => {
     }
 
     setRows((prev) => prev.filter((s) => s.id !== row.id));
-    if (activeSchoolId === row.id) {
-      setActiveSchoolId(null);
+    if (viewingRow?.id === row.id) {
+      setViewingRow(null);
+      setShowViewModal(false);
     }
   };
 
@@ -410,6 +670,7 @@ export const SchoolsScreen: React.FC = () => {
           district: values.district.trim() || null,
           city: values.city.trim() || null,
           notes: values.notes.trim() || null,
+          admin_workbook_url: values.admin_workbook_url.trim() || null, // NEW
         })
         .select(
           `
@@ -426,6 +687,7 @@ export const SchoolsScreen: React.FC = () => {
           district,
           city,
           notes,
+          admin_workbook_url,
           created_at,
           updated_at
         `
@@ -440,7 +702,7 @@ export const SchoolsScreen: React.FC = () => {
 
       const newRow = data as SchoolRow;
       setRows((prev) => [...prev, newRow]);
-      setActiveSchoolId(newRow.id);
+      openView(newRow); // Open View Modal on creation
       setShowForm(false);
       return;
     }
@@ -461,6 +723,7 @@ export const SchoolsScreen: React.FC = () => {
         district: values.district.trim() || null,
         city: values.city.trim() || null,
         notes: values.notes.trim() || null,
+        admin_workbook_url: values.admin_workbook_url.trim() || null, // NEW
         updated_at: new Date().toISOString(),
       })
       .eq("id", editingRow.id)
@@ -480,6 +743,7 @@ export const SchoolsScreen: React.FC = () => {
         district,
         city,
         notes,
+        admin_workbook_url,
         created_at,
         updated_at
       `
@@ -496,7 +760,7 @@ export const SchoolsScreen: React.FC = () => {
     setRows((prev) =>
       prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
-    setActiveSchoolId(updated.id);
+    openView(updated); // Open View Modal after update
     setShowForm(false);
   };
 
@@ -514,6 +778,7 @@ export const SchoolsScreen: React.FC = () => {
           district: editingRow.district ?? "",
           city: editingRow.city ?? "",
           notes: editingRow.notes ?? "",
+          admin_workbook_url: editingRow.admin_workbook_url ?? "",
         }
       : undefined;
 
@@ -565,7 +830,7 @@ export const SchoolsScreen: React.FC = () => {
             </div>
           )}
 
-          {!loading && filteredRows.length === 0 && !loadError && (
+          {!loading && table.getRowModel().rows.length === 0 && !loadError && (
             <div className="empty-state">
               <p>No schools yet.</p>
               <button
@@ -578,21 +843,66 @@ export const SchoolsScreen: React.FC = () => {
             </div>
           )}
 
-          {!loading && filteredRows.length > 0 && (
+          {!loading && table.getRowModel().rows.length > 0 && (
             <div className="table-wrapper">
-              <table className="simple-table">
+              <table className="simple-table" style={{ width: table.getTotalSize() }}>
                 <thead>
-                  <tr>
-                    <th>School & campus</th>
-                    <th>Admin</th>
-                    <th>AM</th>
-                    <th>City</th>
-                    <th style={{ width: 140 }}>Actions</th>
-                  </tr>
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <tr key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => (
+                        <th
+                          key={header.id}
+                          colSpan={header.colSpan}
+                          style={{ width: header.getSize() }}
+                          className={header.column.getCanSort() ? "sortable-header" : ""}
+                        >
+                          {header.isPlaceholder ? null : (
+                            <div
+                              {...{
+                                className: header.column.getCanSort()
+                                  ? "cursor-pointer select-none"
+                                  : "",
+                                onClick: header.column.getToggleSortingHandler(),
+                              }}
+                            >
+                              {flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )}
+                              {{
+                                asc: " ↑",
+                                desc: " ↓",
+                              }[header.column.getIsSorted() as string] ?? null}
+                            </div>
+                          )}
+                          {header.column.getCanResize() && (
+                            <div
+                              {...{
+                                onMouseDown: header.getResizeHandler(),
+                                onTouchStart: header.getResizeHandler(),
+                                className: `resizer ${
+                                  header.column.getIsResizing() ? "isResizing" : ""
+                                }`,
+                                style: {
+                                  transform:
+                                    columnResizeMode === "onEnd" &&
+                                    header.column.getIsResizing()
+                                      ? `translateX(${
+                                          table.getState().columnSizingInfo.deltaOffset
+                                        }px)`
+                                      : "",
+                                },
+                              }}
+                            />
+                          )}
+                        </th>
+                      ))}
+                    </tr>
+                  ))}
                 </thead>
                 <tbody>
-                  {filteredRows.map((row) => {
-                    const isActive = row.id === activeSchoolId;
+                  {table.getRowModel().rows.map((row) => {
+                    const isActive = row.original.id === viewingRow?.id; // Highlight viewing row
                     return (
                       <tr
                         key={row.id}
@@ -600,61 +910,19 @@ export const SchoolsScreen: React.FC = () => {
                           "simple-table-row" +
                           (isActive ? " simple-table-row--active" : "")
                         }
-                        onClick={() => setActiveSchoolId(row.id)}
+                        onClick={() => openView(row.original)}
                       >
-                        <td>
-                          <div className="entity-cell-main">
-                            {row.school_name}
-                          </div>
-                          <div className="entity-cell-sub">
-                            {row.campus_name}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="entity-cell-main">
-                            {row.admin_name || "—"}
-                          </div>
-                          <div className="entity-cell-sub">
-                            {row.admin_email || ""}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="entity-cell-main">
-                            {row.am_name || "—"}
-                          </div>
-                          <div className="entity-cell-sub">
-                            {row.am_email || ""}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="entity-cell-main">
-                            {row.city || "—"}
-                          </div>
-                          <div className="entity-cell-sub">
-                            {row.district || ""}
-                          </div>
-                        </td>
-                        <td>
-                          <div
-                            className="table-actions"
-                            onClick={(e) => e.stopPropagation()}
+                        {row.getVisibleCells().map((cell) => (
+                          <td
+                            key={cell.id}
+                            style={{ width: cell.column.getSize() }}
                           >
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={() => openEdit(row)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={() => handleDelete(row)}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
+                          </td>
+                        ))}
                       </tr>
                     );
                   })}
@@ -671,6 +939,14 @@ export const SchoolsScreen: React.FC = () => {
         initial={formInitial}
         onCancel={() => setShowForm(false)}
         onSubmit={submitForm}
+      />
+      
+      <SchoolViewModal
+        open={showViewModal}
+        row={viewingRow}
+        onCancel={() => setShowViewModal(false)}
+        onEdit={openEditFromView}
+        onDelete={handleDelete}
       />
     </>
   );
