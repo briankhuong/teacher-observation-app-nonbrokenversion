@@ -1,10 +1,61 @@
 // src/ObservationWorkspaceShell.tsx
 import { exportTeacherExcel } from "./exportTeacherExcel";
 import { CanvasPad } from "./CanvasPad";
-import React, { useEffect, useRef,useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { exportAdminExcel } from "./exportAdminExcel"; // ← NEW
 //import { buildAdminExportModel, type AdminExportModel } from "./exportAdminModel";
 import { emailTeacherReport } from "./emailTeacherReport";
+
+const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
+const DEFAULT_CANVAS_HEIGHT = 300; // Default height for the canvas pad
+const MIN_CANVAS_HEIGHT = 100; // Minimum height for the canvas pad
+
+const TEXTAREA_HEIGHT_STORAGE_KEY = "textarea-height";
+const DEFAULT_TEXTAREA_HEIGHT = 120;
+const MIN_TEXTAREA_HEIGHT = 60;
+
+function getPersistedCanvasHeight(): number {
+  if (typeof window === "undefined") return DEFAULT_CANVAS_HEIGHT;
+  try {
+    const raw = localStorage.getItem(CANVAS_HEIGHT_STORAGE_KEY);
+    const parsed = raw ? parseInt(raw, 10) : DEFAULT_CANVAS_HEIGHT;
+    return isNaN(parsed) ? DEFAULT_CANVAS_HEIGHT : Math.max(MIN_CANVAS_HEIGHT, parsed);
+  } catch (error) {
+    console.error("Failed to read persisted canvas height", error);
+    return DEFAULT_CANVAS_HEIGHT;
+  }
+}
+
+function setPersistedCanvasHeight(height: number) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CANVAS_HEIGHT_STORAGE_KEY, height.toString());
+  } catch (error) {
+    console.error("Failed to write persisted canvas height", error);
+  }
+}
+
+function getPersistedTextareaHeight(): number {
+  if (typeof window === "undefined") return DEFAULT_TEXTAREA_HEIGHT;
+  try {
+    const raw = localStorage.getItem(TEXTAREA_HEIGHT_STORAGE_KEY);
+    const parsed = raw ? parseInt(raw, 10) : DEFAULT_TEXTAREA_HEIGHT;
+    return isNaN(parsed) ? DEFAULT_TEXTAREA_HEIGHT : Math.max(MIN_TEXTAREA_HEIGHT, parsed);
+  } catch (error) {
+    console.error("Failed to read persisted textarea height", error);
+    return DEFAULT_TEXTAREA_HEIGHT;
+  }
+}
+
+function setPersistedTextareaHeight(height: number) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(TEXTAREA_HEIGHT_STORAGE_KEY, height.toString());
+  } catch (error) {
+    console.error("Failed to write persisted textarea height", error);
+  }
+}
+
 const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
 import {
   loadObservationFromDb,
@@ -554,17 +605,166 @@ export const ObservationWorkspaceShell: React.FC<
 
 
 
-  // Inside ObservationWorkspaceShell component
-  // Batch Polish State
-  const [showBatchModal, setShowBatchModal] = useState(false);
-  const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
-  const [isAiPolishing, setIsAiPolishing] = useState(false);
-  const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
+// Inside ObservationWorkspaceShell component
+// Batch Polish State
+const [showBatchModal, setShowBatchModal] = useState(false);
+const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
+const [isAiPolishing, setIsAiPolishing] = useState(false);
+const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
 
-  const [indicators, setIndicators] =
-    useState<IndicatorState[]>(INITIAL_INDICATORS);
-  const [activeIndex, setActiveIndex] = useState(0);
-  // Observation-level status: "draft" (editable) or "saved" (completed/locked)
+// NEW: Input Control States
+const [isCanvasVisible, setIsCanvasVisible] = useState(true); // NEW: collapse state
+// NEW: Textarea Resizing State
+const [textAreaHeight, setTextAreaHeight] = useState(getPersistedTextareaHeight);
+const [isTextareaResizing, setIsTextareaResizing] = useState(false);
+const textareaRef = useRef<HTMLTextAreaElement>(null);
+const startYTextareaRef = useRef(0);
+const startHeightTextareaRef = useRef(0);
+
+// NEW: Canvas Resizing Logic
+const [canvasHeight, setCanvasHeight] = useState(getPersistedCanvasHeight);
+const [isResizing, setIsResizing] = useState(false);
+const canvasWrapperRef = useRef<HTMLDivElement>(null);
+const startYRef = useRef(0);
+const startHeightRef = useRef(0);
+
+// Unified resize event handler for both mouse and touch
+const doCanvasResize = useCallback(
+  (e: MouseEvent | TouchEvent) => {
+    if (!isResizing || !canvasWrapperRef.current) return;
+
+    const currentY =
+      (e as MouseEvent).clientY ?? (e as TouchEvent).touches[0].clientY;
+    
+    // We resize from the top of the canvas, so the new height is based on the 
+    // current mouse/touch position relative to the top of the wrapper.
+    const rect = canvasWrapperRef.current.getBoundingClientRect();
+    let newHeight = currentY - rect.top;
+
+    // Apply minimum height constraint
+    newHeight = Math.max(MIN_CANVAS_HEIGHT, newHeight);
+
+    setCanvasHeight(newHeight);
+  },
+  [isResizing]
+);
+
+// End canvas resize and save height
+const stopCanvasResize = useCallback(() => {
+  if (isResizing) {
+    setIsResizing(false);
+    setPersistedCanvasHeight(canvasHeight);
+    // Optional: force a resize event for other components to adapt
+    window.dispatchEvent(new Event("resize"));
+  }
+}, [isResizing, canvasHeight]);
+
+// Start canvas resize and capture initial state
+const startCanvasResize = useCallback(
+  (e: React.MouseEvent | React.TouchEvent) => {
+    // Only process left mouse button (0) or a touch event
+    const isMouseEvent = (e as React.MouseEvent).button !== undefined;
+    if (isMouseEvent && (e as React.MouseEvent).button !== 0) return;
+    
+    // Prevent default touch behavior (e.g., scrolling)
+    if ((e as React.TouchEvent).touches) {
+      e.preventDefault();
+    }
+    
+    const currentY =
+      (e as React.MouseEvent).clientY ?? (e as React.TouchEvent).touches[0].clientY;
+
+    startYRef.current = currentY;
+    startHeightRef.current = canvasHeight; // Use the state's current height
+    setIsResizing(true);
+  },
+  [canvasHeight]
+);
+
+// Unified resize event handler for both mouse and touch (TEXTAREA)
+const doTextareaResize = useCallback(
+  (e: MouseEvent | TouchEvent) => {
+    if (!isTextareaResizing || !textareaRef.current) return;
+
+    const currentY =
+      (e as MouseEvent).clientY ?? (e as TouchEvent).touches[0].clientY;
+
+    // We resize from the top of the textarea, so new height is currentY minus the top of the textarea wrapper.
+    // The handle is below the textarea, so we calculate height from the top of the textarea to the mouse position.
+    const rect = textareaRef.current.getBoundingClientRect();
+    let newHeight = currentY - rect.top;
+
+    // Apply minimum height constraint
+    newHeight = Math.max(MIN_TEXTAREA_HEIGHT, newHeight);
+
+    setTextAreaHeight(newHeight);
+  },
+  [isTextareaResizing]
+);
+
+// End textarea resize and save height
+const stopTextareaResize = useCallback(() => {
+  if (isTextareaResizing) {
+    setIsTextareaResizing(false);
+    setPersistedTextareaHeight(textAreaHeight);
+  }
+}, [isTextareaResizing, textAreaHeight]);
+
+// Start textarea resize and capture initial state
+const startTextareaResize = useCallback(
+  (e: React.MouseEvent | React.TouchEvent) => {
+    // Only process left mouse button (0) or a touch event
+    const isMouseEvent = (e as React.MouseEvent).button !== undefined;
+    if (isMouseEvent && (e as React.MouseEvent).button !== 0) return;
+
+    // Prevent default touch behavior (e.g., scrolling)
+    if ((e as React.TouchEvent).touches) {
+      e.preventDefault();
+    }
+
+    setIsTextareaResizing(true);
+  },
+  []
+);
+
+// Global event listeners for drag control continuity
+useEffect(() => {
+  // Canvas resize listeners
+  if (isResizing) {
+    window.addEventListener("mousemove", doCanvasResize);
+    window.addEventListener("mouseup", stopCanvasResize);
+    window.addEventListener("touchmove", doCanvasResize);
+    window.addEventListener("touchend", stopCanvasResize);
+  }
+
+  // Textarea resize listeners
+  if (isTextareaResizing) {
+    window.addEventListener("mousemove", doTextareaResize);
+    window.addEventListener("mouseup", stopTextareaResize);
+    window.addEventListener("touchmove", doTextareaResize);
+    window.addEventListener("touchend", stopTextareaResize);
+  }
+
+  return () => {
+    // Cleanup listeners
+    window.removeEventListener("mousemove", doCanvasResize);
+    window.removeEventListener("mouseup", stopCanvasResize);
+    window.removeEventListener("touchmove", doCanvasResize);
+    window.removeEventListener("touchend", stopCanvasResize);
+    window.removeEventListener("mousemove", doTextareaResize);
+    window.removeEventListener("mouseup", stopTextareaResize);
+    window.removeEventListener("touchmove", doTextareaResize);
+    window.removeEventListener("touchend", stopTextareaResize);
+  };
+}, [
+  isResizing, doCanvasResize, stopCanvasResize, 
+  isTextareaResizing, doTextareaResize, stopTextareaResize
+]);
+
+const [indicators, setIndicators] =
+  useState<IndicatorState[]>(INITIAL_INDICATORS);
+const [activeIndex, setActiveIndex] = useState(0);
+// Observation-level status: "draft" (editable) or "saved" (completed/locked)
   const [observationStatus, setObservationStatus] = useState<"draft" | "saved">(
     "draft"
   );
@@ -1882,27 +2082,50 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
         <div className="workspace-container">
           <div className="canvas-card">
             <div className="canvas-header">
-              <div>
-                <div className="canvas-indicator-title">
-                  {active.number} — {active.title}
-                </div>
-                <div
-                  className={
-                    expandedDesc[active.id]
-                      ? "canvas-indicator-desc expanded"
-                      : "canvas-indicator-desc collapsed"
-                  }
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button 
+                  type="button" 
+                  className="btn btn-ghost canvas-collapse-btn" // Use btn-ghost for styling reset
+                  onClick={() => setIsCanvasVisible(v => !v)}
+                  title={isCanvasVisible ? "Collapse canvas and tools" : "Expand canvas and tools"}
+                  style={{
+                    width: 24,
+                    height: 24,
+                    padding: 0,
+                    flexShrink: 0,
+                    transform: isCanvasVisible ? "rotate(0deg)" : "rotate(180deg)",
+                    transition: "transform 0.2s ease",
+                    fontSize: 12,
+                    lineHeight: 1,
+                    border: '1px solid var(--accent)', // Accent border
+                    color: 'var(--accent)', // Accent color icon
+                    background: 'transparent'
+                  }}
                 >
-                  {active.description}
-                </div>
-
-                <button
-                  type="button"
-                  className="desc-toggle-btn"
-                  onClick={() => toggleDescription(active.id)}
-                >
-                  {expandedDesc[active.id] ? "Show less" : "Show more"}
+                  {isCanvasVisible ? "▼" : "▲"}
                 </button>
+                <div>
+                  <div className="canvas-indicator-title">
+                    {active.number} — {active.title}
+                  </div>
+                  <div
+                    className={
+                      expandedDesc[active.id]
+                        ? "canvas-indicator-desc expanded"
+                        : "canvas-indicator-desc collapsed"
+                    }
+                  >
+                    {active.description}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="desc-toggle-btn"
+                    onClick={() => toggleDescription(active.id)}
+                  >
+                    {expandedDesc[active.id] ? "Show less" : "Show more"}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1922,13 +2145,34 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               </select>
             </div>
 
-            <CanvasPad
-            key={active.id}
-            strokes={active.strokes}
-            onChange={(s) => handleStrokesChange(activeIndex, s)}
-            readOnly={isLocked}
-          />
-            {/* 🔤 Manual OCR button */}
+            {/* 🆕 Resizable Wrapper for CanvasPad — Only visible if not collapsed */}
+            <div
+              className={`canvas-resizable-wrapper ${isCanvasVisible ? '' : 'collapsed'}`}
+              ref={canvasWrapperRef}
+              style={{ 
+                height: isCanvasVisible ? `${canvasHeight}px` : '0px', 
+                transition: 'height 0.2s ease-out',
+                overflow: 'hidden' // Hide inner content when height is 0
+              }}
+            >
+              <CanvasPad
+                key={active.id}
+                strokes={active.strokes}
+                onChange={(s) => handleStrokesChange(activeIndex, s)}
+                readOnly={isLocked || !isCanvasVisible} // Disable drawing when hidden
+              />
+            </div>
+ 
+            {/* 🆕 Dedicated Canvas Resize Handle (must be outside CanvasPad) — Only visible if not collapsed */}
+            {isCanvasVisible && (
+              <div
+                className="canvas-resize-handle"
+                onMouseDown={startCanvasResize}
+                onTouchStart={startCanvasResize}
+              />
+            )}
+
+            {/* 🔤 Manual OCR button / AI Polish */}
             <div
               style={{
                 marginTop: 8,
@@ -2000,7 +2244,17 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               )}
             </div>
 
-            <div style={{ marginTop: 10 }}>
+            {/* 📝 Textarea and Handle */}
+            <div 
+              style={{ 
+                marginTop: 10, 
+                position: "relative", 
+                zIndex: 10, 
+                display: "flex", 
+                flexDirection: "column",
+                flexGrow: 1 // Allow textarea section to take up remaining vertical space
+              }}
+            >
             <div
               style={{
                 fontSize: 12,
@@ -2049,13 +2303,16 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               )}
             </div>
             <textarea
+              ref={textareaRef}
               value={active.commentText}
               onChange={(e) => handleCommentChange(activeIndex, e.target.value)}
               rows={5}
               readOnly={isLocked}
               style={{
                 width: "100%",
-                resize: "vertical",
+                height: `${textAreaHeight}px`, // Apply dynamic height
+                minHeight: `${MIN_TEXTAREA_HEIGHT}px`,
+                resize: "none", // Remove inline resize
                 borderRadius: 10,
                 border: active.ocrPendingReview
                   ? "1px solid rgba(250, 204, 21, 0.9)"
@@ -2067,7 +2324,14 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                 color: "var(--text)",
                 padding: 8,
                 fontSize: 13,
+                flexGrow: 1, // Allow it to fill space if height is collapsed/minimized
               }}
+            />
+            {/* 🆕 Dedicated Textarea Resize Handle */}
+            <div
+              className="textarea-resize-handle"
+              onMouseDown={startTextareaResize}
+              onTouchStart={startTextareaResize}
             />
           </div>
 
