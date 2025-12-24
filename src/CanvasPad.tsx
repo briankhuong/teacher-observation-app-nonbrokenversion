@@ -1,5 +1,29 @@
 import React, { useLayoutEffect, useRef, useState, useCallback } from "react";
 import { getStroke } from "perfect-freehand";
+
+const usePersistedState = <T,>(key: string, defaultValue: T) => {
+  const [state, setState] = useState<T>(() => {
+    if (typeof window === 'undefined') return defaultValue;
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : defaultValue;
+    } catch (error) {
+      return defaultValue;
+    }
+  });
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(state));
+    } catch (error) {
+      // Ignore write errors
+    }
+  }, [key, state]);
+
+  return [state, setState] as const;
+};
+
 // ------------------------------------------------------------------
 // 1. Configuration (Standard Pen Feel)
 // ------------------------------------------------------------------
@@ -37,6 +61,23 @@ export interface Stroke {
   points: StrokePoint[];
   mode: "pen" | "eraser";
 }
+// ------------------------------------------------------------------
+// Eraser Utility
+// ------------------------------------------------------------------
+const ERASER_HIT_DISTANCE_SQUARED = 5 * 5; // Distance of 5px squared for 'on contact' comparison
+function isStrokeIntersecting(eraserPoints: StrokePoint[], targetStroke: Stroke): boolean {
+  for (const ePoint of eraserPoints) {
+    for (const tPoint of targetStroke.points) {
+      const dx = ePoint.x - tPoint.x;
+      const dy = ePoint.y - tPoint.y;
+      // We check distance squared to avoid Math.sqrt
+      if (dx * dx + dy * dy < ERASER_HIT_DISTANCE_SQUARED) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 interface CanvasPadProps {
   strokes: Stroke[];
   onChange: (strokes: Stroke[]) => void;
@@ -59,10 +100,10 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
   const currentStroke = useRef<StrokePoint[]>([]);
   const isDrawing = useRef(false);
   // Tools
-  const [mode, setMode] = useState<"pen" | "eraser">("pen");
-  const [color, setColor] = useState<string>("#e5e7eb");
-  const [size, setSize] = useState<number>(3);
- 
+  const [mode, setMode] = usePersistedState<"pen" | "eraser">("canvas-tool-mode", "pen");
+  const [color, setColor] = usePersistedState<string>("canvas-tool-color", "#e5e7eb");
+  const [size, setSize] = usePersistedState<number>("canvas-tool-size", 3);
+
   // These are for the UI buttons only
   const [canUndo, setCanUndo] = useState(strokes.length > 0);
   const [redoStack, setRedoStack] = useState<Stroke[]>([]);
@@ -259,19 +300,50 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
     };
     const commitStroke = () => {
       if (currentStroke.current.length > 0) {
-        const newStroke: Stroke = {
-          color: toolsRef.current.mode === "pen" ? toolsRef.current.color : "#020617",
-          size: toolsRef.current.mode === "pen" ? toolsRef.current.size : toolsRef.current.size * 4,
-          points: [...currentStroke.current],
-          mode: toolsRef.current.mode as "pen" | "eraser",
-        };
-        // Commit to static canvas
-        const staticCtx = canvasStaticRef.current?.getContext("2d");
-        if (staticCtx) stampPrettyStroke(staticCtx, newStroke);
-        // Update history
-        history.current = [...history.current, newStroke];
-        setCanUndo(true);
+        const currentMode = toolsRef.current.mode;
+        let newHistory = history.current;
+
+        if (currentMode === "eraser") {
+          const eraserPoints = currentStroke.current;
+
+          // Filter out any strokes that intersect with the eraser path
+          const keptStrokes = history.current.filter((stroke) => {
+            // Only consider pen strokes for deletion
+            if (stroke.mode !== "pen") return true; 
+            return !isStrokeIntersecting(eraserPoints, stroke);
+          });
+
+          if (keptStrokes.length !== history.current.length) {
+            newHistory = keptStrokes;
+          } else {
+            // No stroke was deleted, just clear current and return
+            currentStroke.current = [];
+            requestAnimationFrame(drawAll);
+            return;
+          }
+        } else {
+          // Pen mode: create and add a new stroke
+          const newStroke: Stroke = {
+            color: toolsRef.current.color,
+            size: toolsRef.current.size,
+            points: [...currentStroke.current],
+            mode: currentMode as "pen",
+          };
+          // Commit to static canvas
+          const staticCtx = canvasStaticRef.current?.getContext("2d");
+          if (staticCtx) stampPrettyStroke(staticCtx, newStroke);
+          newHistory = [...history.current, newStroke];
+        }
+
+        history.current = newHistory;
+        setCanUndo(newHistory.length > 0);
         setRedoStack([]);
+
+        // Redraw static canvas fully for eraser mode (to show deletions)
+        if (currentMode === "eraser") {
+            redrawAll();
+        }
+
         // Clear current
         currentStroke.current = [];
         requestAnimationFrame(drawAll);
