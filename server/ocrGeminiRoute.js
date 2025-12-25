@@ -7,15 +7,12 @@ const router = express.Router();
 // 1. CONFIGURATION & ABBREVIATIONS
 // ---------------------------------------------------------
 
-// Initialize Gemini
 const GEN_AI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 const genAI = new GoogleGenerativeAI(GEN_AI_KEY || "");
 
-// Increase payload limit to handle Base64 images
 router.use(express.json({ limit: "10mb" }));
 
-// Define the abbreviations map based on your requirements
-// "GA" is intentionally excluded as requested.
+// Your specific glossary
 const ABBREVIATION_MAP = {
   "PCs": "Phonogram cards",
   "PWCs": "Phonogram word cards",
@@ -31,21 +28,24 @@ const ABBREVIATION_MAP = {
   "LP": "Lesson plan",
   "AA": "Action activities",
   "MPC": "Multi-letter phonogram"
+  // "GA": "GA" (No change)
 };
 
 /**
- * Helper function to find and replace abbreviations with full terms.
- * Uses word boundaries (\b) to ensure partial words aren't replaced.
+ * Turns the map into a string string for the AI prompt
+ * Example output: "- PCs: Phonogram cards\n- TM: Teaching materials..."
+ */
+const GLOSSARY_STRING = Object.entries(ABBREVIATION_MAP)
+  .map(([key, value]) => `- ${key}: ${value}`)
+  .join("\n");
+
+/**
+ * JS Failsafe: Expands abbreviations if the AI forgets to do it.
  */
 function expandAbbreviations(text) {
   if (!text) return "";
-  
-  // Create regex pattern from keys: /\b(PCs|PWCs|...)\b/g
   const pattern = new RegExp(`\\b(${Object.keys(ABBREVIATION_MAP).join('|')})\\b`, 'g');
-
-  return text.replace(pattern, (matched) => {
-    return ABBREVIATION_MAP[matched];
-  });
+  return text.replace(pattern, (matched) => ABBREVIATION_MAP[matched]);
 }
 
 // ---------------------------------------------------------
@@ -56,7 +56,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
   try {
     // --- Safety Checks ---
     if (!GEN_AI_KEY) {
-      console.error("❌ GOOGLE_GENERATIVE_AI_KEY is missing in server environment.");
+      console.error("❌ GOOGLE_GENERATIVE_AI_KEY is missing.");
       return res.status(500).json({ error: "Server missing Google API Key" });
     }
 
@@ -65,24 +65,27 @@ router.post("/api/ocr-gemini", async (req, res) => {
       return res.status(400).json({ error: "No image data provided" });
     }
 
-    // --- Prepare the Model ---
-    // 🟢 KEEPING MODEL AS 2.5 FLASH AS REQUESTED
+    // --- Prepare Model ---
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // --- The Prompt ---
+    // We inject GLOSSARY_STRING here so the AI knows exactly what "PCs" means.
     const prompt = `
       You are an expert handwriting transcriber and strict grammar editor.
-      
+
+      REFERENCE GLOSSARY (Use these exact definitions):
+      ${GLOSSARY_STRING}
+
       TASK:
       1. Transcribe the handwriting accurately from the image.
-      2. Fix grammar, spelling, and tense (e.g., "She speak" -> "She spoke").
-      3. Expand shorthand (e.g., "tchr" -> "teacher").
-      4. Keep the tone SIMPLE. Do not upgrade vocabulary.
+      2. Fix grammar and spelling.
+      3. EXPAND ABBREVIATIONS: If you see an acronym from the Glossary above, replace it with the full term (e.g., change "PCs" to "Phonogram cards"). Do NOT guess other meanings like "Prior Concepts".
+      4. Keep the tone SIMPLE.
 
-      CRITICAL DATA INTEGRITY RULES:
-      - PRESERVE MARKERS: You must NEVER remove or alter hyphens "-" at the start of lines or tags like "(GA)". 
-      - PRESERVE VISUAL LINE BREAKS: Do not combine lines yourself. Return the text exactly as visually arranged on the page.
-      
+      CRITICAL FORMATTING RULES:
+      - PRESERVE MARKERS: Never remove hyphens "-" or "(GA)" at the start of lines.
+      - PRESERVE LINE BREAKS: Return text exactly as visually arranged. Do not combine lines.
+
       OUTPUT:
       - Return ONLY the final text.
     `;
@@ -110,30 +113,25 @@ router.post("/api/ocr-gemini", async (req, res) => {
       const cleanLine = line.trim();
       if (!cleanLine) return acc;
 
-      // Define Block Starters
       const isMarker = cleanLine.startsWith("-") || 
                        cleanLine.toUpperCase().startsWith("(GA)");
 
-      if (acc.length === 0) {
-        return cleanLine;
-      }
+      if (acc.length === 0) return cleanLine;
 
       if (isMarker) {
-        // FOUND A NEW MARKER: Force a new paragraph (Double Newline)
         return `${acc}\n\n${cleanLine}`;
       } else {
-        // NO MARKER: Glue it to the previous block with a SPACE.
         return `${acc} ${cleanLine}`;
       }
     }, "");
 
     // ---------------------------------------------------------
-    // 4. ABBREVIATION EXPANSION (Final Polish)
+    // 4. FAILSAFE EXPANSION
     // ---------------------------------------------------------
-    // This runs AFTER the text structures are fixed, expanding keys like "PCs" to "Phonogram cards"
+    // If the AI missed any (or if it outputted "PCs" specifically), 
+    // this JS will catch it.
     formattedText = expandAbbreviations(formattedText);
 
-    // --- Return JSON ---
     return res.json({ 
       text: formattedText, 
       confidence: 0.95 
@@ -141,16 +139,11 @@ router.post("/api/ocr-gemini", async (req, res) => {
 
   } catch (err) {
     console.error("Gemini OCR Error:", err);
-    
-    let errorMessage = "Failed to process image with Gemini.";
+    let errorMessage = "Failed to process image.";
     if (err.message && err.message.includes("SAFETY")) {
       errorMessage = "Gemini blocked this image due to safety filters.";
     }
-
-    return res.status(500).json({ 
-      error: errorMessage, 
-      details: err.message 
-    });
+    return res.status(500).json({ error: errorMessage, details: err.message });
   }
 });
 
