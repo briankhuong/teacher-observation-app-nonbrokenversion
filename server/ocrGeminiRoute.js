@@ -3,6 +3,10 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const router = express.Router();
 
+// ---------------------------------------------------------
+// 1. CONFIGURATION & ABBREVIATIONS
+// ---------------------------------------------------------
+
 // Initialize Gemini
 const GEN_AI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 const genAI = new GoogleGenerativeAI(GEN_AI_KEY || "");
@@ -10,9 +14,47 @@ const genAI = new GoogleGenerativeAI(GEN_AI_KEY || "");
 // Increase payload limit to handle Base64 images
 router.use(express.json({ limit: "10mb" }));
 
+// Define the abbreviations map based on your requirements
+// "GA" is intentionally excluded as requested.
+const ABBREVIATION_MAP = {
+  "PCs": "Phonogram cards",
+  "PWCs": "Phonogram word cards",
+  "VPCs": "Vocabulary picture cards",
+  "TM": "Teaching materials",
+  "CM": "Classroom management",
+  "AW": "Air-writing",
+  "GS": "GrapeSEED",
+  "LVA": "Lesson video analysis",
+  "TSTS": "Teacher - student - teacher - student",
+  "STS": "Student - Teacher - Student",
+  "LO": "Learning objective",
+  "LP": "Lesson plan",
+  "AA": "Action activities",
+  "MPC": "Multi-letter phonogram"
+};
+
+/**
+ * Helper function to find and replace abbreviations with full terms.
+ * Uses word boundaries (\b) to ensure partial words aren't replaced.
+ */
+function expandAbbreviations(text) {
+  if (!text) return "";
+  
+  // Create regex pattern from keys: /\b(PCs|PWCs|...)\b/g
+  const pattern = new RegExp(`\\b(${Object.keys(ABBREVIATION_MAP).join('|')})\\b`, 'g');
+
+  return text.replace(pattern, (matched) => {
+    return ABBREVIATION_MAP[matched];
+  });
+}
+
+// ---------------------------------------------------------
+// 2. ROUTE HANDLER
+// ---------------------------------------------------------
+
 router.post("/api/ocr-gemini", async (req, res) => {
   try {
-    // 1. Safety Checks
+    // --- Safety Checks ---
     if (!GEN_AI_KEY) {
       console.error("❌ GOOGLE_GENERATIVE_AI_KEY is missing in server environment.");
       return res.status(500).json({ error: "Server missing Google API Key" });
@@ -23,13 +65,11 @@ router.post("/api/ocr-gemini", async (req, res) => {
       return res.status(400).json({ error: "No image data provided" });
     }
 
-    // 2. Prepare the Model
+    // --- Prepare the Model ---
     // 🟢 KEEPING MODEL AS 2.5 FLASH AS REQUESTED
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // 3. The Prompt
-    // We strictly instruct Gemini to PRESERVE the raw line breaks from the image.
-    // We also include the "Minimalist Fixer" rules to correct grammar without changing style.
+    // --- The Prompt ---
     const prompt = `
       You are an expert handwriting transcriber and strict grammar editor.
       
@@ -47,7 +87,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
       - Return ONLY the final text.
     `;
 
-    // 4. Send to Gemini
+    // --- Send to Gemini ---
     const result = await model.generateContent([
       prompt,
       {
@@ -62,12 +102,11 @@ router.post("/api/ocr-gemini", async (req, res) => {
     const rawText = response.text().trim();
 
     // ---------------------------------------------------------
-    // 5. "STICKY BLOCK" LOGIC
+    // 3. "STICKY BLOCK" LOGIC (Formatting)
     // ---------------------------------------------------------
-    // We split by newline to get the raw visual lines from Gemini.
     const rawLines = rawText.split(/\r?\n/);
 
-    const formattedText = rawLines.reduce((acc, line) => {
+    let formattedText = rawLines.reduce((acc, line) => {
       const cleanLine = line.trim();
       if (!cleanLine) return acc;
 
@@ -84,12 +123,17 @@ router.post("/api/ocr-gemini", async (req, res) => {
         return `${acc}\n\n${cleanLine}`;
       } else {
         // NO MARKER: Glue it to the previous block with a SPACE.
-        // This ensures sentences like "For example..." stay inside the current block.
         return `${acc} ${cleanLine}`;
       }
     }, "");
 
-    // 6. Return JSON
+    // ---------------------------------------------------------
+    // 4. ABBREVIATION EXPANSION (Final Polish)
+    // ---------------------------------------------------------
+    // This runs AFTER the text structures are fixed, expanding keys like "PCs" to "Phonogram cards"
+    formattedText = expandAbbreviations(formattedText);
+
+    // --- Return JSON ---
     return res.json({ 
       text: formattedText, 
       confidence: 0.95 
