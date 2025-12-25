@@ -10,6 +10,7 @@ const GEN_AI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 
 const genAI = new GoogleGenerativeAI(GEN_AI_KEY || "");
 
+// Increase payload limit to handle Base64 images
 router.use(express.json({ limit: "10mb" }));
 
 router.post("/api/ocr-gemini", async (req, res) => {
@@ -26,22 +27,30 @@ router.post("/api/ocr-gemini", async (req, res) => {
     }
 
     // 3. Prepare the Model
-    // 'gemini-1.5-flash' is the fastest and cheapest for OCR tasks.
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    // Using 'gemini-1.5-flash' - currently the best balance of speed/cost for OCR.
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-
-    // This tells Gemini: "Read my messy writing and turn it into clear, correct English."
+    // 4. The "Minimalist Fixer" Prompt
+    // This incorporates your requirements: Fix grammar, keep style, preserve Excel markers.
     const prompt = `
-      You are an expert assistant transcribing a teacher's observation notes.
-      The user has written these notes quickly by hand. 
-      
-      Your job is to:
-      1. Transcribe the handwriting accurately.
-      2. CORRECT all grammar, spelling, and punctuation errors automatically.
-      3. EXPAND shorthand (e.g., convert "stdnts" to "students", "w/" to "with").
-      4. MAKE IT READABLE: Ensure the sentences flow naturally as standard English.
-      
-      Return ONLY the cleaned-up text. Do not add conversational filler.
+      You are an expert handwriting transcriber and strict grammar editor.
+
+      TASK:
+      1. Transcribe the text from the image exactly.
+      2. Fix the grammar and formatting of the transcribed text using the rules below.
+
+      CRITICAL RULES (DATA INTEGRITY):
+      - PRESERVE MARKERS: You must NEVER remove or alter hyphens "-" at the start of lines or tags like "(GA)" or "(WA)". These are critical for placing text into Excel files.
+      - PRESERVE LINE BREAKS: Keep the vertical structure of the notes.
+
+      EDITING RULES (MINIMALIST):
+      - EXPAND SHORTHAND: Convert "tchr" -> "teacher", "stdnts" -> "students", "w/" -> "with".
+      - FIX TENSE & GRAMMAR: Convert "She speak loud" -> "She spoke loudly".
+      - ADD GLUE WORDS: Convert "Students happy" -> "The students were happy".
+      - DO NOT UPGRADE VOCABULARY: If the user wrote "good job", keep it "Good job." Do NOT change it to "Exemplary performance." Keep the tone simple and direct.
+
+      OUTPUT:
+      - Return ONLY the final cleaned text. Do not add conversational filler like "Here is the text."
     `;
 
     // 5. Send to Gemini
@@ -50,7 +59,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
       {
         inlineData: {
           data: imageBase64,
-          mimeType: "image/jpeg", // We send JPEG from frontend
+          mimeType: "image/jpeg", // Ensure the frontend sends this or matches the actual type
         },
       },
     ]);
@@ -66,13 +75,13 @@ router.post("/api/ocr-gemini", async (req, res) => {
       confidence: 0.95 
     });
 
-  } catch (err) {
+  } catch (err: any) {
     console.error("Gemini OCR Error:", err);
     
     // 7. Handle Safety Blocks or API Errors
-    // This ensures your frontend shows the red error box correctly.
     let errorMessage = "Failed to process image with Gemini.";
     
+    // Check if the error is related to safety settings blocking the content
     if (err.message && err.message.includes("SAFETY")) {
       errorMessage = "Gemini blocked this image due to safety filters.";
     }
