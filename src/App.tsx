@@ -56,19 +56,21 @@ const App: React.FC = () => {
     });
 
     // --- 🟢 NEW: Warm-up Logic (Fixes OCR Cold Start) ---
-  const warmUpServices = async () => {
-    try {
-      const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
-      if (MERGE_SERVER_BASE) {
-        // Send a lightweight HEAD request to wake up the Render server
-        fetch(`${MERGE_SERVER_BASE}/api/ocr-azure`, { method: "HEAD" }).catch(() => {});
-        console.log("🚀 OCR Server warm-up signaled...");
+// --- 🟢 NEW: Warm-up Logic (Fixes OCR Cold Start) ---
+    const warmUpServices = async () => {
+      try {
+        const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
+        if (MERGE_SERVER_BASE) {
+          // 🟢 UPDATED: Pointing to the Gemini route
+          // Using "HEAD" is a lightweight way to wake the server without sending data
+          fetch(`${MERGE_SERVER_BASE}/api/ocr-gemini`, { method: "HEAD" }).catch(() => {});
+          console.log("🚀 Gemini OCR Server warm-up signaled...");
+        }
+      } catch (e) {
+        // Silently fail, it's just a background optimization
       }
-    } catch (e) {
-      // Silently fail, it's just a background optimization
-    }
-  };
-  warmUpServices();
+    };
+    warmUpServices();
 
     // --- Network Logic (Fixes the "sticky" badge) ---
     const handleStatusChange = () => setIsOnline(navigator.onLine);

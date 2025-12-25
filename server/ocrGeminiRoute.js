@@ -49,8 +49,14 @@ function expandAbbreviations(text) {
 }
 
 // ---------------------------------------------------------
-// 2. ROUTE HANDLER
+// 2. ROUTE HANDLERS
 // ---------------------------------------------------------
+
+// 🟢 NEW: Allow HEAD requests for warm-up (returns 200 OK immediately)
+// This prevents the console error when the frontend "pings" the server.
+router.head("/api/ocr-gemini", (req, res) => {
+  res.status(200).end();
+});
 
 router.post("/api/ocr-gemini", async (req, res) => {
   try {
