@@ -4,6 +4,8 @@ import express from "express";
 import cors from "cors";
 import fetch from "node-fetch"; 
 import mergeRoutes from "./mergeRoutes.js";
+// 👇 NEW: Import the Gemini Route
+import geminiOcrRoutes from "./ocrGeminiRoute.js";
 
 dotenv.config({ path: ".env.azure" });
 
@@ -12,6 +14,11 @@ dotenv.config({ path: ".env.azure" });
 // -----------------------------------------------------------------
 const AZURE_OCR_ENDPOINT = process.env.AZURE_OCR_ENDPOINT;
 const AZURE_OCR_KEY = process.env.AZURE_OCR_KEY;
+
+// (Optional) We can log if Gemini key is missing too, strictly for debugging
+if (!process.env.GOOGLE_GENERATIVE_AI_KEY) {
+  console.warn("⚠️ GOOGLE_GENERATIVE_AI_KEY is missing in .env.azure");
+}
 
 if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
   console.error("❌ Missing AZURE_OCR_ENDPOINT or AZURE_OCR_KEY in .env.azure");
@@ -30,26 +37,11 @@ const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
 // 🟢 ROBUST CORS SETUP
 app.use(cors({
   origin: function(origin, callback){
-    // Allow requests with no origin (like mobile apps or curl requests)
     if(!origin) return callback(null, true);
+    if (origin.includes('localhost')) return callback(null, true);
+    if (origin.includes('192.168')) return callback(null, true);
+    if (origin === ALLOWED_ORIGIN) return callback(null, true);
 
-    // 1. Allow Localhost (HTTP or HTTPS)
-    if (origin.includes('localhost')) {
-      return callback(null, true);
-    }
-
-    // 2. Allow Local Network IP (HTTP or HTTPS)
-    // 🟢 FIX: Used .includes() instead of .startsWith('http') to allow https://192...
-    if (origin.includes('192.168')) {
-      return callback(null, true);
-    }
-
-    // 3. Allow Production Domain
-    if (origin === ALLOWED_ORIGIN) {
-      return callback(null, true);
-    }
-
-    // Block everything else
     console.log("🚫 Blocked CORS origin:", origin);
     return callback(new Error(`CORS blocked for origin: ${origin}`), false);
   },
@@ -59,8 +51,16 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
-// 3. OCR Endpoint (With Smart Paragraph Logic)
+// 3. Register Routes
 // -----------------------------------------------------------------
+
+// 👇 NEW: Enable the Gemini Route
+// This listens for requests to /api/ocr-gemini
+app.use(geminiOcrRoutes);
+
+
+// 👇 OLD: Azure OCR Endpoint (Kept for reference/backup)
+// This listens for requests to /api/ocr-azure
 app.post("/api/ocr-azure", async (req, res) => {
   if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
       return res.status(500).json({ error: "OCR keys are not configured on the server." });
@@ -115,11 +115,8 @@ app.post("/api/ocr-azure", async (req, res) => {
     // B. SMART GLUE LOGIC
     const text = rawLines.reduce((acc, line) => {
       if (!line) return acc;
-
       const isNewItem = line.startsWith("-") || line.toUpperCase().startsWith("(GA)");
-
       if (acc.length === 0) return line;
-
       if (isNewItem) {
         return `${acc}\n${line}`; 
       } else {
