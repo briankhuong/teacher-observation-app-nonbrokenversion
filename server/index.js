@@ -4,7 +4,7 @@ import express from "express";
 import cors from "cors";
 import fetch from "node-fetch"; 
 import mergeRoutes from "./mergeRoutes.js";
-// 👇 NEW: Import the Gemini Route
+// 👇 Import the new Gemini Route
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
 
 dotenv.config({ path: ".env.azure" });
@@ -14,10 +14,11 @@ dotenv.config({ path: ".env.azure" });
 // -----------------------------------------------------------------
 const AZURE_OCR_ENDPOINT = process.env.AZURE_OCR_ENDPOINT;
 const AZURE_OCR_KEY = process.env.AZURE_OCR_KEY;
+const GEMINI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 
-// (Optional) We can log if Gemini key is missing too, strictly for debugging
-if (!process.env.GOOGLE_GENERATIVE_AI_KEY) {
-  console.warn("⚠️ GOOGLE_GENERATIVE_AI_KEY is missing in .env.azure");
+// Log warnings if keys are missing
+if (!GEMINI_KEY) {
+  console.warn("⚠️ GOOGLE_GENERATIVE_AI_KEY is missing in .env.azure. Gemini OCR will fail.");
 }
 
 if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
@@ -38,6 +39,8 @@ const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
 app.use(cors({
   origin: function(origin, callback){
     if(!origin) return callback(null, true);
+    
+    // Allow Localhost, Local Network (192.168...), and Production
     if (origin.includes('localhost')) return callback(null, true);
     if (origin.includes('192.168')) return callback(null, true);
     if (origin === ALLOWED_ORIGIN) return callback(null, true);
@@ -48,19 +51,18 @@ app.use(cors({
   credentials: false,
 }));
 
+// Increase limit for Base64 image payloads
 app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
 // 3. Register Routes
 // -----------------------------------------------------------------
 
-// 👇 NEW: Enable the Gemini Route
-// This listens for requests to /api/ocr-gemini
+// 👇 Enable the Gemini Route (mounts /api/ocr-gemini)
 app.use(geminiOcrRoutes);
 
 
-// 👇 OLD: Azure OCR Endpoint (Kept for reference/backup)
-// This listens for requests to /api/ocr-azure
+// 👇 Azure OCR Endpoint (Kept for reference/backup)
 app.post("/api/ocr-azure", async (req, res) => {
   if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
       return res.status(500).json({ error: "OCR keys are not configured on the server." });
@@ -112,7 +114,7 @@ app.post("/api/ocr-azure", async (req, res) => {
       }
     }
 
-    // B. SMART GLUE LOGIC
+    // Azure "Simple Glue" Logic
     const text = rawLines.reduce((acc, line) => {
       if (!line) return acc;
       const isNewItem = line.startsWith("-") || line.toUpperCase().startsWith("(GA)");
