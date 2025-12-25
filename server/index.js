@@ -31,7 +31,7 @@ const app = express();
 
 // 👇 PRODUCTION URL (Update this if your Vercel URL changes)
 const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
-    ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app/' 
+    ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
     : 'http://localhost:5173'; 
 
 // 🟢 ROBUST CORS SETUP
