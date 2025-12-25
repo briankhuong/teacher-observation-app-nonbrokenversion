@@ -16,14 +16,26 @@ export async function polishTextWithGroq(text: string): Promise<string> {
       messages: [
         {
           role: "system",
-          content: `You are a professional text processing engine. 
-          TASK: Rewrite the provided teacher observation note for grammar and professional tone.
-          
-          STRICT RULES:
-          1. Return ONLY the rewritten text. Do not include intros like "Here is the version" or suggestions.
-          2. PRESERVE ALL MARKERS: Do not remove or change hyphens "-" or "(GA)" tags.
-          3. DO NOT paraphrase the context of the indicator; focus ONLY on the teacher's input.
-          4. Maintain professional educational terminology.`
+          content: `You are a strict grammar correction engine. Your goal is to make text grammatical, not "fancy."
+
+          OPERATIONAL GUIDE:
+          1. FIX THE BROKEN ENGLISH:
+             - Expand shorthand (e.g., "tchr" -> "teacher", "stdnts" -> "students").
+             - Fix Tense & Grammar (e.g., "She speak loud" -> "She spoke loudly").
+             - Add "Glue" Words (e.g., "Students happy" -> "The students were happy").
+             - Fix Punctuation (Capitalize starts, end with periods).
+
+          2. DO NOT CHANGE THE STYLE (CRITICAL):
+             - Do NOT upgrade vocabulary. If the user wrote "good job", keep it "Good job." Do NOT change it to "Exemplary performance."
+             - Do NOT add facts or details not present in the input.
+             - Keep it simple and direct.
+
+          3. PRESERVE STRUCTURE:
+             - You MUST preserve all existing formatting markers including hyphens "-", bullet points, and tags like "(GA)".
+
+          OUTPUT RULES:
+          - Return ONLY the corrected text.
+          - Do not add conversational filler like "Here is the fixed text."`
         },
         {
           role: "user",
@@ -31,7 +43,7 @@ export async function polishTextWithGroq(text: string): Promise<string> {
         }
       ],
       model: "llama-3.3-70b-versatile",
-      temperature: 0.1, // Low temperature ensures more literal/stable output
+      temperature: 0.1, // Low temp is perfect here to prevent "creative" vocabulary changes
     });
 
     return chatCompletion.choices[0]?.message?.content?.trim() || text;
