@@ -10,7 +10,6 @@ const GEN_AI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 
 const genAI = new GoogleGenerativeAI(GEN_AI_KEY || "");
 
-// Increase payload limit to handle Base64 images
 router.use(express.json({ limit: "10mb" }));
 
 router.post("/api/ocr-gemini", async (req, res) => {
@@ -27,30 +26,27 @@ router.post("/api/ocr-gemini", async (req, res) => {
     }
 
     // 3. Prepare the Model
-    // Using 'gemini-1.5-flash' - currently the best balance of speed/cost for OCR.
+    // 'gemini-1.5-flash' is the fastest and cheapest for OCR tasks.
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // 4. The "Minimalist Fixer" Prompt
-    // This incorporates your requirements: Fix grammar, keep style, preserve Excel markers.
+
+    // This tells Gemini: "Read my messy writing, fix the English, but DON'T break the Excel formatting."
     const prompt = `
-      You are an expert handwriting transcriber and strict grammar editor.
-
+      You are an expert assistant transcribing a teacher's observation notes.
+      
       TASK:
-      1. Transcribe the text from the image exactly.
-      2. Fix the grammar and formatting of the transcribed text using the rules below.
+      1. Transcribe the handwriting accurately from the image.
+      2. Fix grammar, spelling, and tense (e.g., "She speak" -> "She spoke").
+      3. Expand shorthand (e.g., "tchr" -> "teacher").
+      4. Keep the tone SIMPLE. Do not upgrade vocabulary (e.g., keep "good job", do NOT change to "exemplary").
 
-      CRITICAL RULES (DATA INTEGRITY):
-      - PRESERVE MARKERS: You must NEVER remove or alter hyphens "-" at the start of lines or tags like "(GA)" or "(WA)". These are critical for placing text into Excel files.
-      - PRESERVE LINE BREAKS: Keep the vertical structure of the notes.
+      CRITICAL DATA INTEGRITY RULES:
+      - You must PRESERVE all structure markers exactly as they appear.
+      - NEVER remove a hyphen "-" at the start of a line.
+      - NEVER remove or change tags like "(GA)", "(WA)", etc. 
+      - These markers are required for the text to load correctly into Excel files.
 
-      EDITING RULES (MINIMALIST):
-      - EXPAND SHORTHAND: Convert "tchr" -> "teacher", "stdnts" -> "students", "w/" -> "with".
-      - FIX TENSE & GRAMMAR: Convert "She speak loud" -> "She spoke loudly".
-      - ADD GLUE WORDS: Convert "Students happy" -> "The students were happy".
-      - DO NOT UPGRADE VOCABULARY: If the user wrote "good job", keep it "Good job." Do NOT change it to "Exemplary performance." Keep the tone simple and direct.
-
-      OUTPUT:
-      - Return ONLY the final cleaned text. Do not add conversational filler like "Here is the text."
+      Return ONLY the cleaned-up text. Do not add conversational filler.
     `;
 
     // 5. Send to Gemini
@@ -59,7 +55,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
       {
         inlineData: {
           data: imageBase64,
-          mimeType: "image/jpeg", // Ensure the frontend sends this or matches the actual type
+          mimeType: "image/jpeg", // We send JPEG from frontend
         },
       },
     ]);
@@ -75,13 +71,13 @@ router.post("/api/ocr-gemini", async (req, res) => {
       confidence: 0.95 
     });
 
-  } catch (err: any) {
+  } catch (err) {
     console.error("Gemini OCR Error:", err);
     
     // 7. Handle Safety Blocks or API Errors
+    // This ensures your frontend shows the red error box correctly.
     let errorMessage = "Failed to process image with Gemini.";
     
-    // Check if the error is related to safety settings blocking the content
     if (err.message && err.message.includes("SAFETY")) {
       errorMessage = "Gemini blocked this image due to safety filters.";
     }
