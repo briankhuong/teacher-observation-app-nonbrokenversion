@@ -533,7 +533,7 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
       console.log(`OCR Attempt ${attempt}/${MAX_RETRIES}...`);
       const imageBase64 = await strokesToPngBase64(strokes);
 
-      const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-azure`, {
+      const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ imageBase64 }),
