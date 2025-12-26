@@ -1,4 +1,3 @@
-// server/index.js
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
@@ -22,7 +21,7 @@ if (!GEMINI_KEY) {
 }
 
 if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
-  console.error("❌ Missing AZURE_OCR_ENDPOINT or AZURE_OCR_KEY in .env.azure");
+  console.warn("⚠️ AZURE_OCR keys missing. The /api/ocr-azure route will fail if used.");
 }
 
 // -----------------------------------------------------------------
@@ -58,11 +57,11 @@ app.use(express.json({ limit: "10mb" }));
 // 3. Register Routes
 // -----------------------------------------------------------------
 
-// 👇 Enable the Gemini Route (mounts /api/ocr-gemini)
+// 👇 A. Enable the Gemini Route (mounts /api/ocr-gemini)
 app.use(geminiOcrRoutes);
 
 
-// 👇 Azure OCR Endpoint (Kept for reference/backup)
+// 👇 B. Azure OCR Endpoint (Kept for reference/backup)
 app.post("/api/ocr-azure", async (req, res) => {
   if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
       return res.status(500).json({ error: "OCR keys are not configured on the server." });
@@ -138,13 +137,17 @@ app.post("/api/ocr-azure", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------------
-// 4. Merge Routes & Start Server
-// -----------------------------------------------------------------
+// 👇 C. Merge Routes (Excel Logic)
 app.use(mergeRoutes); 
+
+// -----------------------------------------------------------------
+// 4. Start Server
+// -----------------------------------------------------------------
 
 const PORT = process.env.OCR_SERVER_PORT || 4000;
 
 app.listen(PORT, () => {
   console.log(`✅ Main server (OCR/Merge) running at http://localhost:${PORT}`);
+  console.log(`   - Gemini OCR: /api/ocr-gemini`);
+  console.log(`   - Azure OCR:  /api/ocr-azure (Backup)`);
 });
