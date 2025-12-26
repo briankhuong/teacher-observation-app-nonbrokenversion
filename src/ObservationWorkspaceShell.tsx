@@ -2,13 +2,12 @@
 import { exportTeacherExcel } from "./exportTeacherExcel";
 import { CanvasPad } from "./CanvasPad";
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { exportAdminExcel } from "./exportAdminExcel"; // ← NEW
-//import { buildAdminExportModel, type AdminExportModel } from "./exportAdminModel";
+import { exportAdminExcel } from "./exportAdminExcel"; 
 import { emailTeacherReport } from "./emailTeacherReport";
 
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
-const DEFAULT_CANVAS_HEIGHT = 300; // Default height for the canvas pad
-const MIN_CANVAS_HEIGHT = 100; // Minimum height for the canvas pad
+const DEFAULT_CANVAS_HEIGHT = 300; 
+const MIN_CANVAS_HEIGHT = 100; 
 
 const TEXTAREA_HEIGHT_STORAGE_KEY = "textarea-height";
 const DEFAULT_TEXTAREA_HEIGHT = 120;
@@ -57,6 +56,7 @@ function setPersistedTextareaHeight(height: number) {
 }
 
 const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
+
 import {
   loadObservationFromDb,
   saveObservationToDb,
@@ -71,7 +71,7 @@ import type {
 
 import { buildTeacherExportModel } from "./exportTeacherModel";
 import { buildAdminExportModel } from "./exportAdminModel";
-import type { AdminExportModel, AdminExportRow } from "./exportAdminModel";
+import type { AdminExportModel } from "./exportAdminModel";
 import { polishTextWithGroq, polishBatchWithGroq } from "./utils/gemini";
 
 interface ObservationWorkspaceProps {
@@ -83,29 +83,25 @@ interface ObservationWorkspaceProps {
     unit: string;
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
-     date: string; // NEW: actual observation date "YYYY-MM-DD"
+    date: string; 
   };
   onBack: () => void;
- isOnline: boolean;
-  // 🟢 ADD THESE TWO LINES TO FIX THE ERRORS
+  isOnline: boolean;
   isSyncing: boolean;
   setIsSyncing: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
-// OCR result from handwriting conversionfv
 interface OcrResult {
   text: string;
   confidence: number;
 }
 
-// One point in a stroke
 interface StrokePoint {
   x: number;
   y: number;
   pressure: number;
 }
 
-// One stroke drawn on canvas
 interface Stroke {
   color: string;
   size: number;
@@ -113,21 +109,6 @@ interface Stroke {
   mode: "pen" | "eraser";
 }
 
-// For future OCR integration
-// One stroke drawn on canvas
-interface Stroke {
-  color: string;
-  size: number;
-  points: StrokePoint[];
-  mode: "pen" | "eraser";
-}
-
-interface OcrResult {
-  text: string;
-  confidence: number;
-}
-
-// One indicator's state in the workspace
 interface IndicatorState {
   id: string;
   number: string;
@@ -140,33 +121,13 @@ interface IndicatorState {
   favorite: boolean;
   commentText: string;
   strokes: Stroke[];
-
-  // 🔍 OCR metadata
   ocrUsed?: boolean;
   ocrLastRunAt?: number | null;
-  ocrLastConfidence?: number | null; // later when we have real OCR
-  ocrPendingReview?: boolean;        // true = show yellow highlight
-  includeInTrainerSummary?: boolean;  // true = include this indicator in trainer summary
-  // 🤖 AI metadata (NEW)
+  ocrLastConfidence?: number | null; 
+  ocrPendingReview?: boolean;        
+  includeInTrainerSummary?: boolean;  
   aiPendingReview?: boolean;
 }
-
-// interface SavedObservationPayload {
-//   id: string;
-//   meta: {
-//     teacherName: string;
-//     schoolName: string;
-//     campus: string;
-//     unit: string;
-//     lesson: string;
-//     supportType: "Training" | "LVA" | "Visit";
-//     date: string; // NEW
-//   };
-//   indicators: IndicatorState[];
-//   status: "draft" | "saved";
-//   updatedAt: number;
-//   scratchpadText?: string; // 🆕 optional for old records
-// }
 
 interface SavedObservationPayload {
   id: string;
@@ -178,13 +139,9 @@ interface SavedObservationPayload {
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
     date: string;
-
-    // ✅ keep stable links (optional)
     teacherWorkbookUrl?: string | null;
     adminWorkbookUrl?: string | null;
     adminWorkbookViewUrl?: string | null;
-
-    // ✅ keep merge results (optional)
     mergedTeacher?: { url: string; sheetName?: string; mergedAt?: string } | null;
     mergedAdmin?: { url: string; sheetName?: string; mergedAt?: string } | null;
   };
@@ -199,9 +156,6 @@ interface SavedObservationPayload {
 
 const STORAGE_PREFIX = "obs-v1-";
 
-
-// TEMP: a small subset of indicators just so Phase 2 works.
-// Later we’ll replace this with your full cleaned list.
 const INITIAL_INDICATORS: IndicatorState[] = [
   {
     id: "ind-1",
@@ -215,7 +169,6 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     commentText: "",
     strokes: [],
     favorite: false,  
-
   },
   {
     id: "ind-2",
@@ -229,7 +182,6 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     commentText: "",
     strokes: [],
     favorite: false,  
-
   },
   {
     id: "ind-3",
@@ -243,12 +195,11 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     growth: false,
     commentText: "",
     strokes: [],
-
   },
   {
     id: "ind-4",
     number: "2.1.– 2.2",
-    title: "Classroom Routines  & Management Strategies",
+    title: "Classroom Routines & Management Strategies",
     description: "- Routines are well-planned, effectively taught/modeled, and consistently reinforced. - Effective strategies create a predictable, positive learning environment.",
     hasPreComment: false,
     preComment: undefined,
@@ -274,7 +225,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
   {
     id: "ind-6",
     number: "3.1",
-    title: "Utilizing Lession Plans",
+    title: "Utilizing Lesson Plans",
     description: "Follows lesson plans with precision and adapts only when needed to support learning.",
     hasPreComment: true,
     preComment: "You managed to follow all instructions in the lesson plan.",
@@ -442,7 +393,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
   },
 ];
 
-// 🟢 UPDATED: Uses JPEG compression (0.7) to significantly reduce payload size and prevent timeouts.
+// 🟢 UPDATED: Includes RESIZING to max 1024px width + JPEG Compression
 async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
   if (!strokes.length) {
     throw new Error("No strokes to convert");
@@ -454,7 +405,7 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
     throw new Error("2D canvas not supported");
   }
 
-  // Compute bounds so we don’t create a huge blank image
+  // 1. Calculate Bounds
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
   for (const stroke of strokes) {
@@ -471,25 +422,45 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
   }
 
   const margin = 20;
-  const width = Math.max(1, Math.round(maxX - minX + margin * 2));
-  const height = Math.max(1, Math.round(maxY - minY + margin * 2));
+  const originalWidth = Math.max(1, Math.round(maxX - minX + margin * 2));
+  const originalHeight = Math.max(1, Math.round(maxY - minY + margin * 2));
 
-  canvas.width = width;
-  canvas.height = height;
+  // 2. Calculate Scale Factor (Downscale if width > 1024px)
+  const MAX_WIDTH = 1024;
+  let scale = 1;
+  if (originalWidth > MAX_WIDTH) {
+    scale = MAX_WIDTH / originalWidth;
+  }
 
-  // 🛡️ BACKGROUND: Must be solid for JPEG (JPEG doesn't support transparency)
+  // 3. Set Canvas Dimensions (Applied Scale)
+  canvas.width = originalWidth * scale;
+  canvas.height = originalHeight * scale;
+
+  // 4. Draw Background (Solid Color for JPEG)
+  // Use the exact dark color from the app theme so strokes look correct
   ctx.fillStyle = "#020617";
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // 5. Apply Scaling to the Context
+  // This automatically shrinks all drawing operations below
+  ctx.scale(scale, scale);
+
+  // 6. Draw Strokes
+  // We draw them as if they were the original size, shifted by minX/minY.
+  // The ctx.scale() above handles the shrinking.
   for (const stroke of strokes) {
     if (!stroke.points.length) continue;
     ctx.beginPath();
+    
     const first = stroke.points[0];
     ctx.moveTo(first.x - minX + margin, first.y - minY + margin);
+    
     for (let i = 1; i < stroke.points.length; i++) {
       const p = stroke.points[i];
       ctx.lineTo(p.x - minX + margin, p.y - minY + margin);
     }
+    
+    // Scale line width too, otherwise thin lines might disappear when shrunk
     ctx.lineWidth = stroke.size || 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -497,22 +468,17 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
     ctx.stroke();
   }
 
-  /**
-   * 🟢 FINAL FIX: PERFORMANCE OPTIMIZATION
-   * Old: canvas.toBlob(..., "image/png") -> Very slow, large file.
-   * New: canvas.toDataURL(..., 0.7) -> Instant, tiny file (JPEG).
-   */
+  // 7. Export Compressed JPEG
   const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
   
-  // Remove the "data:image/jpeg;base64," prefix to get raw base64
+  // Remove prefix
   const base64 = dataUrl.split(",")[1];
   
   return base64;
 }
 
 /**
- * 🟢 REVISED: runOcrOnStrokes with Automatic Retry logic
- * Handles the "Cold Start" by trying again if the first connection fails.
+ * runOcrOnStrokes with Automatic Retry logic
  */
 async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
   if (!MERGE_SERVER_BASE) {
@@ -525,12 +491,13 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const controller = new AbortController();
-    // 15s timeout for first attempt, 20s for the second
     const timeoutDuration = attempt === 1 ? 15000 : 20000;
     const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
 
     try {
       console.log(`OCR Attempt ${attempt}/${MAX_RETRIES}...`);
+      
+      // 🟢 The optimization happens here inside strokesToPngBase64
       const imageBase64 = await strokesToPngBase64(strokes);
 
       const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-gemini`, {
@@ -559,34 +526,24 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
       
       console.warn(`OCR Attempt ${attempt} failed: ${lastError}`);
       
-      // If it's the last attempt, don't wait, just exit the loop
       if (attempt < MAX_RETRIES) {
-        // Small 1-second delay before trying again to let the server breathe
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
   }
 
-  // If we reach here, all retries failed
   return { 
     text: `Error: OCR failed after ${MAX_RETRIES} attempts. (${lastError})`, 
     confidence: 0 
   };
 }
 
-
-// Normalize indicators coming from DB or localStorage so we always have an array
 function normalizeIndicators(raw: any): any[] {
   if (Array.isArray(raw)) return raw;
-
-  // Some legacy shapes might be { indicators: [...] }
   if (raw && Array.isArray(raw.indicators)) return raw.indicators;
-
-  // {} / null / undefined → start from empty
   return [];
 }
 
-// 🛡️ Helper: Determine if the workspace has ACTUAL user progress
 function hasUserProgress(indicators: IndicatorState[]): boolean {
   return indicators.some(ind => {
     const hasMark = ind.good || ind.growth || ind.favorite;
@@ -596,52 +553,36 @@ function hasUserProgress(indicators: IndicatorState[]): boolean {
   });
 }
 
-
 export const ObservationWorkspaceShell: React.FC<
   ObservationWorkspaceProps
 > = ({ observationMeta, onBack, isOnline, isSyncing, setIsSyncing }) => {
   const { teacherName, schoolName, campus, unit, lesson, supportType, date } =
     observationMeta;
 
-
-
-// Inside ObservationWorkspaceShell component
-// Batch Polish State
 const [showBatchModal, setShowBatchModal] = useState(false);
 const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
 const [isAiPolishing, setIsAiPolishing] = useState(false);
 const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
 
-// NEW: Input Control States
-const [isCanvasVisible, setIsCanvasVisible] = useState(true); // NEW: collapse state
-// NEW: Textarea Resizing State
+const [isCanvasVisible, setIsCanvasVisible] = useState(true); 
 const [textAreaHeight, setTextAreaHeight] = useState(getPersistedTextareaHeight);
 const [isTextareaResizing, setIsTextareaResizing] = useState(false);
 const textareaRef = useRef<HTMLTextAreaElement>(null);
-const startYTextareaRef = useRef(0);
-const startHeightTextareaRef = useRef(0);
 
-// NEW: Canvas Resizing Logic
 const [canvasHeight, setCanvasHeight] = useState(getPersistedCanvasHeight);
 const [isResizing, setIsResizing] = useState(false);
 const canvasWrapperRef = useRef<HTMLDivElement>(null);
 const startYRef = useRef(0);
 const startHeightRef = useRef(0);
 
-// Unified resize event handler for both mouse and touch
 const doCanvasResize = useCallback(
   (e: MouseEvent | TouchEvent) => {
     if (!isResizing || !canvasWrapperRef.current) return;
-
     const currentY =
       (e as MouseEvent).clientY ?? (e as TouchEvent).touches[0].clientY;
     
-    // We resize from the top of the canvas, so the new height is based on the 
-    // current mouse/touch position relative to the top of the wrapper.
     const rect = canvasWrapperRef.current.getBoundingClientRect();
     let newHeight = currentY - rect.top;
-
-    // Apply minimum height constraint
     newHeight = Math.max(MIN_CANVAS_HEIGHT, newHeight);
 
     setCanvasHeight(newHeight);
@@ -649,24 +590,19 @@ const doCanvasResize = useCallback(
   [isResizing]
 );
 
-// End canvas resize and save height
 const stopCanvasResize = useCallback(() => {
   if (isResizing) {
     setIsResizing(false);
     setPersistedCanvasHeight(canvasHeight);
-    // Optional: force a resize event for other components to adapt
     window.dispatchEvent(new Event("resize"));
   }
 }, [isResizing, canvasHeight]);
 
-// Start canvas resize and capture initial state
 const startCanvasResize = useCallback(
   (e: React.MouseEvent | React.TouchEvent) => {
-    // Only process left mouse button (0) or a touch event
     const isMouseEvent = (e as React.MouseEvent).button !== undefined;
     if (isMouseEvent && (e as React.MouseEvent).button !== 0) return;
     
-    // Prevent default touch behavior (e.g., scrolling)
     if ((e as React.TouchEvent).touches) {
       e.preventDefault();
     }
@@ -675,13 +611,12 @@ const startCanvasResize = useCallback(
       (e as React.MouseEvent).clientY ?? (e as React.TouchEvent).touches[0].clientY;
 
     startYRef.current = currentY;
-    startHeightRef.current = canvasHeight; // Use the state's current height
+    startHeightRef.current = canvasHeight; 
     setIsResizing(true);
   },
   [canvasHeight]
 );
 
-// Unified resize event handler for both mouse and touch (TEXTAREA)
 const doTextareaResize = useCallback(
   (e: MouseEvent | TouchEvent) => {
     if (!isTextareaResizing || !textareaRef.current) return;
@@ -689,12 +624,9 @@ const doTextareaResize = useCallback(
     const currentY =
       (e as MouseEvent).clientY ?? (e as TouchEvent).touches[0].clientY;
 
-    // We resize from the top of the textarea, so new height is currentY minus the top of the textarea wrapper.
-    // The handle is below the textarea, so we calculate height from the top of the textarea to the mouse position.
     const rect = textareaRef.current.getBoundingClientRect();
     let newHeight = currentY - rect.top;
 
-    // Apply minimum height constraint
     newHeight = Math.max(MIN_TEXTAREA_HEIGHT, newHeight);
 
     setTextAreaHeight(newHeight);
@@ -702,7 +634,6 @@ const doTextareaResize = useCallback(
   [isTextareaResizing]
 );
 
-// End textarea resize and save height
 const stopTextareaResize = useCallback(() => {
   if (isTextareaResizing) {
     setIsTextareaResizing(false);
@@ -710,14 +641,11 @@ const stopTextareaResize = useCallback(() => {
   }
 }, [isTextareaResizing, textAreaHeight]);
 
-// Start textarea resize and capture initial state
 const startTextareaResize = useCallback(
   (e: React.MouseEvent | React.TouchEvent) => {
-    // Only process left mouse button (0) or a touch event
     const isMouseEvent = (e as React.MouseEvent).button !== undefined;
     if (isMouseEvent && (e as React.MouseEvent).button !== 0) return;
 
-    // Prevent default touch behavior (e.g., scrolling)
     if ((e as React.TouchEvent).touches) {
       e.preventDefault();
     }
@@ -727,9 +655,7 @@ const startTextareaResize = useCallback(
   []
 );
 
-// Global event listeners for drag control continuity
 useEffect(() => {
-  // Canvas resize listeners
   if (isResizing) {
     window.addEventListener("mousemove", doCanvasResize);
     window.addEventListener("mouseup", stopCanvasResize);
@@ -737,7 +663,6 @@ useEffect(() => {
     window.addEventListener("touchend", stopCanvasResize);
   }
 
-  // Textarea resize listeners
   if (isTextareaResizing) {
     window.addEventListener("mousemove", doTextareaResize);
     window.addEventListener("mouseup", stopTextareaResize);
@@ -746,7 +671,6 @@ useEffect(() => {
   }
 
   return () => {
-    // Cleanup listeners
     window.removeEventListener("mousemove", doCanvasResize);
     window.removeEventListener("mouseup", stopCanvasResize);
     window.removeEventListener("touchmove", doCanvasResize);
@@ -764,14 +688,11 @@ useEffect(() => {
 const [indicators, setIndicators] =
   useState<IndicatorState[]>(INITIAL_INDICATORS);
 const [activeIndex, setActiveIndex] = useState(0);
-// Observation-level status: "draft" (editable) or "saved" (completed/locked)
   const [observationStatus, setObservationStatus] = useState<"draft" | "saved">(
     "draft"
   );
-  // For the little "saved at" label (existing behaviour)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
   const isLocked = observationStatus === "saved";
-// 👇 UPDATE 2: Add State for Global Flags
   const [isGood, setIsGood] = useState(false);
   const [isBad, setIsBad] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -783,7 +704,6 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
 );
 
 
-  // Track which indicator descriptions are expanded
   const [expandedDesc, setExpandedDesc] = useState<Record<string, boolean>>({});
   const [scratchpadText, setScratchpadText] = useState<string>("");
   const [showScratchpad, setShowScratchpad] = useState(false);
@@ -791,7 +711,6 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const [showExportPreview, setShowExportPreview] = useState(false);
   const [exportPreview, setExportPreview] = useState<TeacherExportModel | null>(null);
-  //admin preview
   const [showAdminPreview, setShowAdminPreview] = useState(false);
   const [adminPreview, setAdminPreview] = useState<AdminExportModel | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
@@ -809,17 +728,10 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
   const active =
   indicators[activeIndex] ?? indicators[0] ?? INITIAL_INDICATORS[0];
 
-
-// @reference: src/ObservationWorkspaceShell.tsx (Replace the load useEffect)
-
-// @reference: src/ObservationWorkspaceShell.tsx
-
-// 🟢 EFFECT A: Standard Offline-First Loading
 useEffect(() => {
   let cancelled = false;
 
   async function load() {
-    // 1️⃣ Get Local Data (Fastest)
     let localData: SavedObservationPayload | null = null;
     try {
       const raw = localStorage.getItem(storageKey);
@@ -827,14 +739,12 @@ useEffect(() => {
     } catch (err) { console.error("Local read error", err); }
 
     try {
-      // 2️⃣ Get Cloud Data
       const row = await loadObservationFromDb(observationMeta.id);
       if (cancelled) return;
 
       const dbUpdatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
       const localUpdatedAt = localData?.updatedAt ?? 0;
 
-      // 3️⃣ Conflict Resolution: Trust whichever is NEWER
       if (localData && localUpdatedAt > dbUpdatedAt) {
         console.log("Using newer local data.");
         setIndicators(localData.indicators);
@@ -846,7 +756,6 @@ useEffect(() => {
         return; 
       }
 
-      // Otherwise, use Cloud Data
       const normalizedFromDb = normalizeIndicators(row.indicators);
       setIndicators(normalizedFromDb.length > 0 ? normalizedFromDb : INITIAL_INDICATORS);
       setObservationStatus(row.status ?? "draft");
@@ -856,7 +765,6 @@ useEffect(() => {
       setIsFavorite(row.is_favorite ?? false);
 
     } catch (err) {
-      // ❌ Offline Fallback: If cloud fails, use local
       console.warn("Offline: Using local backup.");
       if (localData && !cancelled) {
         setIndicators(localData.indicators);
@@ -874,17 +782,15 @@ useEffect(() => {
   return () => { cancelled = true; };
 }, [storageKey, observationMeta.id]);
 
-// 🟢 EFFECT: Auto-Sync when Internet Returns (Simple & Robust)
 useEffect(() => {
   if (isOnline && observationMeta.id) {
     const performSync = async () => {
       try {
         const raw = localStorage.getItem(storageKey);
-        if (!raw) return; // Nothing locally to sync
+        if (!raw) return; 
 
         const localData: SavedObservationPayload = JSON.parse(raw);
         
-        // 🚀 SIMPLE SYNC: No complex checks. If data exists, sync it.
         setIsSyncing(true); 
         
         await saveObservationToDb({
@@ -909,7 +815,6 @@ useEffect(() => {
 
 const persistObservation = React.useCallback(
   async (payload: SavedObservationPayload) => {
-    // 1️⃣ Local Save (Always safe)
     try {
       localStorage.setItem(storageKey, JSON.stringify(payload));
       setLastSavedAt(payload.updatedAt); 
@@ -917,7 +822,6 @@ const persistObservation = React.useCallback(
       console.error("Failed to write to localStorage", err);
     }
 
-    // 2️⃣ Cloud Sync (Attempt if online)
     try {
       await saveObservationToDb({
         id: payload.id,
@@ -932,8 +836,6 @@ const persistObservation = React.useCallback(
   },
   [storageKey]
 );
-
-// @reference: src/ObservationWorkspaceShell.tsx
 
 useEffect(() => {
   if (!observationMeta.id) return;
@@ -966,24 +868,13 @@ useEffect(() => {
   isGood, isBad, isFavorite, persistObservation
 ]);
 
-
-  // How many indicators have any value (good/growth/comment/strokes)
-    const progressCount = indicators.filter((ind) => {
-    const hasMark = ind.good || ind.growth;
-    const hasComment = ind.commentText.trim().length > 0;
-    const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
-    return hasMark || hasComment || hasInk;
-  }).length;
-
-// 1. The "Pre-Flight" Check
   const handleBatchPolishClick = () => {
-    // Find indicators that have text but haven't been polished yet
     const candidates = indicators
       .filter(
         (ind) =>
-          ind.commentText.trim().length > 3 && // Has meaningful text
-          !ind.aiPendingReview &&             // Not already polished
-          !ind.ocrPendingReview               // Not waiting for OCR check
+          ind.commentText.trim().length > 3 && 
+          !ind.aiPendingReview &&             
+          !ind.ocrPendingReview               
       )
       .map(ind => ({
         id: ind.id,
@@ -1001,25 +892,18 @@ useEffect(() => {
     setShowBatchModal(true);
   };
 
-  // 2. The Execution
-// @reference: src/ObservationWorkspaceShell.tsx -> executeBatchPolish
-
 const executeBatchPolish = async () => {
   setIsAiPolishing(true);
   setShowBatchModal(false); 
 
   try {
-    // 🟢 REVISED: Map only the ID and the TEXT.
-    // By removing 'title: c.title', the AI has no context to paraphrase.
     const batchItems = batchCandidates.map(c => ({
       id: c.id,
       text: c.text 
     }));
 
-    // 2. Call the updated Groq utility
     const results = await polishBatchWithGroq(batchItems);
 
-    // 3. Update indicators
     setIndicators(prev => prev.map(ind => {
       const polishedText = results[ind.id];
       if (polishedText) {
@@ -1039,7 +923,7 @@ const executeBatchPolish = async () => {
     setIsAiPolishing(false);
   }
 };
-const handleManualSave = async () => { // async keyword kept for compatibility, but logical flow changes
+const handleManualSave = async () => { 
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
       setCanvasDirty(false);
@@ -1054,10 +938,7 @@ const handleManualSave = async () => { // async keyword kept for compatibility, 
       isGood, isBad, isFavorite,
     };
 
-    // 🟢 NEW: Fire and forget (LocalStorage handles the safety)
     persistObservation(payload); 
-    
-    // UI Feedback is now handled inside persistObservation's local step
   };
 
 const handleAdminReviewSave = async () => {
@@ -1066,20 +947,15 @@ const handleAdminReviewSave = async () => {
       return;
     }
 
-    // 1. Get the translated summary from the current adminPreview state
     const translatedSummary = adminPreview.trainerSummary;
 
     try {
-      // 2. Save it to the database
       await saveAdminSummaryToDb(observationMeta.id, translatedSummary);
 
-      // 3. Update the local observation state with the newly saved text
-      // This ensures the preview stays consistent without a reload
       if (typeof setAdminSummaryVN === 'function') {
           setAdminSummaryVN(translatedSummary);
       }
 
-      // 4. Success feedback
       alert("✅ Translated Summary Saved to Database!");
     } catch (err) {
       console.error("Admin Review Save failed", err);
@@ -1087,10 +963,7 @@ const handleAdminReviewSave = async () => {
     }
   };
 
-// @reference: src/ObservationWorkspaceShell.tsx
-
 const handleBackToDashboard = () => {
-    // Simple Save & Exit
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
       meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
@@ -1104,66 +977,29 @@ const handleBackToDashboard = () => {
     persistObservation(payload);
     onBack();
 };
-const handleMarkCompleted = async () => {
-  if (isLocked) return;
+const handleToggleLock = () => { 
+    if (canvasDirty) {
+      handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+      setCanvasDirty(false);
+    }
 
-  // Flush unsaved strokes
-  if (canvasDirty) {
-    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-    setCanvasDirty(false);
-  }
+    const nextStatus: "draft" | "saved" =
+      observationStatus === "draft" ? "saved" : "draft";
 
-  const payload: SavedObservationPayload = {
-    id: observationMeta.id,
-    meta: {
-      teacherName,
-      schoolName,
-      campus,
-      unit,
-      lesson,
-      supportType,
-      date,
-    },
-    indicators,
-    status: "saved",
-    updatedAt: Date.now(),
-    scratchpadText,
+    const payload: SavedObservationPayload = {
+      id: observationMeta.id,
+      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      indicators,
+      status: nextStatus,
+      updatedAt: Date.now(),
+      scratchpadText,
+      isGood, isBad, isFavorite,
+    };
+
+    persistObservation(payload);
+
+    setObservationStatus(nextStatus);
   };
-
-  setObservationStatus("saved");
-  setSaveStatus("saved");
-  setLastSavedAt(payload.updatedAt);
-  await persistObservation(payload);
-};
-
-const handleReopenDraft = async () => {
-  if (!isLocked) return;
-
-  const payload: SavedObservationPayload = {
-    id: observationMeta.id,
-    meta: {
-      teacherName,
-      schoolName,
-      campus,
-      unit,
-      lesson,
-      supportType,
-      date,
-    },
-    indicators,
-    status: "draft",
-    updatedAt: Date.now(),
-    scratchpadText,
-    isGood,
-      isBad,
-      isFavorite,
-  };
-
-  setObservationStatus("draft");
-  setSaveStatus("saved");
-  setLastSavedAt(payload.updatedAt);
-  await persistObservation(payload);
-};
 
 const handleEmailTeacher = async () => {
   if (canvasDirty) {
@@ -1171,8 +1007,6 @@ const handleEmailTeacher = async () => {
     setCanvasDirty(false);
   }
 
-  // You probably already have teacher email in meta in a later phase.
-  // For now we pull it from meta if present, or prompt as fallback.
   const emailFromMeta =
     (observationMeta as any).teacherEmail ||
     (observationMeta as any).email ||
@@ -1238,8 +1072,6 @@ const handleEmailTeacher = async () => {
       unit,
       lesson,
       supportType,
-      // TODO: once the observation form includes a date in meta,
-      // wire it here. For now this will show "(not set in app yet)".
       date,
     };
 
@@ -1255,20 +1087,15 @@ const handleEmailTeacher = async () => {
 
     const model = buildTeacherExportModel(metaForExport, exportIndicators);
 
-    // Optional: still log for debugging
-    console.log("TEACHER_EXPORT_MODEL", model);
-
     await exportTeacherExcel(model);
   };
 
 const handleExportAdmin = async () => {
-  // 1️⃣ If there is unsaved ink on the active indicator, flush it first
   if (canvasDirty) {
     handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
     setCanvasDirty(false);
   }
 
-  // 2️⃣ Build meta for export (same as teacher export, but reused here)
   const metaForExport: ObservationMetaForExport = {
     teacherName,
     schoolName,
@@ -1276,10 +1103,9 @@ const handleExportAdmin = async () => {
     unit,
     lesson,
     supportType,
-    date: observationMeta.date, // already wired
+    date: observationMeta.date, 
   };
 
-  // 3️⃣ Flatten indicators into the generic export shape
   const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
     id: ind.id,
     number: ind.number,
@@ -1288,32 +1114,25 @@ const handleExportAdmin = async () => {
     good: ind.good,
     growth: ind.growth,
     commentText: ind.commentText,
-    // 🆕 make sure includeInTrainerSummary is passed through
     includeInTrainerSummary: ind.includeInTrainerSummary ?? false,
   }));
 
-  // 4️⃣ Build base ADMIN model from current state
   const baseModel = buildAdminExportModel(metaForExport, exportIndicators);
 
-  // 5️⃣ If the Admin preview has been opened/edited, prefer those values
   const modelToExport =
     adminPreview && showAdminPreview
       ? {
           ...baseModel,
-          rows: adminPreview.rows,                 // use edited trainerNotes
-          trainerSummary: adminPreview.trainerSummary, // use edited summary
+          rows: adminPreview.rows,                  
+          trainerSummary: adminPreview.trainerSummary, 
         }
       : baseModel;
-
-  // Optional: log for debugging
-  console.log("ADMIN_EXPORT_MODEL", modelToExport);
 
   await exportAdminExcel(modelToExport);
 };
 
   
 const handleExportPreview = () => {
-  // Flush unsaved canvas strokes first so the model is accurate
   if (canvasDirty) {
     handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
     setCanvasDirty(false);
@@ -1326,8 +1145,7 @@ const handleExportPreview = () => {
     unit,
     lesson,
     supportType,
-    // TODO: wire actual date from observation meta later
-     date: observationMeta.date, // "YYYY-MM-DD"
+    date: observationMeta.date, 
   };
 
  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
@@ -1338,7 +1156,7 @@ const handleExportPreview = () => {
   good: ind.good,
   growth: ind.growth,
   commentText: ind.commentText,
-  includeInTrainerSummary: !!ind.includeInTrainerSummary, // 🆕
+  includeInTrainerSummary: !!ind.includeInTrainerSummary, 
 }));
 
   const model = buildTeacherExportModel(metaForExport, exportIndicators);
@@ -1347,57 +1165,45 @@ const handleExportPreview = () => {
   setShowExportPreview(true);
 };
 
-//admin preview
-// admin preview
-// admin preview
 const handleAdminPreview = () => {
-  // 1. Flush canvas first
-  if (canvasDirty) {
-    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-    setCanvasDirty(false);
-  }
+  if (canvasDirty) {
+    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+    setCanvasDirty(false);
+  }
 
-  const metaForExport: ObservationMetaForExport = {
-    teacherName,
-    schoolName,
-    campus,
-    unit,
-    lesson,
-    supportType,
-    date: observationMeta.date, // already wired
-  };
+  const metaForExport: ObservationMetaForExport = {
+    teacherName,
+    schoolName,
+    campus,
+    unit,
+    lesson,
+    supportType,
+    date: observationMeta.date, 
+  };
 
-  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
-    id: ind.id,
-    number: ind.number,
-    title: ind.title,
-    description: ind.description,
-    good: ind.good,
-    growth: ind.growth,
-    commentText: ind.commentText,
-    // ✅ pass Trainer-summary flag through to the export model
-    includeInTrainerSummary: !!ind.includeInTrainerSummary,
-  }));
+  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
+    id: ind.id,
+    number: ind.number,
+    title: ind.title,
+    description: ind.description,
+    good: ind.good,
+    growth: ind.growth,
+    commentText: ind.commentText,
+    includeInTrainerSummary: !!ind.includeInTrainerSummary,
+  }));
 
-  // 2. Build the fresh model (this calculates the English trainerSummary)
-  const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
-  
-  // 3. Check for SAVED Vietnamese text from the state variable
-  const savedVNSummary = adminSummaryVN; 
+  const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
+  
+  const savedVNSummary = adminSummaryVN; 
 
-  // 4. Create the final model, prioritizing the saved Vietnamese text
-  const finalModel = {
-      ...freshModel,
-      // If savedVNSummary is truthy (a string), use it. Otherwise, use the fresh English summary.
-      trainerSummary: savedVNSummary || freshModel.trainerSummary, 
-  };
+  const finalModel = {
+      ...freshModel,
+      trainerSummary: savedVNSummary || freshModel.trainerSummary, 
+  };
 
-  // 5. Set the final model to the preview state
-  setAdminPreview(finalModel);
-  setShowAdminPreview(true);
+  setAdminPreview(finalModel);
+  setShowAdminPreview(true);
 };
-
-
 
 
 const [canvasDirty, setCanvasDirty] = useState(false);
@@ -1405,11 +1211,7 @@ const [canvasDirty, setCanvasDirty] = useState(false);
 useEffect(() => {
   const handleBeforeUnload = (e: BeforeUnloadEvent) => {
     if (!canvasDirty) return;
-
     e.preventDefault();
-    // NOTE: returnValue is deprecated but still required
-    // for Chrome/desktop Safari to actually show a dialog.
-    // On iPad Safari this is ignored.
     // @ts-ignore
     e.returnValue = "";
   };
@@ -1420,16 +1222,13 @@ useEffect(() => {
 
 
 const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
-  if (isLocked) return; // 🔒 prevent drawing when locked
+  if (isLocked) return; 
   updateIndicator(index, { strokes: newStrokes });
-  setCanvasDirty(true);  // 🟡 canvas has unsaved handwriting
+  setCanvasDirty(true);  
 };
 
 
-// @reference: src/ObservationWorkspaceShell.tsx
-
 const handlePolishWithAi = async () => {
-  // 1. Safety Checks
   const currentText = active.commentText.trim();
   if (!currentText) return;
   if (isAiPolishing) return;
@@ -1437,11 +1236,8 @@ const handlePolishWithAi = async () => {
   setIsAiPolishing(true);
 
   try {
-    // 🟢 REVISED: Only pass currentText. 
-    // Do NOT pass active.title or active.description anymore.
     const polished = await polishTextWithGroq(currentText);
 
-    // 3. Update State
     updateIndicator(activeIndex, {
       commentText: polished,
       aiPendingReview: true,
@@ -1461,28 +1257,23 @@ const handlePolishWithAi = async () => {
 const handleConvertHandwritingToText = async () => {
   setOcrError(null);
 
-  // No ink, nothing to do
   if (!active.strokes || active.strokes.length === 0) {
     setOcrError("No handwriting found for this indicator.");
     return;
   }
 
-  // Prevent double-click during an ongoing OCR run
   if (isOcrRunning) return;
 
   setIsOcrRunning(true);
 
   try {
-    // 1️⃣ Call the OCR hook — later this will be real OCR
     const { text, confidence } = await runOcrOnStrokes(active.strokes);
 
-    // 2️⃣ Merge into existing comment with [OCR] label
     const existing = active.commentText.trim();
     const combined = existing
       ? `${existing}\n\n[OCR]\n${text}`
       : `[OCR]\n${text}`;
 
-    // 3️⃣ Update indicator state
     const now = Date.now();
 
     updateIndicator(activeIndex, {
@@ -1503,16 +1294,13 @@ const handleConvertHandwritingToText = async () => {
 const handleBulkOcrForMissing = async () => {
   setOcrError(null);
 
-  // Flush unsaved strokes for the active indicator first
   if (canvasDirty) {
     handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
     setCanvasDirty(false);
   }
 
-  // Already running? Ignore
   if (isOcrRunning) return;
 
-  // Find all indicators that have handwriting but OCR not run yet
   const targets = indicators
     .map((ind, index) => ({ ind, index }))
     .filter(({ ind }) => {
@@ -1529,7 +1317,6 @@ const handleBulkOcrForMissing = async () => {
 
   try {
     for (const { ind, index } of targets) {
-      // In case state changed while we were looping, re-check ink/OCR
       const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
       if (!hasInk || ind.ocrUsed) continue;
 
@@ -1577,7 +1364,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
     );
   };
 
-  // Toggle expanded/collapsed description for one indicator
     const toggleDescription = (id: string) => {
     setExpandedDesc((prev) => ({
         ...prev,
@@ -1605,7 +1391,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
     updateIndicator(index, { commentText: newText });
   };
 
-  // Auto-insert default comments for Good items that have a template but empty text
   const insertDefaultCommentsForGood = () => {
     setIndicators((prev) =>
       prev.map((ind) => {
@@ -1616,7 +1401,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
         if (ind.good && hasTemplate && emptyComment) {
           return {
             ...ind,
-            commentText: ind.preComment!, // use the template text
+            commentText: ind.preComment!, 
           };
         }
 
@@ -1625,7 +1410,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
     );
   };
 
-    // Make the indicator numbers in the warning banner clickable
   const renderClickableList = (items: IndicatorState[]) => {
     return items.map((ind, idx) => {
       const globalIndex = indicators.findIndex((x) => x.id === ind.id);
@@ -1634,11 +1418,9 @@ const toggleIncludeInTrainerSummary = (index: number) => {
       const handleClick = () => {
         if (globalIndex < 0) return;
 
-        // Open sidebar so you can see the list
         setSidebarCollapsed(false);
         window.dispatchEvent(new Event("resize"));
 
-        // Jump to that indicator
         setActiveIndex(globalIndex);
 
         const row = document.querySelector(
@@ -1664,7 +1446,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
   };
 
   const handleMarkOcrReviewed = () => {
-    // Clear the yellow highlight / pending flag for the active indicator
     updateIndicator(activeIndex, {
       ocrPendingReview: false,
     });
@@ -1674,17 +1455,15 @@ const toggleIncludeInTrainerSummary = (index: number) => {
   if (isLocked) return;
   const ind = indicators[index];
 
-  // Check if the user has removed ALL OCR content
   const hadOcr = ind.ocrUsed;
   const ocrStillExists = value.includes("[OCR]");
 
   let patch: Partial<IndicatorState> = {
     commentText: value,
-    ocrPendingReview: false, // user edited → no yellow highlight
-    aiPendingReview: false, // 🟢 NEW: Clear AI flag on manual edit
+    ocrPendingReview: false, 
+    aiPendingReview: false, 
   };
 
-  // If OCR was previously used but no [OCR] tag remains → reset OCR state
   if (hadOcr && !ocrStillExists) {
     patch = {
       ...patch,
@@ -1698,15 +1477,12 @@ const toggleIncludeInTrainerSummary = (index: number) => {
   updateIndicator(index, patch);
 };
 
-    // 🔎 Helper: jump to an indicator from preview warnings
   const jumpToIndicator = (indicatorNumber: string) => {
     const idx = indicators.findIndex((ind) => ind.number === indicatorNumber);
     if (idx === -1) return;
 
-    // open sidebar if collapsed
     if (sidebarCollapsed) {
       setSidebarCollapsed(() => {
-        // force CanvasPad resize after sidebar opens
         window.dispatchEvent(new Event("resize"));
         return false;
       });
@@ -1714,7 +1490,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
 
     setActiveIndex(idx);
 
-    // scroll that indicator row into view
     requestAnimationFrame(() => {
       const el = document.querySelector<HTMLElement>(
         `[data-indicator-number="${indicatorNumber}"]`
@@ -1740,32 +1515,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
       ))}
     </>
   );
-const handleToggleLock = () => { // 🟢 Removed 'async'
-    if (canvasDirty) {
-      handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-      setCanvasDirty(false);
-    }
-
-    const nextStatus: "draft" | "saved" =
-      observationStatus === "draft" ? "saved" : "draft";
-
-    const payload: SavedObservationPayload = {
-      id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
-      indicators,
-      status: nextStatus,
-      updatedAt: Date.now(),
-      scratchpadText,
-      isGood, isBad, isFavorite,
-    };
-
-    // Fire and forget
-    persistObservation(payload);
-
-    setObservationStatus(nextStatus);
-    // lastSavedAt and saveStatus are handled inside persistObservation now
-  };
-
 
   return (
     <div className="workspace-root">
@@ -1873,7 +1622,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               type="button"
               onClick={() => {
                 setSidebarCollapsed(false);
-                // Again, force a resize so canvas recomputes width/height
                 window.dispatchEvent(new Event("resize"));
               }}
               title="Expand indicators"
@@ -1913,7 +1661,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                   className="btn"
                   onClick={() => {
                     setSidebarCollapsed(true);
-                    // Tell CanvasPad its container size changed
                     window.dispatchEvent(new Event("resize"));
                   }}
                   title="Collapse indicators"
@@ -1925,14 +1672,9 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
 
             <div className="indicator-list">
               {indicators.map((ind, idx) => {
-                // Apply filter
                 if (filterMode === "good" && !ind.good) return null;
                 if (filterMode === "growth" && !ind.growth) return null;
                 if (filterMode === "favorites" && !ind.favorite) return null;
-
-                const hasInk = ind.strokes?.some((s) => s.points && s.points.length > 0);
-                const hasOcr = !!ind.ocrUsed;
-                const hasComment = ind.commentText.trim().length > 0;
 
                 return (
                   <div
@@ -1974,7 +1716,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                     </div>
 
                    <div className="indicator-actions">
-                    {/* status dots: ink / text / OCR */}
                     <div className="indicator-status-dots"
                         onClick={(e) => e.stopPropagation()}
                         title={[
@@ -1994,7 +1735,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                       )}
                     </div>
 
-                    {/* Favorite toggle */}
                     <button
                       type="button"
                       className="btn"
@@ -2049,7 +1789,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                       </button>
                     )}
 
-                    {/* 🆕 Trainer summary checkbox */}
                     <label
                       onClick={(e) => e.stopPropagation()}
                       style={{
@@ -2085,7 +1824,7 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button 
                   type="button" 
-                  className="btn btn-ghost canvas-collapse-btn" // Use btn-ghost for styling reset
+                  className="btn btn-ghost canvas-collapse-btn" 
                   onClick={() => setIsCanvasVisible(v => !v)}
                   title={isCanvasVisible ? "Collapse canvas and tools" : "Expand canvas and tools"}
                   style={{
@@ -2097,8 +1836,8 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                     transition: "transform 0.2s ease",
                     fontSize: 12,
                     lineHeight: 1,
-                    border: '1px solid var(--accent)', // Accent border
-                    color: 'var(--accent)', // Accent color icon
+                    border: '1px solid var(--accent)', 
+                    color: 'var(--accent)', 
                     background: 'transparent'
                   }}
                 >
@@ -2145,25 +1884,23 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               </select>
             </div>
 
-            {/* 🆕 Resizable Wrapper for CanvasPad — Only visible if not collapsed */}
             <div
               className={`canvas-resizable-wrapper ${isCanvasVisible ? '' : 'collapsed'}`}
               ref={canvasWrapperRef}
               style={{ 
                 height: isCanvasVisible ? `${canvasHeight}px` : '0px', 
                 transition: 'height 0.2s ease-out',
-                overflow: 'hidden' // Hide inner content when height is 0
+                overflow: 'hidden'
               }}
             >
               <CanvasPad
                 key={active.id}
                 strokes={active.strokes}
                 onChange={(s) => handleStrokesChange(activeIndex, s)}
-                readOnly={isLocked || !isCanvasVisible} // Disable drawing when hidden
+                readOnly={isLocked || !isCanvasVisible} 
               />
             </div>
  
-            {/* 🆕 Dedicated Canvas Resize Handle (must be outside CanvasPad) — Only visible if not collapsed */}
             {isCanvasVisible && (
               <div
                 className="canvas-resize-handle"
@@ -2197,7 +1934,7 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                 className="btn"
                 onClick={handleConvertHandwritingToText}
                 disabled={
-                  isOcrRunning || // 🛡️ This will now reset after 15s thanks to the timeout block
+                  isOcrRunning || 
                   !active.strokes ||
                   !active.strokes.some(s => s.points && s.points.length > 0)
                 }
@@ -2252,18 +1989,17 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                 zIndex: 10, 
                 display: "flex", 
                 flexDirection: "column",
-                flexGrow: 1 // Allow textarea section to take up remaining vertical space
+                flexGrow: 1 
               }}
             >
             <div
               style={{
                 fontSize: 12,
                 marginBottom: 4,
-                // 🟣 Update color logic: Purple if AI, Yellow if OCR, Gray if neither
                 color: active.aiPendingReview 
-                  ? "#c084fc" // Purple-400
+                  ? "#c084fc" 
                   : active.ocrPendingReview 
-                    ? "#facc15" // Yellow-400
+                    ? "#facc15" 
                     : "var(--text-muted)",
                 display: "flex",
                 alignItems: "center",
@@ -2272,7 +2008,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               }}
             >
               {active.aiPendingReview ? (
-                 /* 🟣 AI Feedback Header */
                 <>
                   <span>✨ AI polished this text. Please review.</span>
                   <button
@@ -2285,7 +2020,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                   </button>
                 </>
               ) : active.ocrPendingReview ? (
-                 /* 🟡 OCR Feedback Header */
                 <>
                   <span>OCR text added – please review.</span>
                   <button
@@ -2298,7 +2032,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                   </button>
                 </>
               ) : (
-                 /* ⚪ Default Header */
                 "Comments for this indicator"
               )}
             </div>
@@ -2310,9 +2043,9 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
               readOnly={isLocked}
               style={{
                 width: "100%",
-                height: `${textAreaHeight}px`, // Apply dynamic height
+                height: `${textAreaHeight}px`, 
                 minHeight: `${MIN_TEXTAREA_HEIGHT}px`,
-                resize: "none", // Remove inline resize
+                resize: "none", 
                 borderRadius: 10,
                 border: active.ocrPendingReview
                   ? "1px solid rgba(250, 204, 21, 0.9)"
@@ -2324,10 +2057,9 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                 color: "var(--text)",
                 padding: 8,
                 fontSize: 13,
-                flexGrow: 1, // Allow it to fill space if height is collapsed/minimized
+                flexGrow: 1, 
               }}
             />
-            {/* 🆕 Dedicated Textarea Resize Handle */}
             <div
               className="textarea-resize-handle"
               onMouseDown={startTextareaResize}
@@ -2338,20 +2070,17 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
             {showExportPreview &&
               exportPreview &&
               (() => {
-                // 1️⃣ Detect if this preview has any *unreviewed* OCR text.
-              // We look at live indicator state, not just "[OCR]" tags in the model.
-              // 1️⃣ Collect indicators that have *unreviewed* OCR text.
-            const unreviewedOcrIndicators = indicators.filter(
-              (ind) => ind.ocrUsed && ind.ocrPendingReview
-            );
+              const unreviewedOcrIndicators = indicators.filter(
+                (ind) => ind.ocrUsed && ind.ocrPendingReview
+              );
 
             const hasUnreviewedOcr = unreviewedOcrIndicators.length > 0;
-            // 🟢 NEW: Detect unreviewed AI (Add this block)
+            
                   const unreviewedAiIndicators = indicators.filter(
                     (ind) => ind.aiPendingReview
                   );
                   const hasUnreviewedAi = unreviewedAiIndicators.length > 0;
-                // 2️⃣ Build warning buckets from the live indicators state
+                
                 const growthWithoutComment = indicators.filter((ind) => {
                   const hasComment = ind.commentText.trim().length > 0;
                   return ind.growth && !hasComment;
@@ -2374,10 +2103,9 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
 
                 const inkNotConverted = indicators.filter((ind) => {
                 const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
-                return hasInk && !ind.ocrUsed; // ❗ no good/growth requirement
+                return hasInk && !ind.ocrUsed; 
               });
 
-              // 🔢 Fast lookup sets by indicator number
               const growthNoCommentNums = new Set(
                 growthWithoutComment.map((ind) => ind.number)
               );
@@ -2397,18 +2125,17 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
 
                 return (
                   <div className="export-preview-panel">
-                    {/* 🔤 OCR banner – only if some OCR is still pending review */}
                     {hasUnreviewedOcr && (
                     <div className="export-ocr-banner">
                       ⚠ This preview includes OCR text that hasn&apos;t been marked as reviewed yet in:{" "}
                       {renderIndicatorLinks(unreviewedOcrIndicators.map((ind) => ind.number))}
                       . Please double-check those comments before sending to the teacher.
                     </div>
-                     )}
-                     {/* 🟢 NEW: AI banner (Add this block) */}
+                      )}
+                      
                   {hasUnreviewedAi && (
                     <div className="export-ocr-banner" style={{ 
-                      backgroundColor: "rgba(147, 51, 234, 0.2)", // Purple tint
+                      backgroundColor: "rgba(147, 51, 234, 0.2)", 
                       border: "1px solid rgba(147, 51, 234, 0.5)",
                       color: "#e9d5ff" 
                     }}>
@@ -2418,7 +2145,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                     </div>
                   )}
 
-                    {/* ⚠️ NEW: high-level preview warnings */}
                     {anyWarnings && (
                       <div className="export-warning-banner">
                         {growthWithoutComment.length > 0 && (
@@ -2490,7 +2216,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                       </div>
                     )}
 
-                    {/* 👇 original Teacher preview content */}
                     <div className="export-preview-header">
                       <div>
                         <div className="export-preview-title">
@@ -2535,7 +2260,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
 
                       return (
                         <div key={row.rowIndex} className={rowClassName}>
-                          {/* LEFT COLUMN: indicator + description */}
                           <div className="export-preview-left">
                             <div className="export-preview-indicator">
                               <strong>{row.indicatorLabel}</strong>
@@ -2545,7 +2269,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                             </div>
                           </div>
 
-                          {/* RIGHT COLUMN: status + strengths + growths */}
                           <div className="export-preview-right">
                             {(row.status || row.strengths || row.growths) && (
                               <div className="export-preview-status-line">
@@ -2604,7 +2327,7 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
             {showAdminPreview && adminPreview && (
               <div className="export-preview-panel admin-preview">
                 <div className="export-preview-header">
-                  <div className="flex-grow"> {/* Added flex-grow div for spacing */}
+                  <div className="flex-grow"> 
                     <div className="export-preview-title">
                       Admin export preview
                     </div>
@@ -2615,16 +2338,14 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                         : null}
                     </div>
                   </div>
-                  {/* 👇 ADD SAVE BUTTON HERE 👇 */}
                   <button
                     type="button"
-                    className="btn btn-primary" // Assuming you have a btn-primary style
-                    onClick={handleAdminReviewSave} // Function defined in Step 4
+                    className="btn btn-primary" 
+                    onClick={handleAdminReviewSave} 
                     style={{ marginRight: 8, backgroundColor: 'var(--color-primary)' }} 
                   >
                     Save Translated Summary
                   </button>
-                  {/* 👆 END SAVE BUTTON 👆 */}
                   <button
                     type="button"
                     className="btn"
@@ -2633,7 +2354,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                     Close
                   </button>
                 </div>
-                {/* 🆕 Trainer summary section (mapped to merged cell E5–E18) */}
                 <div
                   style={{
                     marginBottom: 16,
@@ -2684,14 +2404,13 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                       lineHeight: 1.4,
                     }}
                   />
-                </div>            
+                </div>              
                 <div className="export-preview-table">
                   {adminPreview.rows.map((row) => (
                     <div
                       key={row.rowIndex}
                       className="export-preview-row admin-row"
                     >
-                      {/* Left: category + aspect */}
                       <div className="export-preview-indicator">
                         <div className="admin-main-category">
                           {row.mainCategory}
@@ -2699,17 +2418,14 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
                         <div className="admin-aspect">{row.aspect}</div>
                       </div>
 
-                      {/* Middle: VN classroom signs (read-only) */}
                       <div className="export-preview-description">
                         {row.classroomSigns}
                       </div>
 
-                      {/* Rating (still read-only for now, coming from export model) */}
                       <div className="export-preview-status">
                         {row.trainerRating || "\u00A0"}
                       </div>
 
-                      {/* 🆕 Trainer notes: editable textarea */}
                       <div className="export-preview-notes">
                         <textarea
                           value={row.trainerNotes}
@@ -2787,7 +2503,6 @@ const handleToggleLock = () => { // 🟢 Removed 'async'
           </div>
         </div>
       )}
-      {/* 🟣 BATCH POLISH MODAL */}
       {showBatchModal && (
         <div className="scratchpad-backdrop">
           <div className="scratchpad-modal" style={{ maxWidth: 500, display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
