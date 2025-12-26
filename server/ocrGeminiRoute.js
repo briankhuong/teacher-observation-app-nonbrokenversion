@@ -10,21 +10,23 @@ const router = express.Router();
 const GEN_AI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 const genAI = new GoogleGenerativeAI(GEN_AI_KEY || "");
 
-// Increase limit to 10mb
+// Increase limit to 10mb for image handling
 router.use(express.json({ limit: "10mb" }));
 
 // ---------------------------------------------------------
 // 2. ROUTE HANDLERS
 // ---------------------------------------------------------
 
-// Warm-up route
+// 🟢 FIX 2: Warm-up Route (Placed at the top)
+// Handles the "HEAD" request from App.tsx without errors
 router.head("/api/ocr-gemini", (req, res) => {
   res.status(200).end();
 });
 
 router.post("/api/ocr-gemini", async (req, res) => {
   try {
-    // --- A. Define Glossary INSIDE the route to prevent scope errors ---
+    // 🟢 FIX 1: Defined Glossary INSIDE the route
+    // This prevents the "GLOSSARY_STRING is not defined" 500 error
     const ABBREVIATION_MAP = {
       "PCs": "Phonogram cards",
       "PWCs": "Phonogram word cards",
@@ -46,14 +48,14 @@ router.post("/api/ocr-gemini", async (req, res) => {
       .map(([key, value]) => `- ${key}: ${value}`)
       .join("\n");
 
-    // --- B. Helper Function INSIDE the route ---
+    // Helper to expand abbreviations in case AI misses them
     const expandAbbreviations = (text) => {
       if (!text) return "";
       const pattern = new RegExp(`\\b(${Object.keys(ABBREVIATION_MAP).join('|')})\\b`, 'g');
       return text.replace(pattern, (matched) => ABBREVIATION_MAP[matched]);
     };
 
-    // --- C. Safety Checks ---
+    // --- Safety Checks ---
     if (!GEN_AI_KEY) {
       console.error("❌ GOOGLE_GENERATIVE_AI_KEY is missing.");
       return res.status(500).json({ error: "Server missing Google API Key" });
@@ -64,10 +66,10 @@ router.post("/api/ocr-gemini", async (req, res) => {
       return res.status(400).json({ error: "No image data provided" });
     }
 
-    // --- D. Prepare Model ---
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); // Updated to 2.0 Flash for speed
+    // --- Prepare Model ---
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-    // --- E. The Prompt ---
+    // --- The Prompt ---
     const prompt = `
       You are an expert handwriting transcriber and strict grammar editor.
 
@@ -88,7 +90,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
       - Return ONLY the final text.
     `;
 
-    // --- F. Send to Gemini ---
+    // --- Send to Gemini ---
     const result = await model.generateContent([
       prompt,
       {
@@ -102,7 +104,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
     const response = await result.response;
     const rawText = response.text().trim();
 
-    // --- G. Formatting Logic ---
+    // --- Sticky Block Logic ---
     const rawLines = rawText.split(/\r?\n/);
 
     let formattedText = rawLines.reduce((acc, line) => {
@@ -121,7 +123,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
       }
     }, "");
 
-    // --- H. Failsafe Expansion ---
+    // --- Final Failsafe Expansion ---
     formattedText = expandAbbreviations(formattedText);
 
     return res.json({ 
@@ -135,6 +137,7 @@ router.post("/api/ocr-gemini", async (req, res) => {
     if (err.message && err.message.includes("SAFETY")) {
       errorMessage = "Gemini blocked this image due to safety filters.";
     }
+    // Return detailed error to help debugging
     return res.status(500).json({ error: errorMessage, details: err.message });
   }
 });
