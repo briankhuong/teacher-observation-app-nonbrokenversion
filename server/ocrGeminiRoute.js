@@ -16,8 +16,6 @@ router.use(express.json({ limit: "10mb" }));
 // 2. ROUTE HANDLERS
 // ---------------------------------------------------------
 
-// 🟢 WARM-UP ROUTE: Allow HEAD requests (returns 200 OK immediately)
-// (This is the working part from your code)
 router.head("/api/ocr-gemini", (req, res) => {
   res.status(200).end();
 });
@@ -25,7 +23,7 @@ router.head("/api/ocr-gemini", (req, res) => {
 router.post("/api/ocr-gemini", async (req, res) => {
   try {
     // ---------------------------------------------------------
-    // 🟢 MOVED INSIDE: Define Glossary here to prevent scope errors
+    // 🟢 OPTIMIZATION: Glossary is defined here for JS, NOT sent to AI
     // ---------------------------------------------------------
     const ABBREVIATION_MAP = {
       "PCs": "Phonogram cards",
@@ -44,19 +42,13 @@ router.post("/api/ocr-gemini", async (req, res) => {
       "MPC": "Multi-letter phonogram"
     };
 
-    const GLOSSARY_STRING = Object.entries(ABBREVIATION_MAP)
-      .map(([key, value]) => `- ${key}: ${value}`)
-      .join("\n");
+    // 🟢 REMOVED: const GLOSSARY_STRING ... (We don't send this to AI anymore)
 
     const expandAbbreviations = (text) => {
       if (!text) return "";
       const pattern = new RegExp(`\\b(${Object.keys(ABBREVIATION_MAP).join('|')})\\b`, 'g');
       return text.replace(pattern, (matched) => ABBREVIATION_MAP[matched]);
     };
-
-    // ---------------------------------------------------------
-    // 3. EXECUTION
-    // ---------------------------------------------------------
 
     // --- Safety Checks ---
     if (!GEN_AI_KEY) {
@@ -72,25 +64,20 @@ router.post("/api/ocr-gemini", async (req, res) => {
     // --- Prepare Model ---
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // --- The Prompt ---
+    // --- 🟢 OPTIMIZED PROMPT (Minimal Tokens) ---
+    // We removed the glossary and just ask for raw transcription.
     const prompt = `
-      You are an expert handwriting transcriber and strict grammar editor.
-
-      REFERENCE GLOSSARY (Use these exact definitions):
-      ${GLOSSARY_STRING}
+      You are an expert handwriting transcriber.
 
       TASK:
-      1. Transcribe the handwriting accurately from the image.
-      2. Fix grammar and spelling.
-      3. EXPAND ABBREVIATIONS: If you see an acronym from the Glossary above, replace it with the full term (e.g., change "PCs" to "Phonogram cards"). Do NOT guess other meanings like "Prior Concepts".
-      4. Keep the tone SIMPLE.
+      1. Transcribe the handwriting accurately.
+      2. Fix grammar and spelling errors.
+      3. DO NOT expand abbreviations (e.g., keep "PCs" as "PCs").
+      4. DO NOT add conversational filler.
 
-      CRITICAL FORMATTING RULES:
-      - PRESERVE MARKERS: Never remove hyphens "-" or "(GA)" at the start of lines.
-      - PRESERVE LINE BREAKS: Return text exactly as visually arranged. Do not combine lines.
-
-      OUTPUT:
-      - Return ONLY the final text.
+      CRITICAL FORMATTING:
+      - Preserve "-" or "(GA)" markers at start of lines.
+      - Return text exactly as visually arranged.
     `;
 
     // --- Send to Gemini ---
@@ -126,7 +113,8 @@ router.post("/api/ocr-gemini", async (req, res) => {
       }
     }, "");
 
-    // --- Final Failsafe Expansion ---
+    // --- 🟢 JS DOES THE WORK (Free) ---
+    // Since AI didn't expand them, we do it here instantly.
     formattedText = expandAbbreviations(formattedText);
 
     return res.json({ 
