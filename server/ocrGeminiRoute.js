@@ -10,53 +10,8 @@ const router = express.Router();
 const GEN_AI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 const genAI = new GoogleGenerativeAI(GEN_AI_KEY || "");
 
+// Increase payload limit to handle Base64 images
 router.use(express.json({ limit: "10mb" }));
-
-// Your specific glossary
-const ABBREVIATION_MAP = {
-  "PCs": "Phonogram cards",
-  "PWCs": "Phonogram word cards",
-  "VPCs": "Vocabulary picture cards",
-  "TM": "Teaching materials",
-  "CM": "Classroom management",
-  "AW": "Air-writing",
-  "GS": "GrapeSEED",
-  "LVA": "Lesson video analysis",
-  "TSTS": "Teacher - student - teacher - student",
-  "STS": "Student - Teacher - Student",
-  "LO": "Learning objective",
-  "LP": "Lesson plan",
-  "AA": "Action activities",
-  "MPC": "Multi-letter phonogram"
-  // "GA": "GA" (No change)
-};
-
-/**
- * Turns the map into a string string for the AI prompt
- * Example output: "- PCs: Phonogram cards\n- TM: Teaching materials..."
- */
-const GLOSSARY_STRING = Object.entries(ABBREVIATION_MAP)
-  .map(([key, value]) => `- ${key}: ${value}`)
-  .join("\n");
-
-/**
- * JS Failsafe: Expands abbreviations if the AI forgets to do it.
- */
-function expandAbbreviations(text) {
-  if (!text) return "";
-  const pattern = new RegExp(`\\b(${Object.keys(ABBREVIATION_MAP).join('|')})\\b`, 'g');
-  return text.replace(pattern, (matched) => ABBREVIATION_MAP[matched]);
-}
-
-// ---------------------------------------------------------
-// 2. ROUTE HANDLERS
-// ---------------------------------------------------------
-
-// 🟢 NEW: Allow HEAD requests for warm-up (returns 200 OK immediately)
-// This prevents the console error when the frontend "pings" the server.
-router.head("/api/ocr-gemini", (req, res) => {
-  res.status(200).end();
-});
 
 router.post("/api/ocr-gemini", async (req, res) => {
   try {
