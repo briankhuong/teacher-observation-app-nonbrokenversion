@@ -39,7 +39,9 @@ router.post("/api/ocr-gemini", async (req, res) => {
       "LO": "Learning objective",
       "LP": "Lesson plan",
       "AA": "Action activities",
-      "MPC": "Multi-letter phonogram"
+      "MPC": "Multi-letter phonogram",
+      "Ss": "Students",
+      "PC": "Progress check"
     };
 
     // 🟢 REMOVED: const GLOSSARY_STRING ... (We don't send this to AI anymore)
