@@ -4,6 +4,7 @@ import { CanvasPad } from "./CanvasPad";
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { exportAdminExcel } from "./exportAdminExcel"; 
 import { emailTeacherReport } from "./emailTeacherReport";
+import { generateAdminSummary } from "./utils/gemini";
 
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
 const DEFAULT_CANVAS_HEIGHT = 300; 
@@ -393,21 +394,13 @@ const INITIAL_INDICATORS: IndicatorState[] = [
   },
 ];
 
-// 🟢 UPDATED: Includes RESIZING to max 1024px width + JPEG Compression
+// (In ObservationWorkspaceShell.tsx - Replace existing strokesToPngBase64)
+
 async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
-  if (!strokes.length) {
-    throw new Error("No strokes to convert");
-  }
+  if (!strokes.length) throw new Error("No strokes to convert");
 
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("2D canvas not supported");
-  }
-
-  // 1. Calculate Bounds
+  // 1. Calculate Bounds (Crop Logic)
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
   for (const stroke of strokes) {
     for (const p of stroke.points) {
       if (p.x < minX) minX = p.x;
@@ -417,66 +410,45 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
     }
   }
 
-  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
-    throw new Error("Invalid stroke bounds");
-  }
+  // Add Padding
+  const padding = 40; 
+  const width = Math.max(1, (maxX - minX) + (padding * 2));
+  const height = Math.max(1, (maxY - minY) + (padding * 2));
 
-  const margin = 20;
-  const originalWidth = Math.max(1, Math.round(maxX - minX + margin * 2));
-  const originalHeight = Math.max(1, Math.round(maxY - minY + margin * 2));
+  // 2. Create Sized Canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2D canvas not supported");
 
-  // 2. Calculate Scale Factor (Downscale if width > 1024px)
-  const MAX_WIDTH = 1024;
-  let scale = 1;
-  if (originalWidth > MAX_WIDTH) {
-    scale = MAX_WIDTH / originalWidth;
-  }
+  // 3. White Background (Better for OCR than dark)
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, width, height);
 
-  // 3. Set Canvas Dimensions (Applied Scale)
-  canvas.width = originalWidth * scale;
-  canvas.height = originalHeight * scale;
-
-  // 4. Draw Background (Solid Color for JPEG)
-  // Use the exact dark color from the app theme so strokes look correct
-  ctx.fillStyle = "#020617";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // 5. Apply Scaling to the Context
-  // This automatically shrinks all drawing operations below
-  ctx.scale(scale, scale);
-
-  // 6. Draw Strokes
-  // We draw them as if they were the original size, shifted by minX/minY.
-  // The ctx.scale() above handles the shrinking.
+  // 4. Draw Strokes (Shifted by minX/minY)
+  ctx.translate(-minX + padding, -minY + padding);
+  
   for (const stroke of strokes) {
     if (!stroke.points.length) continue;
     ctx.beginPath();
-    
-    const first = stroke.points[0];
-    ctx.moveTo(first.x - minX + margin, first.y - minY + margin);
-    
-    for (let i = 1; i < stroke.points.length; i++) {
-      const p = stroke.points[i];
-      ctx.lineTo(p.x - minX + margin, p.y - minY + margin);
-    }
-    
-    // Scale line width too, otherwise thin lines might disappear when shrunk
     ctx.lineWidth = stroke.size || 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.color || "#ffffff";
+    ctx.strokeStyle = "#000000"; // Force Black Ink for Contrast
+    
+    const first = stroke.points[0];
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < stroke.points.length; i++) {
+      ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+    }
     ctx.stroke();
   }
 
-  // 7. Export Compressed JPEG
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
-  
-  // Remove prefix
-  const base64 = dataUrl.split(",")[1];
-  
-  return base64;
+  // 5. Export Small JPEG
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+  return dataUrl.split(",")[1];
 }
-
 /**
  * runOcrOnStrokes with Automatic Retry logic
  */
@@ -1165,46 +1137,101 @@ const handleExportPreview = () => {
   setShowExportPreview(true);
 };
 
-const handleAdminPreview = () => {
+const handleAdminPreview = async () => {
+  // 1. Save Canvas if dirty (Your existing logic)
   if (canvasDirty) {
     handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
     setCanvasDirty(false);
   }
 
-  const metaForExport: ObservationMetaForExport = {
-    teacherName,
-    schoolName,
-    campus,
-    unit,
-    lesson,
-    supportType,
-    date: observationMeta.date, 
-  };
+  // 2. Identify candidates for summary
+  const summaryCandidates = indicators.filter(
+    (i) => i.includeInTrainerSummary && i.commentText?.trim()
+  );
 
-  const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
-    id: ind.id,
-    number: ind.number,
-    title: ind.title,
-    description: ind.description,
-    good: ind.good,
-    growth: ind.growth,
-    commentText: ind.commentText,
-    includeInTrainerSummary: !!ind.includeInTrainerSummary,
-  }));
+  if (summaryCandidates.length === 0) {
+    alert("Please check 'Include in Summary' for at least one indicator.");
+    return;
+  }
 
-  const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
-  
-  const savedVNSummary = adminSummaryVN; 
+  // Optional: Set a loading state here if you have one, e.g., setIsGlobalLoading(true);
 
-  const finalModel = {
+  try {
+    // -------------------------------------------------------------
+    // 🚀 STEP A: COLLECT RAW NOTES
+    // Grab text WITH anchors ([AD], [Hints]) intact.
+    // -------------------------------------------------------------
+    const rawNotes = summaryCandidates.map((i) => i.commentText.trim());
+
+    // -------------------------------------------------------------
+    // 🧠 STEP B: CALL THE BRAIN (The Translator)
+    // Send raw notes to Groq to get the Vietnamese Action Plan.
+    // -------------------------------------------------------------
+    console.log("🤖 Generating Admin Summary with AI...");
+    // Note: If you have a saved summary in DB (adminSummaryVN) that is NOT empty,
+    // you might want to skip AI generation to avoid overwriting your edits.
+    // But usually, clicking "Preview" implies you want to regenerate or view current state.
+    // Let's assume we regenerate if the summary is empty, or just overwrite for now based on 'Preview' semantics.
+    
+    // Check if we already have a saved summary to prioritize? 
+    // If you want "Preview" to always regenerate from current notes, keep this:
+    const aiGeneratedSummary = await generateAdminSummary(rawNotes);
+
+    // -------------------------------------------------------------
+    // 📋 STEP C: BUILD PREVIEW MODEL
+    // -------------------------------------------------------------
+    const metaForExport: ObservationMetaForExport = {
+      teacherName,
+      schoolName,
+      campus,
+      unit,
+      lesson,
+      supportType,
+      date: observationMeta.date,
+    };
+
+    const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
+      id: ind.id,
+      number: ind.number,
+      title: ind.title,
+      description: ind.description,
+      good: ind.good,
+      growth: ind.growth,
+      commentText: ind.commentText,
+      includeInTrainerSummary: !!ind.includeInTrainerSummary,
+    }));
+
+    const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
+
+    // -------------------------------------------------------------
+    // 🔄 STEP D: INJECT AI SUMMARY & UPDATE UI
+    // -------------------------------------------------------------
+    // We prioritize the AI summary we just generated. 
+    // If AI failed/returned empty, we fall back to the basic joining logic in freshModel.
+    
+    const finalModel = {
       ...freshModel,
-      trainerSummary: savedVNSummary || freshModel.trainerSummary, 
-  };
+      trainerSummary: aiGeneratedSummary || freshModel.trainerSummary, 
+    };
 
-  setAdminPreview(finalModel);
-  setShowAdminPreview(true);
+    // Update the State for the Textarea (so user sees it immediately)
+    if (setAdminSummaryVN) {
+        setAdminSummaryVN(finalModel.trainerSummary);
+    }
+    
+    // Update the Preview Model
+    setAdminPreview(finalModel);
+    
+    // Show the Modal (Using your specific state setter)
+    setShowAdminPreview(true);
+
+  } catch (err) {
+    console.error("❌ Admin Preview Error:", err);
+    alert("Failed to generate summary. Please check console.");
+  } finally {
+    // setIsGlobalLoading(false);
+  }
 };
-
 
 const [canvasDirty, setCanvasDirty] = useState(false);
 
@@ -1256,36 +1283,88 @@ const handlePolishWithAi = async () => {
 
 const handleConvertHandwritingToText = async () => {
   setOcrError(null);
-
+  
+  // 1. Check for ink
   if (!active.strokes || active.strokes.length === 0) {
-    setOcrError("No handwriting found for this indicator.");
+    setOcrError("No handwriting found.");
     return;
   }
-
   if (isOcrRunning) return;
-
   setIsOcrRunning(true);
 
   try {
-    const { text, confidence } = await runOcrOnStrokes(active.strokes);
+    // -------------------------------------------------------
+    // STEP 1: VISION (Gemini)
+    // -------------------------------------------------------
+    // Note: We use the UPDATED strokesToPngBase64 that converts to Black-on-White JPEG
+    const { text: rawText, confidence } = await runOcrOnStrokes(active.strokes);
 
-    const existing = active.commentText.trim();
-    const combined = existing
-      ? `${existing}\n\n[OCR]\n${text}`
-      : `[OCR]\n${text}`;
+    if (!rawText) throw new Error("OCR returned empty text");
 
+    // -------------------------------------------------------
+    // STEP 2: IMMEDIATE UPDATE (Raw Text)
+    // Show user the result instantly.
+    // -------------------------------------------------------
     const now = Date.now();
+    
+    // We append [OCR] tag so we know it came from handwriting
+    const rawCombined = active.commentText.trim() 
+      ? `${active.commentText.trim()}\n\n[OCR]\n${rawText}` 
+      : `[OCR]\n${rawText}`;
 
+    // Update State: Show Raw Text
     updateIndicator(activeIndex, {
-      commentText: combined,
+      commentText: rawCombined,
       ocrUsed: true,
       ocrLastRunAt: now,
       ocrLastConfidence: confidence,
-      ocrPendingReview: true,
+      ocrPendingReview: true, 
+      aiPendingReview: false // Not polished yet
     });
+
+    // -------------------------------------------------------
+    // STEP 3: POLISH (Groq) - The "Assembly Line" continues...
+    // -------------------------------------------------------
+    // We only polish the NEW text part (rawText), not the whole comment history
+    // But simplest is to polish the rawText before appending? 
+    // Actually, user wants "Double Update" UI.
+    
+    try {
+      // Expand Abbreviations locally first (Client-side JS)
+      // (You can create a helper for this map or put it here)
+      const ABBREVIATION_MAP: Record<string, string> = {
+        "PCs": "Phonogram cards",
+        "PWCs": "Phonogram word cards",
+        // ... add your map here ...
+      };
+      const expand = (t: string) => t.replace(/\b(PCs|PWCs|TM)\b/g, m => ABBREVIATION_MAP[m] || m);
+      
+      const expandedText = expand(rawText);
+
+      // Call Groq
+      const polishedText = await polishTextWithGroq(expandedText);
+
+      // -------------------------------------------------------
+      // STEP 4: FINAL UPDATE (Polished Text)
+      // Replace the raw [OCR] block with the polished one
+      // -------------------------------------------------------
+      const finalCombined = active.commentText.trim()
+        ? `${active.commentText.trim()}\n\n[OCR]\n${polishedText}`
+        : `[OCR]\n${polishedText}`;
+
+      updateIndicator(activeIndex, {
+        commentText: finalCombined,
+        aiPendingReview: true // Now it is polished!
+      });
+
+    } catch (polishErr) {
+      console.warn("Auto-polish failed, keeping raw text.", polishErr);
+      // No alert needed, user still has the raw text.
+    }
+
   } catch (err) {
-    console.error("OCR failed", err);
-    setOcrError("Could not convert handwriting. Please try again.");
+    console.error("OCR Pipeline failed", err);
+    setOcrError("Could not convert handwriting.");
   } finally {
     setIsOcrRunning(false);
   }

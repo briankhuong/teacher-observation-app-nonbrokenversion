@@ -138,7 +138,7 @@ export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
 };
 
 // -----------------------------------------------------------------
-// 5. Main Export Function (Revised for Hybrid Logic)
+// 5. Main Export Function (Revised for Keyword Anchors)
 // -----------------------------------------------------------------
 
 export function buildTeacherExportModel(
@@ -156,8 +156,16 @@ export function buildTeacherExportModel(
     const growth = src?.growth ?? false;
     let comment = src?.commentText ?? "";
 
-    // 1. GLOBAL CLEAN: Remove [OCR] tags and surrounding spaces
-    comment = comment.replace(/\[\s*OCR\s*\]/gi, "").trim();
+    // ---------------------------------------------------------
+    // 🟢 SANITIZER (Updated)
+    // ---------------------------------------------------------
+    // Remove [OCR], [AD], [Hints], or any content in square brackets.
+    // The teacher should NOT see these "cheat codes".
+    comment = comment.replace(/\[.*?\]/g, "").trim();
+    
+    // Clean up any double spaces left behind by the removal
+    comment = comment.replace(/\s\s+/g, " ");
+    // ---------------------------------------------------------
 
     // 🟢 DEDUPLICATION: Use Sets to ensure unique lines
     const strengthSet = new Set<string>();
@@ -172,16 +180,14 @@ export function buildTeacherExportModel(
       // Rule A: Explicit Markers (These override everything)
       
       // 1. Check for (GA) - Priority 1
-      // Regex looks for (GA) anywhere, even if preceded by "- " or "• "
       const gaRegex = /[\s\-\•]*\(\s*GA\s*\)(.*)$/i;
       const gaMatch = line.match(gaRegex);
 
       if (gaMatch) {
         // Found (GA) -> It is definitely GROWTH (Bad)
-        // gaMatch[1] contains the text AFTER (GA). Clean it up.
         const content = gaMatch[1].trim(); 
         if (content) growthSet.add(content);
-        return; // Line handled, stop processing.
+        return; // Line handled
       } 
 
       // 2. Check for Hyphen or Bullet - Priority 2
@@ -189,10 +195,10 @@ export function buildTeacherExportModel(
         // Found Hyphen -> It is definitely STRENGTH (Good)
         const content = line.replace(/^[\s\-\•]+/, "").trim();
         if (content) strengthSet.add(content);
-        return; // Line handled, stop processing.
+        return; // Line handled
       }
 
-      // Rule B: No Markers? Fallback to Checkboxes (Original Logic)
+      // Rule B: No Markers? Fallback to Checkboxes
       if (!good && growth) {
         // Only "Growth" is checked -> Unlabeled text goes to GROWTH
         growthSet.add(line);
@@ -211,7 +217,6 @@ export function buildTeacherExportModel(
     let growths = growthItems.map(g => `- ${g}`).join("\n");
 
     // 🟢 BLANK CHECK: No default text if empty
-    // If user checked boxes but wrote no text, cells stay blank.
     if (!strengthItems.length && !growthItems.length) {
         strengths = "";
         growths = "";
