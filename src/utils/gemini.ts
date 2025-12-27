@@ -1,6 +1,7 @@
 // src/utils/gemini.ts
 import Groq from "groq-sdk";
 
+
 const groq = new Groq({
   apiKey: import.meta.env.VITE_GROQ_API_KEY,
   dangerouslyAllowBrowser: true 
@@ -90,6 +91,60 @@ export async function polishBatchWithGroq(items: { id: string; text: string }[])
     return parsed;
   } catch (error) {
     console.error("Groq Batch Error:", error);
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 🟢 NEW: GENERATE ADMIN SUMMARY (Vietnamese Translation with Anchors)
+// ---------------------------------------------------------------------------
+
+/**
+ * Takes RAW English notes (with anchors like [AD], [Hint]) and
+ * generates a professional Vietnamese Action Plan.
+ * * Used by: "Preview Admin Report" button.
+ */
+export async function generateAdminSummary(rawNotes: string[]): Promise<string> {
+  if (!rawNotes.length) return "";
+
+  const systemPrompt = `
+    You are a Senior Teacher Trainer for GrapeSEED.
+    
+    TASK:
+    Convert the following raw observation notes (English) into a professional "Next Steps" Action Plan in Vietnamese for the School Administrator.
+
+    STRICT TRANSLATION RULES (The "Anchor" System):
+    1. "[AD]" Tag: If a line ends with [AD], it is already a solution. Translate it DIRECTLY to professional Vietnamese.
+       - Ex: "Separate the boys [AD]" -> "Cần tách vị trí ngồi của các học sinh nam mất trật tự."
+    
+    2. "[Keyword]" Hint: If you see a keyword in brackets like [Props] or [CCQs], ignore the specific question and write a standard recommendation for that skill.
+       - Ex: "Why no checking? [CCQs]" -> "Sử dụng câu hỏi kiểm tra bài (CCQs) thường xuyên để đảm bảo học sinh hiểu bài."
+    
+    3. No Tag? If a note has no brackets, synthesize the core meaning into a constructive/positive action item in Vietnamese.
+       - Ex: "Teacher spoke too fast" -> "Cần điều chỉnh tốc độ nói chậm lại để học sinh dễ tiếp thu."
+
+    OUTPUT FORMAT:
+    - Return a clean bulleted list in Vietnamese.
+    - Professional, constructive, and clear.
+    - Do NOT include the original English.
+    - Do NOT include conversational filler.
+  `;
+
+  const userPrompt = `INPUT DATA:\n${rawNotes.map(n => `- ${n}`).join("\n")}`;
+
+  try {
+    const response = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.3, // Slightly higher creativity allowed for translation flow
+    });
+
+    return response.choices[0]?.message?.content?.trim() || "";
+  } catch (error) {
+    console.error("Groq Admin Summary Error:", error);
     throw error;
   }
 }

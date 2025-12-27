@@ -67,22 +67,19 @@ router.post("/api/ocr-gemini", async (req, res) => {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // --- 🟢 OPTIMIZED PROMPT (Minimal Tokens) ---
-    // We removed the glossary and just ask for raw transcription.
+
     const prompt = `
       You are an expert handwriting transcriber.
-
-      TASK:
-      1. Transcribe the handwriting accurately.
-      2. Fix grammar and spelling errors.
-      3. DO NOT expand abbreviations (e.g., keep "PCs" as "PCs").
-      4. DO NOT add conversational filler.
-
-      CRITICAL FORMATTING:
-      - Preserve "-" or "(GA)" markers at start of lines.
-      - Return text exactly as visually arranged.
+      TASK: Transcribe the handwriting EXACTLY as seen.
+      
+      RULES:
+      1. Do NOT fix grammar.
+      2. Do NOT expand abbreviations (keep "PCs" as "PCs").
+      3. Do NOT add filler.
+      4. Preserve line breaks.
+      5. If it looks like a bullet point "-", keep it.
     `;
 
-    // --- Send to Gemini ---
     const result = await model.generateContent([
       prompt,
       {
