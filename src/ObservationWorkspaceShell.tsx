@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { exportAdminExcel } from "./exportAdminExcel"; 
 import { emailTeacherReport } from "./emailTeacherReport";
 import { generateAdminSummary } from "./utils/gemini";
+import { getOptimizedInkImage } from "./utils/imageOptimizer"; // If you created this file
 
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
 const DEFAULT_CANVAS_HEIGHT = 300; 
@@ -1283,8 +1284,8 @@ const handlePolishWithAi = async () => {
 
 const handleConvertHandwritingToText = async () => {
   setOcrError(null);
-  
-  // 1. Check for ink
+
+  // 1. Validation
   if (!active.strokes || active.strokes.length === 0) {
     setOcrError("No handwriting found.");
     return;
@@ -1296,74 +1297,82 @@ const handleConvertHandwritingToText = async () => {
     // -------------------------------------------------------
     // STEP 1: VISION (Gemini)
     // -------------------------------------------------------
-    // Note: We use the UPDATED strokesToPngBase64 that converts to Black-on-White JPEG
+    console.log("👁️ Step 1: Sending image to Gemini (Vision)...");
+    
+    // Use your existing strokesToPngBase64 or the new optimizer
     const { text: rawText, confidence } = await runOcrOnStrokes(active.strokes);
 
     if (!rawText) throw new Error("OCR returned empty text");
 
+    console.log("✅ Step 1 Complete. Raw Text:", rawText);
+
     // -------------------------------------------------------
-    // STEP 2: IMMEDIATE UPDATE (Raw Text)
-    // Show user the result instantly.
+    // STEP 2: IMMEDIATE UPDATE (Show Raw Text)
     // -------------------------------------------------------
     const now = Date.now();
+    const existingComment = active.commentText.trim();
     
-    // We append [OCR] tag so we know it came from handwriting
-    const rawCombined = active.commentText.trim() 
-      ? `${active.commentText.trim()}\n\n[OCR]\n${rawText}` 
+    // Append [OCR] tag
+    const rawCombined = existingComment 
+      ? `${existingComment}\n\n[OCR]\n${rawText}` 
       : `[OCR]\n${rawText}`;
 
-    // Update State: Show Raw Text
     updateIndicator(activeIndex, {
       commentText: rawCombined,
       ocrUsed: true,
       ocrLastRunAt: now,
       ocrLastConfidence: confidence,
       ocrPendingReview: true, 
-      aiPendingReview: false // Not polished yet
+      aiPendingReview: false 
     });
 
     // -------------------------------------------------------
-    // STEP 3: POLISH (Groq) - The "Assembly Line" continues...
+    // STEP 3: PREPARE FOR POLISH (Client-Side Expansion)
     // -------------------------------------------------------
-    // We only polish the NEW text part (rawText), not the whole comment history
-    // But simplest is to polish the rawText before appending? 
-    // Actually, user wants "Double Update" UI.
+    console.log("📖 Step 3: Expanding abbreviations...");
     
+    // Simple Client-Side Map (Add your full list here)
+    const ABBREVIATION_MAP: Record<string, string> = {
+      "PCs": "Phonogram cards",
+      "PWCs": "Phonogram word cards",
+      "TM": "Teaching materials",
+      "CM": "Classroom management",
+      "(GA)": "(GA)", // Protect the tag
+    };
+
+    // Regex to match whole words only
+    const expand = (t: string) => t.replace(/\b(PCs|PWCs|TM|CM)\b/g, m => ABBREVIATION_MAP[m] || m);
+    const expandedText = expand(rawText);
+
+    // -------------------------------------------------------
+    // STEP 4: POLISH (Groq)
+    // -------------------------------------------------------
+    console.log("✨ Step 4: Sending to Groq (Polish)...");
+
     try {
-      // Expand Abbreviations locally first (Client-side JS)
-      // (You can create a helper for this map or put it here)
-      const ABBREVIATION_MAP: Record<string, string> = {
-        "PCs": "Phonogram cards",
-        "PWCs": "Phonogram word cards",
-        // ... add your map here ...
-      };
-      const expand = (t: string) => t.replace(/\b(PCs|PWCs|TM)\b/g, m => ABBREVIATION_MAP[m] || m);
-      
-      const expandedText = expand(rawText);
-
-      // Call Groq
       const polishedText = await polishTextWithGroq(expandedText);
+      
+      console.log("✅ Step 4 Complete. Polished Text:", polishedText);
 
       // -------------------------------------------------------
-      // STEP 4: FINAL UPDATE (Polished Text)
-      // Replace the raw [OCR] block with the polished one
+      // STEP 5: FINAL UPDATE (Replace Raw with Polished)
       // -------------------------------------------------------
-      const finalCombined = active.commentText.trim()
-        ? `${active.commentText.trim()}\n\n[OCR]\n${polishedText}`
+      const finalCombined = existingComment
+        ? `${existingComment}\n\n[OCR]\n${polishedText}`
         : `[OCR]\n${polishedText}`;
 
       updateIndicator(activeIndex, {
         commentText: finalCombined,
-        aiPendingReview: true // Now it is polished!
+        aiPendingReview: true // Marks it as "Polished" purple
       });
 
     } catch (polishErr) {
-      console.warn("Auto-polish failed, keeping raw text.", polishErr);
-      // No alert needed, user still has the raw text.
+      console.warn("⚠️ Groq Polish failed. Keeping raw text.", polishErr);
+      // We don't alert here; the user at least has the raw text.
     }
 
   } catch (err) {
-    console.error("OCR Pipeline failed", err);
+    console.error("❌ OCR Pipeline failed", err);
     setOcrError("Could not convert handwriting.");
   } finally {
     setIsOcrRunning(false);
