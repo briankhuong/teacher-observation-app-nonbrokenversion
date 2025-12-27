@@ -23,7 +23,7 @@ router.head("/api/ocr-gemini", (req, res) => {
 router.post("/api/ocr-gemini", async (req, res) => {
   try {
     // ---------------------------------------------------------
-    // 🟢 OPTIMIZATION: Glossary is defined here for JS, NOT sent to AI
+    // 🟢 GLOSSARY & EXPANSION (Client-side Logic)
     // ---------------------------------------------------------
     const ABBREVIATION_MAP = {
       "PCs": "Phonogram cards",
@@ -44,8 +44,6 @@ router.post("/api/ocr-gemini", async (req, res) => {
       "PC": "Progress check"
     };
 
-    // 🟢 REMOVED: const GLOSSARY_STRING ... (We don't send this to AI anymore)
-
     const expandAbbreviations = (text) => {
       if (!text) return "";
       const pattern = new RegExp(`\\b(${Object.keys(ABBREVIATION_MAP).join('|')})\\b`, 'g');
@@ -63,23 +61,36 @@ router.post("/api/ocr-gemini", async (req, res) => {
       return res.status(400).json({ error: "No image data provided" });
     }
 
-    // --- Prepare Model ---
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    // --- 🟢 CONFIGURATION FOR LOWEST COST ---
+    // 1. Use "2.5-flash-lite" (Requested Model).
+    // 2. Force JSON response to stop "thinking".
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash-lite", 
+      generationConfig: { 
+        responseMimeType: "application/json",
+        temperature: 0.1 // Low temp for stricter adherence
+      }
+    });
 
-    // --- 🟢 OPTIMIZED PROMPT (Minimal Tokens) ---
-
-    const prompt = `
-      You are an expert handwriting transcriber.
-      TASK: Transcribe the handwriting EXACTLY as seen.
+    // --- 🟢 ZERO-THOUGHT PROMPT ---
+    const prompt = `EXTRACT TEXT.
       
-      RULES:
-      1. Do NOT fix grammar.
-      2. Do NOT expand abbreviations (keep "PCs" as "PCs").
-      3. Do NOT add filler.
-      4. Preserve line breaks.
-      5. If it looks like a bullet point "-", keep it.
-    `;
+      Output a JSON object with the literal handwriting transcription.
+      
+      JSON Schema:
+      { "text": "string" }
+      
+      STRICT RULES:
+      1. VERBATIM ONLY: Write exactly what you see.
+      2. NO EXPANSION: Do NOT expand "LP" to "Lesson Plan". 
+      3. NO PRONOUNS IN BRACKETS: Do NOT add "I" or "We" inside [ ].
+        - BAD: "[I follow LP]"
+        - GOOD: "[follow LP]"
+      4. KEEP BRACKETS RAW: Content inside [ ] must be copied exactly.
+      5. NO GRAMMAR FIXING.
+      `;
 
+    // --- Send to Gemini ---
     const result = await model.generateContent([
       prompt,
       {
@@ -91,15 +102,41 @@ router.post("/api/ocr-gemini", async (req, res) => {
     ]);
 
     const response = await result.response;
-    const rawText = response.text().trim();
+    const responseText = response.text();
+    
+    // --- 🟢 PARSE JSON ---
+    let rawText = "";
+    try {
+      const json = JSON.parse(responseText);
+      rawText = json.text || "";
+    } catch (e) {
+      console.warn("Gemini JSON parse failed, falling back to raw text:", e);
+      rawText = responseText; // Fallback if JSON fails (rare)
+    }
+
+    // ---------------------------------------------------------
+    // 🟢 FAIL-SAFE CLEANUP (JavaScript Regex)
+    // ---------------------------------------------------------
+    // Since Lite models sometimes ignore instructions, we force-clean the text here.
+    
+    // 1. Remove "I/We" from brackets (e.g., "[I follow" -> "[follow")
+    rawText = rawText.replace(/\[\s*(?:I|We)\s+/gi, "[");
+    
+    // 2. Revert common unwanted expansions if the AI did them
+    rawText = rawText
+      .replace(/Phonogram\s+word\s+cards/gi, "PWCs")
+      .replace(/Phonogram\s+cards/gi, "PCs")
+      .replace(/Lesson\s+plan/gi, "LP");
 
     // --- Sticky Block Logic ---
+    // Ensure bullets and markers stay attached to their lines
     const rawLines = rawText.split(/\r?\n/);
 
     let formattedText = rawLines.reduce((acc, line) => {
       const cleanLine = line.trim();
       if (!cleanLine) return acc;
 
+      // Check for markers like "-" or "(GA)"
       const isMarker = cleanLine.startsWith("-") || 
                        cleanLine.toUpperCase().startsWith("(GA)");
 
@@ -112,8 +149,8 @@ router.post("/api/ocr-gemini", async (req, res) => {
       }
     }, "");
 
-    // --- 🟢 JS DOES THE WORK (Free) ---
-    // Since AI didn't expand them, we do it here instantly.
+    // --- 🟢 JS EXPANSION (Free) ---
+    // Now we expand them controllably using your Glossary map
     formattedText = expandAbbreviations(formattedText);
 
     return res.json({ 
@@ -124,7 +161,8 @@ router.post("/api/ocr-gemini", async (req, res) => {
   } catch (err) {
     console.error("Gemini OCR Error:", err);
     let errorMessage = "Failed to process image.";
-    if (err.message && err.message.includes("SAFETY")) {
+    // Handle safety blocks
+    if (err.message && (err.message.includes("SAFETY") || err.message.includes("blocked"))) {
       errorMessage = "Gemini blocked this image due to safety filters.";
     }
     return res.status(500).json({ error: errorMessage, details: err.message });
