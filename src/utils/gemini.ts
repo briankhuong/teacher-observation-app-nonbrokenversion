@@ -7,6 +7,7 @@ const groq = new Groq({
 
 /**
  * Polish a single note using Groq (Stricter Version)
+ * Keeps specific domain terms (phonetics) and system anchors intact.
  */
 export async function polishTextWithGroq(text: string): Promise<string> {
   try {
@@ -60,6 +61,7 @@ export async function polishTextWithGroq(text: string): Promise<string> {
 
 /**
  * 🟢 Batch Polish with Groq
+ * Optimized for speed using JSON mode.
  */
 export async function polishBatchWithGroq(items: { id: string; text: string }[]) {
   const systemPrompt = `You are a professional text processing engine for an English Phonics Teacher.
@@ -99,13 +101,14 @@ export async function polishBatchWithGroq(items: { id: string; text: string }[])
 }
 
 // ---------------------------------------------------------------------------
-// 🟢 NEW: GENERATE ADMIN SUMMARY (Natural Vietnamese)
+// 🟢 NEW: GENERATE ADMIN SUMMARY (Synthesized & Natural)
 // ---------------------------------------------------------------------------
 
 export async function generateAdminSummary(rawNotes: string[]): Promise<string> {
   if (!rawNotes.length) return "";
 
   // 🟢 STEP 1: STRICT PRE-PROCESSING
+  // Filter out any lines that don't contain anchors before sending to AI
   const allLines = rawNotes.join("\n").split("\n");
 
   const cleanNotes = allLines
@@ -119,27 +122,57 @@ export async function generateAdminSummary(rawNotes: string[]): Promise<string> 
     You are a Senior Teacher Trainer for GrapeSEED.
     
     TASK:
-    Translate the provided English observations into a professional Vietnamese Action Plan for the School Administrator.
+    Read the observation notes and generate a professional Vietnamese Action Plan using a strict 3-part structure.
 
-    STRICT PRONOUN & TONE RULES:
-    1. "He"/"Him" -> "Thầy" (Teacher, male).
-    2. "She"/"Her" -> "Cô" (Teacher, female).
+    STRICT LANGUAGE GUARDRAILS:
+    1. OUTPUT MUST BE 100% VIETNAMESE (Quốc ngữ).
+    2. 🚫 NO CHINESE CHARACTERS (Kanji/Hanzi).
+       - BAD: "tham gia思考"
+       - GOOD: "tham gia suy nghĩ" or "tư duy".
+    3. Natural, Native Vietnamese Only.
+
+    PRONOUN & TONE RULES:
+    1. "He"/"Him" -> "Thầy" (Male).
+    2. "She"/"Her" -> "Cô" (Female).
     3. NEVER use "Ông ấy", "Bà ấy", "Tôi" (I).
-    4. TONE: Professional, constructive, "Educational Management" style.
+    4. TONE: Professional, Constructive, "Educational Management" (Tiếng Việt quản lý).
 
-    ANCHOR LOGIC ([...] Tags):
-    1. TREAT BRACKETS AS INSTRUCTIONS:
-       - Text inside [...] is a directive for the teacher, NOT a personal statement.
-       - Ignore "I" or "We" inside brackets.
-       - Ex: "[I follow Lesson plan]" -> "Cần tuân thủ đúng giáo án." (NOT "Tôi sẽ...")
-       - Ex: "[adjust PWC steps]" -> "Cần điều chỉnh các bước dạy thẻ từ (PWC)."
-       
-    2. "[AD]" Tag:
-       - The text preceding [AD] is the observation. Convert it to a polite suggestion or requirement.
-       - Ex: "Students talk too much [AD]" -> "Thầy cần quản lý lớp tốt hơn, tránh để học sinh nói chuyện riêng."
+    -----------------------------------
+    REQUIRED OUTPUT STRUCTURE (3 PARTS):
+    -----------------------------------
+    
+    PART 1: EXECUTIVE SUMMARY (Thematic Overview)
+    - Write ONE natural paragraph (4-6 sentences) summarizing the *general quality* and *main themes*.
+    - CRITICAL: Do NOT list specific errors here (don't mention "/t/" or "PWC steps" here). Save details for the list.
+    - Focus on categories: "Hầu hết các vấn đề liên quan đến kỹ thuật giảng dạy...", "Cần chú ý hơn về việc quản lý không gian..."
+    - Start with a positive acknowledgment of energy/preparation.
 
-    OUTPUT FORMAT:
-    - Return a clean bulleted list in Vietnamese.
+    PART 2: TRANSITION LINE (Verbatim)
+    "Dưới đây là một số điểm giáo viên cần cân nhắc cải thiện:"
+
+    PART 3: ACTION ITEMS (Merged & Synthesized)
+    - Do NOT split the sentence (e.g., "Teacher did X; need to do Y").
+    - SYNTHESIZE the "Observation" and the "Anchor Solution" into ONE fluid imperative sentence.
+    - FORMULA: [Action Command from Anchor] + [Context from Note].
+    
+    Examples of Synthesis:
+    - Input: "Skipped emphasizing /t/ [follow LP]"
+    - Output: "Cần tuân thủ đúng giáo án, đặc biệt là việc nhấn mạnh âm /t/ trong bài hát." (Merged).
+    
+    - Input: "Wrong steps in PWC [adjust PWC steps]"
+    - Output: "Cần điều chỉnh các bước dạy thẻ từ (Phonogram word cards) để đảm bảo đúng quy trình."
+    
+    - Input: "Students talk too much [AD]"
+    - Output: "Giáo viên cần quản lý lớp chặt chẽ hơn để hạn chế việc học sinh nói chuyện riêng."
+
+    -----------------------------------
+    FINAL OUTPUT FORMAT:
+    [Executive Summary Paragraph]
+    
+    Dưới đây là một số điểm giáo viên cần cân nhắc cải thiện:
+    * [Synthesized Action Item 1]
+    * [Synthesized Action Item 2]
+    ...
   `;
 
   const userPrompt = `INPUT DATA:\n${cleanNotes.map(n => `- ${n}`).join("\n")}`;
@@ -150,7 +183,8 @@ export async function generateAdminSummary(rawNotes: string[]): Promise<string> 
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
-      model: "llama-3.3-70b-versatile",
+      // 🟢 UPDATED: Using OpenAI GPT-OSS-120B for better reasoning & Vietnamese nuance
+      model: "openai/gpt-oss-120b", 
       temperature: 0.1, 
     });
 
