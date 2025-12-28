@@ -1145,12 +1145,10 @@ const handleAdminPreview = async () => {
     setCanvasDirty(false);
   }
 
-  // 2. Identify candidates for summary
-  const summaryCandidates = indicators.filter(
-    (i) => i.includeInTrainerSummary && i.commentText?.trim()
-  );
+  // 2. Validation: Check if at least one indicator is marked for summary
+  const hasSummaryCandidates = indicators.some((i) => i.includeInTrainerSummary);
 
-  if (summaryCandidates.length === 0) {
+  if (!hasSummaryCandidates) {
     alert("Please check 'Include in Summary' for at least one indicator.");
     return;
   }
@@ -1159,27 +1157,16 @@ const handleAdminPreview = async () => {
 
   try {
     // -------------------------------------------------------------
-    // 🚀 STEP A: COLLECT RAW NOTES
-    // Grab text WITH anchors ([AD], [Hints]) intact.
-    // -------------------------------------------------------------
-    const rawNotes = summaryCandidates.map((i) => i.commentText.trim());
-
-    // -------------------------------------------------------------
-    // 🧠 STEP B: CALL THE BRAIN (The Translator)
-    // Send raw notes to Groq to get the Vietnamese Action Plan.
+    // 🧠 CALL THE BRAIN (The Translator + Logic Engine)
     // -------------------------------------------------------------
     console.log("🤖 Generating Admin Summary with AI...");
-    // Note: If you have a saved summary in DB (adminSummaryVN) that is NOT empty,
-    // you might want to skip AI generation to avoid overwriting your edits.
-    // But usually, clicking "Preview" implies you want to regenerate or view current state.
-    // Let's assume we regenerate if the summary is empty, or just overwrite for now based on 'Preview' semantics.
     
-    // Check if we already have a saved summary to prioritize? 
-    // If you want "Preview" to always regenerate from current notes, keep this:
-    const aiGeneratedSummary = await generateAdminSummary(rawNotes);
+    // 🟢 UPDATED: Pass the FULL 'indicators' array. 
+    // The function now handles the logic counting good/bad internally.
+    const aiGeneratedSummary = await generateAdminSummary(indicators);
 
     // -------------------------------------------------------------
-    // 📋 STEP C: BUILD PREVIEW MODEL
+    // 📋 BUILD PREVIEW MODEL
     // -------------------------------------------------------------
     const metaForExport: ObservationMetaForExport = {
       teacherName,
@@ -1205,10 +1192,9 @@ const handleAdminPreview = async () => {
     const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
 
     // -------------------------------------------------------------
-    // 🔄 STEP D: INJECT AI SUMMARY & UPDATE UI
+    // 🔄 INJECT AI SUMMARY & UPDATE UI
     // -------------------------------------------------------------
     // We prioritize the AI summary we just generated. 
-    // If AI failed/returned empty, we fall back to the basic joining logic in freshModel.
     
     const finalModel = {
       ...freshModel,
