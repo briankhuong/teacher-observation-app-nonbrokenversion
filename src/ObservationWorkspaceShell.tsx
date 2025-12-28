@@ -1139,35 +1139,20 @@ const handleExportPreview = () => {
 };
 
 const handleAdminPreview = async () => {
-  // 1. Save Canvas if dirty (Your existing logic)
-  if (canvasDirty) {
-    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-    setCanvasDirty(false);
-  }
+    // 1. Save Canvas if dirty
+    if (canvasDirty) {
+      handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+      setCanvasDirty(false);
+    }
 
-  // 2. Validation: Check if at least one indicator is marked for summary
-  const hasSummaryCandidates = indicators.some((i) => i.includeInTrainerSummary);
+    // 2. Validation
+    const hasSummaryCandidates = indicators.some((i) => i.includeInTrainerSummary);
+    if (!hasSummaryCandidates) {
+      alert("Please check 'Include in Summary' for at least one indicator.");
+      return;
+    }
 
-  if (!hasSummaryCandidates) {
-    alert("Please check 'Include in Summary' for at least one indicator.");
-    return;
-  }
-
-  // Optional: Set a loading state here if you have one, e.g., setIsGlobalLoading(true);
-
-  try {
-    // -------------------------------------------------------------
-    // 🧠 CALL THE BRAIN (The Translator + Logic Engine)
-    // -------------------------------------------------------------
-    console.log("🤖 Generating Admin Summary with AI...");
-    
-    // 🟢 UPDATED: Pass the FULL 'indicators' array. 
-    // The function now handles the logic counting good/bad internally.
-    const aiGeneratedSummary = await generateAdminSummary(indicators);
-
-    // -------------------------------------------------------------
-    // 📋 BUILD PREVIEW MODEL
-    // -------------------------------------------------------------
+    // 3. Build Model (Use existing adminSummaryVN or empty string)
     const metaForExport: ObservationMetaForExport = {
       teacherName,
       schoolName,
@@ -1191,34 +1176,44 @@ const handleAdminPreview = async () => {
 
     const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
 
-    // -------------------------------------------------------------
-    // 🔄 INJECT AI SUMMARY & UPDATE UI
-    // -------------------------------------------------------------
-    // We prioritize the AI summary we just generated. 
-    
     const finalModel = {
       ...freshModel,
-      trainerSummary: aiGeneratedSummary || freshModel.trainerSummary, 
+      // 🟢 CHANGE: Use existing saved summary if available, otherwise blank
+      trainerSummary: adminSummaryVN || "", 
     };
 
-    // Update the State for the Textarea (so user sees it immediately)
-    if (setAdminSummaryVN) {
-        setAdminSummaryVN(finalModel.trainerSummary);
-    }
-    
-    // Update the Preview Model
     setAdminPreview(finalModel);
-    
-    // Show the Modal (Using your specific state setter)
     setShowAdminPreview(true);
+  };
 
-  } catch (err) {
-    console.error("❌ Admin Preview Error:", err);
-    alert("Failed to generate summary. Please check console.");
-  } finally {
-    // setIsGlobalLoading(false);
-  }
-};
+const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+
+  const handleGenerateAiSummary = async () => {
+    if (!adminPreview) return;
+    
+    // Safety check: Don't overwrite existing text without warning
+    if (adminPreview.trainerSummary && adminPreview.trainerSummary.length > 20) {
+      const confirm = window.confirm("This will overwrite your current summary with a new AI draft. Are you sure?");
+      if (!confirm) return;
+    }
+
+    setIsGeneratingSummary(true);
+
+    try {
+      const aiSummary = await generateAdminSummary(indicators);
+      
+      setAdminPreview(prev => prev ? { ...prev, trainerSummary: aiSummary } : prev);
+      
+      // Optional: Auto-save to state so it persists if they close/reopen
+      setAdminSummaryVN(aiSummary); 
+      
+    } catch (err) {
+      console.error("Summary Generation Error", err);
+      alert("Failed to generate summary.");
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  };
 
 const [canvasDirty, setCanvasDirty] = useState(false);
 
@@ -2404,6 +2399,20 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                     </div>
                   </div>
                  <div style={{ display: "flex", gap: "8px" }}>
+                  {/* 🟢 NEW BUTTON: Runs the AI on demand */}
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={handleGenerateAiSummary}
+                      disabled={isGeneratingSummary}
+                      style={{ 
+                        background: "linear-gradient(135deg, #f59e0b, #d97706)", // Amber/Orange
+                        color: "white",
+                        border: "none"
+                      }} 
+                    >
+                      {isGeneratingSummary ? "Generating..." : "✨ Generate AI Summary"}
+                    </button>
                     <button
                       type="button"
                       className="btn btn-primary" 

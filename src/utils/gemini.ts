@@ -5,10 +5,6 @@ const groq = new Groq({
   dangerouslyAllowBrowser: true 
 });
 
-/**
- * Polish a single note using Groq
- * (No changes here)
- */
 export async function polishTextWithGroq(text: string): Promise<string> {
   try {
     const chatCompletion = await groq.chat.completions.create({
@@ -61,7 +57,6 @@ export async function polishTextWithGroq(text: string): Promise<string> {
 
 /**
  * 🟢 Batch Polish with Groq
- * Optimized for speed using JSON mode.
  */
 export async function polishBatchWithGroq(items: { id: string; text: string }[]) {
   const systemPrompt = `You are a professional text processing engine for an English Phonics Teacher.
@@ -99,7 +94,6 @@ export async function polishBatchWithGroq(items: { id: string; text: string }[])
     throw error;
   }
 }
-
 // ===========================================================================
 // 🟢 PART 1: DETERMINISTIC LOGIC (UNTOUCHED)
 // ===========================================================================
