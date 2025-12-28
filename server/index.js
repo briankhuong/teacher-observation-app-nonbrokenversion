@@ -5,6 +5,7 @@ import fetch from "node-fetch";
 import mergeRoutes from "./mergeRoutes.js";
 // 👇 Import the new Gemini Route
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
+import polishGroqRoute from "./polishGroqRoute.js";
 
 dotenv.config({ path: ".env.azure" });
 
@@ -139,6 +140,9 @@ app.post("/api/ocr-azure", async (req, res) => {
 
 // 👇 C. Merge Routes (Excel Logic)
 app.use(mergeRoutes); 
+
+// 👇 USE NEW ROUTE
+app.use(polishGroqRoute);
 
 // -----------------------------------------------------------------
 // 4. Start Server

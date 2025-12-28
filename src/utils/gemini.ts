@@ -1,103 +1,4 @@
-import Groq from "groq-sdk";
-
-const groq = new Groq({
-  apiKey: import.meta.env.VITE_GROQ_API_KEY,
-  dangerouslyAllowBrowser: true 
-});
-
-export async function polishTextWithGroq(text: string): Promise<string> {
-  try {
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: `You are a strict grammar correction engine for an English Phonics Teacher.
-          
-          DOMAIN CONTEXT (CRITICAL):
-          - These are observation notes for an ESL/Phonics class.
-          - The teacher often refers to specific SOUNDS using slashes (e.g., /t/, /s/, /d/) or short letters.
-          - Example: "emphasizing the /t/ in the song" is correct.
-          - Example: "teaching the (H) sound" is correct.
-
-          OPERATIONAL GUIDE:
-          1. FIX BROKEN ENGLISH (Conservative Mode):
-             - Fix Tense, Grammar, and Punctuation.
-             - Expand standard shorthand ("tchr" -> "teacher").
-             - DO NOT guess at "typos" if they look like phonetic sounds. (e.g., keep "ltl", "/t/", or "sts" if unsure).
-             - NEVER change a short string like "ltl" or "/t/" to a completely different word like "lyrics".
-
-          2. DO NOT CHANGE THE STYLE:
-             - Keep it simple and direct. Do not upgrade vocabulary.
-
-          3. PRESERVE STRUCTURE & TAGS:
-             - You MUST preserve hyphens "-", bullet points, and "(GA)" tags.
-             
-          4. PROTECT ANCHORS [...]:
-             - Content inside square brackets (e.g., [follow LP], [AD]) is SYSTEM CODE.
-             - Copy them EXACTLY. Do not fix grammar inside them.
-
-          OUTPUT RULES:
-          - Return ONLY the corrected text.`
-        },
-        {
-          role: "user",
-          content: text
-        }
-      ],
-      model: "llama-3.3-70b-versatile",
-      temperature: 0.1, 
-    });
-
-    return chatCompletion.choices[0]?.message?.content?.trim() || text;
-  } catch (error) {
-    console.error("Groq Polish Error:", error);
-    throw error;
-  }
-}
-
-/**
- * 🟢 Batch Polish with Groq
- */
-export async function polishBatchWithGroq(items: { id: string; text: string }[]) {
-  const systemPrompt = `You are a professional text processing engine for an English Phonics Teacher.
-  
-  DOMAIN RULES:
-  1. Expect phonetic sounds (e.g., /t/, /s/, (H)). Do NOT autocorrect these to words like "lyrics" or "time".
-  2. If a word looks like a sound code, keep it as is.
-  
-  STRICT MACHINE RULES:
-  1. Return ONLY a valid JSON object. 
-  2. PRESERVE TAGS: Do not remove "(GA)" tags.
-  3. PROTECT ANCHORS: Do NOT edit, expand, or fix text inside square brackets "[...]".
-  4. PRESERVE HYPHENS.
-  
-  JSON OUTPUT FORMAT: { "indicator_id": "polished text string" }`;
-
-  const userPrompt = `Data to process: ${JSON.stringify(items)}`;
-
-  try {
-    const response = await groq.chat.completions.create({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      model: "llama-3.3-70b-versatile",
-      response_format: { type: "json_object" }, 
-      temperature: 0.1, 
-    });
-
-    const content = response.choices[0]?.message?.content;
-    const parsed = content ? JSON.parse(content) : {};
-    return parsed;
-  } catch (error) {
-    console.error("Groq Batch Error:", error);
-    throw error;
-  }
-}
-// ===========================================================================
-// 🟢 PART 1: DETERMINISTIC LOGIC (UNTOUCHED)
-// ===========================================================================
-
+// 🟢 PART 1: DETERMINISTIC LOGIC (Keep exactly as is)
 export interface IndicatorSimple {
   number: string;
   title: string;
@@ -170,86 +71,79 @@ function calculateClassLevelAndSentence(indicators: IndicatorSimple[]): string {
   }
 }
 
-// ===========================================================================
-// 🟢 PART 2: THE AI FUNCTION (STRICTEST VERSION)
-// ===========================================================================
+// 🟢 PART 2: API CLIENT FUNCTIONS (Secure)
+
+const API_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
+
+export async function polishTextWithGroq(text: string): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE}/api/polish-text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    return data.polished || text;
+  } catch (error) {
+    console.error("Polish Error:", error);
+    return text;
+  }
+}
+
+export async function polishBatchWithGroq(items: { id: string; text: string }[]) {
+  try {
+    const res = await fetch(`${API_BASE}/api/polish-batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    return await res.json(); // Returns { "id": "polished text" }
+  } catch (error) {
+    console.error("Batch Error:", error);
+    return {};
+  }
+}
 
 export async function generateAdminSummary(
   indicators: IndicatorSimple[]
 ): Promise<string> {
   
-  // 1. GENERATE PART 1 (Code Logic - Untouched)
+  // 1. Calculate General Comment (Local Logic)
   const part1_GeneralComment = calculateClassLevelAndSentence(indicators);
 
-  // 2. PREPARE DATA FOR PART 2
+  // 2. Prepare Notes
   const summaryCandidates = indicators.filter(
     (i) => i.includeInTrainerSummary && i.commentText?.trim().length > 0
   );
 
   const cleanNotes = summaryCandidates
     .map(i => i.commentText.replace(/\[OCR\]/gi, "").trim())
-    // Strict Filter: Only lines with anchors
+    // Keep only lines with anchors [...]
     .filter(t => t.length > 0 && /\[.*?\]/.test(t)); 
 
-  // 3. Return Part 1 if no anchors
-  if (cleanNotes.length === 0) {
+  const notesList = cleanNotes.map(n => `- ${n}`);
+
+  if (notesList.length === 0) {
     return part1_GeneralComment;
   }
 
-  // 4. GENERATE PART 2 WITH AI
-  // 🟢 UPDATED PROMPT: Added Vocabulary & Context Rules
-  const systemPrompt = `
-    You are a Senior Teacher Trainer for GrapeSEED.
-    
-    TASK:
-    Convert the provided Anchored Notes into a Vietnamese Action List.
-
-    STRICT RULES:
-    1. Output 100% Vietnamese. No Chinese characters.
-    2. Tone: Imperative, Constructive.
-    3. PRONOUN RULE: Start every bullet point with a **Verb** or **"Cần"**. 
-       - NEVER use "Thầy/Cô/Giáo viên" at the start.
-    4. **ONE ANCHOR = ONE BULLET**: Do not split one note into multiple bullets.
-
-    🟢 SYNTHESIS LOGIC (CRITICAL):
-    - The content inside [...] is the **COMMAND**.
-    - The text outside [...] is the **CONTEXT**.
-    - **combine them**: Use the Command to tell the teacher *what* to do, and the Context to explain *why* or *how* specific it should be.
-    - **Avoid Vagueness**: Do not just say "Review PCs". Say "Review PCs to help students practice speaking" (if the note mentions speaking).
-
-    🟢 VOCABULARY & TRANSLATION GUIDE:
-    - "Spoon-feeding" -> "làm thay học sinh", "gợi ý quá mức", "không để học sinh tự tư duy". (Do NOT use the English word).
-    - "Pacing" -> "nhịp độ lớp học".
-    - "Monitor" -> "quan sát và hỗ trợ".
-
-    EXAMPLES:
-    - Input: "Students struggle with counting. Teacher counted for them. [avoid spoon-feeding]"
-      -> Output: "- Cần để học sinh tự thực hiện việc đếm, tránh làm thay hoặc gợi ý quá mức cho học sinh."
-    
-    - Input: "No speaking activities seen. [prepare speaking activities]"
-      -> Output: "- Cần chuẩn bị và tổ chức thêm các hoạt động nói để học sinh có cơ hội thực hành giao tiếp nhiều hơn."
-  `;
-
-  const userPrompt = `OBSERVATION NOTES:\n${cleanNotes.map(n => `- ${n}`).join("\n")}`;
-
+  // 3. Call Backend for AI Generation (Part 2)
   try {
-    const response = await groq.chat.completions.create({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      model: "openai/gpt-oss-120b", 
-      temperature: 0.1, 
+    const res = await fetch(`${API_BASE}/api/generate-summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: notesList }),
     });
-
-    const aiBulletPoints = response.choices[0]?.message?.content?.trim() || "";
+    
+    const data = await res.json();
+    const aiBulletPoints = data.summary || "";
 
     if (!aiBulletPoints) return part1_GeneralComment;
 
     return `${part1_GeneralComment}\n\nDưới đây là một số điểm giáo viên cần cân nhắc cải thiện:\n${aiBulletPoints}`;
 
   } catch (error) {
-    console.error("Groq Admin Summary Error:", error);
+    console.error("Admin Summary Error:", error);
     return part1_GeneralComment;
   }
 }
