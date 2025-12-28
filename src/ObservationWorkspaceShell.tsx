@@ -2485,7 +2485,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                         prev ? { ...prev, trainerSummary: value } : prev
                       );
                     }}
-                    rows={4}
+                    rows={15}
                     style={{
                       width: "100%",
                       resize: "vertical",
@@ -2496,6 +2496,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                       padding: 8,
                       fontSize: 12,
                       lineHeight: 1.4,
+                      minHeight: "300px"
                     }}
                   />
                 </div>              
