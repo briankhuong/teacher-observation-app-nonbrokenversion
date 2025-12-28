@@ -16,14 +16,42 @@ export async function polishTextWithGroq(text: string): Promise<string> {
         {
           role: "system",
           content: `You are a strict grammar correction engine for an English Phonics Teacher.
-          DOMAIN CONTEXT: ESL/Phonics class. Teacher refers to sounds like /t/, /s/.
-          RULES: Fix grammar/tense. Keep simple. Preserve structure/tags/anchors.`
+          
+          DOMAIN CONTEXT (CRITICAL):
+          - These are observation notes for an ESL/Phonics class.
+          - The teacher often refers to specific SOUNDS using slashes (e.g., /t/, /s/, /d/) or short letters.
+          - Example: "emphasizing the /t/ in the song" is correct.
+          - Example: "teaching the (H) sound" is correct.
+
+          OPERATIONAL GUIDE:
+          1. FIX BROKEN ENGLISH (Conservative Mode):
+             - Fix Tense, Grammar, and Punctuation.
+             - Expand standard shorthand ("tchr" -> "teacher").
+             - DO NOT guess at "typos" if they look like phonetic sounds. (e.g., keep "ltl", "/t/", or "sts" if unsure).
+             - NEVER change a short string like "ltl" or "/t/" to a completely different word like "lyrics".
+
+          2. DO NOT CHANGE THE STYLE:
+             - Keep it simple and direct. Do not upgrade vocabulary.
+
+          3. PRESERVE STRUCTURE & TAGS:
+             - You MUST preserve hyphens "-", bullet points, and "(GA)" tags.
+             
+          4. PROTECT ANCHORS [...]:
+             - Content inside square brackets (e.g., [follow LP], [AD]) is SYSTEM CODE.
+             - Copy them EXACTLY. Do not fix grammar inside them.
+
+          OUTPUT RULES:
+          - Return ONLY the corrected text.`
         },
-        { role: "user", content: text }
+        {
+          role: "user",
+          content: text
+        }
       ],
       model: "llama-3.3-70b-versatile",
       temperature: 0.1, 
     });
+
     return chatCompletion.choices[0]?.message?.content?.trim() || text;
   } catch (error) {
     console.error("Groq Polish Error:", error);
@@ -32,13 +60,26 @@ export async function polishTextWithGroq(text: string): Promise<string> {
 }
 
 /**
- * Batch Polish
- * (No changes here)
+ * 🟢 Batch Polish with Groq
+ * Optimized for speed using JSON mode.
  */
 export async function polishBatchWithGroq(items: { id: string; text: string }[]) {
-  const systemPrompt = `You are a professional text processing engine.
-  RULES: Return JSON. Preserve tags/anchors. Do not autocorrect phonetics.`;
-  const userPrompt = `Data: ${JSON.stringify(items)}`;
+  const systemPrompt = `You are a professional text processing engine for an English Phonics Teacher.
+  
+  DOMAIN RULES:
+  1. Expect phonetic sounds (e.g., /t/, /s/, (H)). Do NOT autocorrect these to words like "lyrics" or "time".
+  2. If a word looks like a sound code, keep it as is.
+  
+  STRICT MACHINE RULES:
+  1. Return ONLY a valid JSON object. 
+  2. PRESERVE TAGS: Do not remove "(GA)" tags.
+  3. PROTECT ANCHORS: Do NOT edit, expand, or fix text inside square brackets "[...]".
+  4. PRESERVE HYPHENS.
+  
+  JSON OUTPUT FORMAT: { "indicator_id": "polished text string" }`;
+
+  const userPrompt = `Data to process: ${JSON.stringify(items)}`;
+
   try {
     const response = await groq.chat.completions.create({
       messages: [
@@ -49,8 +90,10 @@ export async function polishBatchWithGroq(items: { id: string; text: string }[])
       response_format: { type: "json_object" }, 
       temperature: 0.1, 
     });
+
     const content = response.choices[0]?.message?.content;
-    return content ? JSON.parse(content) : {};
+    const parsed = content ? JSON.parse(content) : {};
+    return parsed;
   } catch (error) {
     console.error("Groq Batch Error:", error);
     throw error;
