@@ -939,93 +939,32 @@ body {
   margin-top: 4px;
   cursor: pointer;
 }
+/* ==========================================================================
+   EXPORT PREVIEW PANEL (TEACHER & ADMIN)
+   ========================================================================== */
 
-.export-preview-panel {
-  margin-top: 10px;
-  border-radius: 16px;
-  border: 1px solid rgba(51, 65, 85, 0.9);
-  background: rgba(15, 23, 42, 0.96);
-  padding: 10px 12px;
-  max-height: 260px;
-  overflow-y: auto;
-  box-shadow: var(--shadow-soft);
-}
-
-.export-preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.export-preview-title {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.export-preview-sub {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.export-preview-table {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.export-preview-row {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) 70px;
-  gap: 8px;
-  font-size: 11px;
-  padding: 6px 8px;
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(30, 41, 59, 0.9);
-}
-
-.export-preview-indicator {
-  font-weight: 600;
-}
-
-.export-preview-description {
-  color: var(--text-muted);
-}
-
-.export-preview-status {
-  text-align: center;
-  color: var(--text-muted);
-}
-.export-preview-status {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  font-size: 11px;
-}
-
-.export-preview-status-main {
-  font-weight: 600;
-}
-
-.export-preview-status-flags {
-  opacity: 0.8;
-}
+/* 🟢 MAIN PANEL CONTAINER */
 .export-preview-panel {
   margin-top: 16px;
   padding: 14px 18px;
   border-radius: 18px;
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: var(--shadow-soft);
+  
+  /* FIX: Flex layout allows the container to grow properly */
+  display: flex;
+  flex-direction: column;
+  max-height: 98vh; /* Prevents it from being taller than the screen */
 }
 
+/* 🟢 HEADER AREA */
 .export-preview-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+  flex-shrink: 0; /* Keeps header visible when scrolling */
 }
 
 .export-preview-title {
@@ -1038,18 +977,37 @@ body {
   color: var(--text-muted);
 }
 
+/* 🟢 SCROLLABLE & RESIZABLE TABLE LIST */
 .export-preview-table {
   display: flex;
   flex-direction: column;
   gap: 6px;
+
+  /* ✨ MAGIC FIX: Tall, scrollable, and draggable ✨ */
+  height: 60vh;        /* Default height (60% of screen) */
+  min-height: 300px;   /* Minimum safe height */
+  resize: vertical;    /* Adds the drag handle at bottom-right */
+  overflow-y: auto;    /* Adds internal scrollbar */
+  overflow-x: hidden;
+  
+  padding-right: 4px;  /* Space for scrollbar */
+  padding-bottom: 4px;
 }
 
+/* ADMIN SPECIFIC: Slightly shorter default because of the textarea above it */
+.admin-preview .export-preview-table {
+  height: 45vh; 
+}
+
+/* 🟢 ROW STYLES (TEACHER) */
 .export-preview-row {
-  display: flex;
+  display: flex; /* Default is Flex for Teacher view */
   gap: 16px;
   padding: 8px 10px;
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(30, 41, 59, 0.5);
+  flex-shrink: 0; /* Prevents rows from squishing */
 }
 
 .export-preview-left {
@@ -1065,8 +1023,30 @@ body {
   gap: 6px;
 }
 
+/* 🟢 ROW STYLES (ADMIN OVERRIDES) */
+/* This overrides the 'flex' above with 'grid' specifically for Admin rows */
+.admin-row {
+  display: grid; 
+  grid-template-columns: 260px 1fr 120px 1.2fr;
+  gap: 12px;
+}
+
+.admin-main-category {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #a0aec0;
+}
+
+.admin-aspect {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 🟢 TEXT & TAG UTILITIES */
 .export-preview-indicator {
   font-size: 12px;
+  font-weight: 600;
 }
 
 .export-preview-description {
@@ -1090,13 +1070,8 @@ body {
   background: rgba(15, 23, 42, 0.95);
 }
 
-.export-status-done {
-  border-color: rgba(34, 197, 94, 0.8);
-}
-
-.export-status-pending {
-  border-color: rgba(234, 179, 8, 0.85);
-}
+.export-status-done { border-color: rgba(34, 197, 94, 0.8); }
+.export-status-pending { border-color: rgba(234, 179, 8, 0.85); }
 
 .export-preview-tags {
   display: flex;
@@ -1118,52 +1093,41 @@ body {
   color: rgba(252, 211, 77, 0.95);
 }
 
-.export-preview-block {
-  font-size: 11px;
-}
-
-.export-preview-label {
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.export-label-good {
-  color: rgba(74, 222, 128, 0.95);
-}
-
-.export-label-growth {
-  color: rgba(252, 211, 77, 0.96);
-}
+.export-preview-block { font-size: 11px; }
+.export-preview-label { font-weight: 600; margin-bottom: 2px; }
+.export-label-good { color: rgba(74, 222, 128, 0.95); }
+.export-label-growth { color: rgba(252, 211, 77, 0.96); }
 
 .export-preview-text {
   color: var(--text-muted);
   white-space: pre-wrap;
 }
 
+.export-preview-notes {
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 .export-preview-panel.admin-preview {
   margin-top: 16px;
 }
 
-.admin-row {
-  grid-template-columns: 260px 1fr 120px 1.2fr;
-}
-
-.admin-main-category {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: #a0aec0;
-}
-
-.admin-aspect {
-  font-size: 13px;
-  font-weight: 600;
-}
-.export-preview-notes {
+/* Visual Warnings inside preview (Yellow text) */
+.export-warning-banner, .export-ocr-banner {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(234, 179, 8, 0.15);
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  color: #fde047;
   font-size: 12px;
-  color: var(--text-muted);
+  border-radius: 8px;
 }
+
+.export-warning-line { margin-bottom: 4px; }
+
+/* Flags for rows with missing data */
+.export-preview-row-flagged { border-left: 3px solid #facc15; }
+.export-preview-row-flagged-ocr { border-left: 3px solid #f472b6; }
 
 
 .scratchpad-backdrop {

@@ -2479,61 +2479,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                     }}
                   />
                 </div>              
-                <div className="export-preview-table">
-                  {adminPreview.rows.map((row) => (
-                    <div
-                      key={row.rowIndex}
-                      className="export-preview-row admin-row"
-                    >
-                      <div className="export-preview-indicator">
-                        <div className="admin-main-category">
-                          {row.mainCategory}
-                        </div>
-                        <div className="admin-aspect">{row.aspect}</div>
-                      </div>
-
-                      <div className="export-preview-description">
-                        {row.classroomSigns}
-                      </div>
-
-                      <div className="export-preview-status">
-                        {row.trainerRating || "\u00A0"}
-                      </div>
-
-                      <div className="export-preview-notes">
-                        <textarea
-                          value={row.trainerNotes}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setAdminPreview((prev) => {
-                              if (!prev) return prev;
-                              return {
-                                ...prev,
-                                rows: prev.rows.map((r) =>
-                                  r.rowIndex === row.rowIndex
-                                    ? { ...r, trainerNotes: value }
-                                    : r
-                                ),
-                              };
-                            });
-                          }}
-                          rows={3}
-                          style={{
-                            width: "100%",
-                            resize: "vertical",
-                            borderRadius: 8,
-                            border: "1px solid rgba(51,65,85,0.9)",
-                            background: "#020617",
-                            color: "var(--text)",
-                            padding: 6,
-                            fontSize: 12,
-                            lineHeight: 1.4,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
           </div>
