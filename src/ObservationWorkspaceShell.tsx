@@ -154,6 +154,7 @@ interface SavedObservationPayload {
   isGood?: boolean;
   isBad?: boolean;
   isFavorite?: boolean;
+  adminSummaryVN?: string | null;
 }
 
 const STORAGE_PREFIX = "obs-v1-";
@@ -726,6 +727,10 @@ useEffect(() => {
         setIsBad(localData.isBad ?? false);
         setIsFavorite(localData.isFavorite ?? false);
         setScratchpadText(localData.scratchpadText ?? "");
+        // 🟢 NEW: Restore summary from the local draft
+          // Use '??' to fall back to DB value if local is missing/null, 
+          // or fallback to null if both are missing.
+          setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
         return; 
       }
 
@@ -826,6 +831,7 @@ useEffect(() => {
       updatedAt: Date.now(),
       scratchpadText,
       isGood, isBad, isFavorite,
+      adminSummaryVN: adminSummaryVN,
     };
 
     persistObservation(payload);
@@ -838,7 +844,7 @@ useEffect(() => {
 }, [
   indicators, scratchpadText, observationMeta, teacherName, schoolName, 
   campus, unit, lesson, supportType, observationStatus, 
-  isGood, isBad, isFavorite, persistObservation
+  isGood, isBad, isFavorite, persistObservation,adminSummaryVN
 ]);
 
   const handleBatchPolishClick = () => {
@@ -915,21 +921,32 @@ const handleManualSave = async () => {
   };
 
 const handleAdminReviewSave = async () => {
-    if (!adminPreview) {
-      console.warn("Cannot save admin review: Preview model is missing.");
-      return;
-    }
+    if (!adminPreview) return;
 
     const translatedSummary = adminPreview.trainerSummary;
 
     try {
+      // 1. Save to Database
       await saveAdminSummaryToDb(observationMeta.id, translatedSummary);
+      
+      // 2. Update React State
+      setAdminSummaryVN(translatedSummary);
 
-      if (typeof setAdminSummaryVN === 'function') {
-          setAdminSummaryVN(translatedSummary);
-      }
+      // 3. 🟢 Update Local Storage (Keep the Draft in sync!)
+      // We manually trigger the 'persistObservation' logic here
+      const payload: SavedObservationPayload = {
+        id: observationMeta.id,
+        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        indicators,
+        status: observationStatus,
+        updatedAt: Date.now(),
+        scratchpadText,
+        isGood, isBad, isFavorite,
+        adminSummaryVN: translatedSummary, // <--- Ensure this is the NEW text
+      };
+      persistObservation(payload);
 
-      alert("✅ Translated Summary Saved to Database!");
+      alert("✅ Translated Summary Saved!");
     } catch (err) {
       console.error("Admin Review Save failed", err);
       alert("❌ Save failed. Check console for details.");
@@ -1139,7 +1156,7 @@ const handleExportPreview = () => {
 };
 
 const handleAdminPreview = async () => {
-    // 1. Save Canvas if dirty
+    // 1. Save Canvas if dirty (Standard check)
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
       setCanvasDirty(false);
@@ -1152,7 +1169,7 @@ const handleAdminPreview = async () => {
       return;
     }
 
-    // 3. Build Model (Use existing adminSummaryVN or empty string)
+    // 3. Build Base Model (Calculates everything except the AI summary)
     const metaForExport: ObservationMetaForExport = {
       teacherName,
       schoolName,
@@ -1176,9 +1193,10 @@ const handleAdminPreview = async () => {
 
     const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
 
+    // 🟢 CRITICAL FIX: Explicitly load the saved 'adminSummaryVN' into the preview.
+    // This ensures that when you reopen the modal, your previous text is restored.
     const finalModel = {
       ...freshModel,
-      // 🟢 CHANGE: Use existing saved summary if available, otherwise blank
       trainerSummary: adminSummaryVN || "", 
     };
 
