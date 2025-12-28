@@ -1651,15 +1651,6 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                 Preview (admin)
               </button>
 
-              {/* EXPORT */}
-              <button className="btn" type="button" onClick={handleExportTeacher}>
-                Export (teacher)
-              </button>
-
-              <button className="btn" type="button" onClick={handleExportAdmin}>
-                Export (admin)
-              </button>
-
               {/* SCRATCHPAD */}
               <button
                 className="btn"
@@ -2412,21 +2403,23 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                         : null}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary" 
-                    onClick={handleAdminReviewSave} 
-                    style={{ marginRight: 8, backgroundColor: 'var(--color-primary)' }} 
-                  >
-                    Save Translated Summary
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setShowAdminPreview(false)}
-                  >
-                    Close
-                  </button>
+                 <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary" 
+                      onClick={handleAdminReviewSave} 
+                      style={{ backgroundColor: 'var(--color-primary)' }} 
+                    >
+                      Save Translated Summary
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setShowAdminPreview(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
                 <div
                   style={{
