@@ -12,7 +12,7 @@ export function buildTeacherPreCallHtml({
   schoolName,
   campus,
   trainerName,
-  bookingUrl = "https://outlook.office.com/bookwithme/user/4934be01038a468f96e53d4680caf11d@grapeseed.com/meetingtype/4J1MzTPOM0m5OcQ16Uo7aQ2?anonymous&ismsaljsauthenabled&ep=mLinkFromTile",
+  bookingUrl = "https://outlook.office.com/bookwithme/user/4934be01038a468f96e53d4680caf11d%40grapeseed.com/meetingtype/4J1MzTPOM0m5OcQ16Uo7aQ2?anonymous&ismsaljsauthenabled",
   teacherWorkbookUrl,
 }: TeacherPreCallTemplateParams): string {
   
@@ -65,3 +65,4 @@ export function buildTeacherPreCallHtml({
 `;
 
 }
+
