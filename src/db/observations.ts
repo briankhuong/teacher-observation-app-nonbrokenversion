@@ -88,60 +88,62 @@ export async function loadObservationFromDb(id: string) {
 // }
 
 // Save indicators + meta + status back to Supabase
+// src/db/observations.ts
+// src/db/observations.ts
+
 export async function saveObservationToDb(args: {
   id: string;
   status: ObservationStatus;
   meta: ObservationMeta;
   indicators: any[];
-  // ❌ REMOVED: isGood, isBad, isFavorite (These are stored inside 'indicators' JSON)
+  updatedAt: number;
+  lastSync: number; // 👈 NEW PARAMETER
 }) {
-  const { id, status, meta, indicators } = args;
+  const { id, status, meta, indicators, updatedAt, lastSync } = args;
 
-  // 1) Read existing meta first so we don't wipe workbook links
-  const { data: existing, error: readErr } = await supabase
+  // 1) Read Server Data
+  const { data: serverRow, error: readErr } = await supabase
     .from("observations")
-    .select("meta")
+    .select("meta, updated_at")
     .eq("id", id)
     .single();
 
   if (readErr) {
-    console.error("[DB] saveObservationToDb read meta error", readErr);
+    console.error("[DB] saveObservationToDb read error", readErr);
     throw readErr;
   }
 
+  // 2) 🛡️ UPDATED CONFLICT CHECK
+  // Compare Server Time vs. When YOU last saw the data (lastSync)
+  const serverTime = serverRow.updated_at ? new Date(serverRow.updated_at).getTime() : 0;
   
+  // Logic: If Server is > 2 seconds newer than your last sync, someone else touched it.
+  if (serverTime > lastSync + 2000) {
+    throw new Error("CONFLICT: Server has newer data. Please refresh.");
+  }
 
-  const prevMeta: any = existing?.meta ?? {};
+  // 3) Write (Same as before)
+  const prevMeta: any = serverRow?.meta ?? {};
   const nextMeta: any = meta ?? {};
 
-  // 2) Merge while preserving stable link fields + merge results
   const mergedMeta: any = {
     ...prevMeta,
     ...nextMeta,
-
-    // ✅ preserve stable links
-    teacherWorkbookUrl:
-      nextMeta.teacherWorkbookUrl ?? prevMeta.teacherWorkbookUrl ?? null,
-    adminWorkbookUrl:
-      nextMeta.adminWorkbookUrl ?? prevMeta.adminWorkbookUrl ?? null,
-    adminWorkbookViewUrl:
-      nextMeta.adminWorkbookViewUrl ?? prevMeta.adminWorkbookViewUrl ?? null,
-
-    // ✅ preserve merged sheet results
+    teacherWorkbookUrl: nextMeta.teacherWorkbookUrl ?? prevMeta.teacherWorkbookUrl ?? null,
+    adminWorkbookUrl: nextMeta.adminWorkbookUrl ?? prevMeta.adminWorkbookUrl ?? null,
+    adminWorkbookViewUrl: nextMeta.adminWorkbookViewUrl ?? prevMeta.adminWorkbookViewUrl ?? null,
     mergedTeacher: nextMeta.mergedTeacher ?? prevMeta.mergedTeacher ?? null,
     mergedAdmin: nextMeta.mergedAdmin ?? prevMeta.mergedAdmin ?? null,
   };
 
-  // 3) Write merged meta AND indicators
   const { error: writeErr } = await supabase
     .from("observations")
     .update({
       status,
       meta: mergedMeta,
-      indicators, // ✅ This saves the full array containing "good", "growth", etc.
+      indicators,
       observation_date: mergedMeta.date ?? null,
-
-      // ❌ REMOVED: is_good, is_bad, is_favorite (Caused the 'column not found' error)
+      updated_at: new Date(updatedAt).toISOString(),
     })
     .eq("id", id);
 
@@ -150,7 +152,6 @@ export async function saveObservationToDb(args: {
     throw writeErr;
   }
 }
-
 /**
  * Saves only the single translated Admin Summary text to the observation row.
  */
