@@ -6,6 +6,8 @@ import { exportAdminExcel } from "./exportAdminExcel";
 import { emailTeacherReport } from "./emailTeacherReport";
 import { generateAdminSummary } from "./utils/gemini";
 import { getOptimizedInkImage } from "./utils/imageOptimizer"; // If you created this file
+// Add these imports
+import { get, set, del } from 'idb-keyval';
 
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
 const DEFAULT_CANVAS_HEIGHT = 300; 
@@ -24,6 +26,37 @@ function getPersistedCanvasHeight(): number {
   } catch (error) {
     console.error("Failed to read persisted canvas height", error);
     return DEFAULT_CANVAS_HEIGHT;
+  }
+}
+
+function cleanupOldDrafts(currentId: string): boolean {
+  console.log("🧹 Attempting to clean up old local drafts...");
+  let clearedCount = 0;
+  
+  try {
+    const keysToRemove: string[] = [];
+    
+    // 1. Scan for other drafts
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      // If it looks like an observation BUT is not the current one
+      if (key && key.startsWith("obs-v1-") && !key.includes(currentId)) {
+        keysToRemove.push(key);
+      }
+    }
+
+    // 2. Delete them
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+      clearedCount++;
+    });
+
+    console.log(`🧹 Deleted ${clearedCount} old drafts to free space.`);
+    return clearedCount > 0; // Return true if we actually deleted something
+    
+  } catch (e) {
+    console.warn("Cleanup failed", e);
+    return false;
   }
 }
 
@@ -713,11 +746,30 @@ useEffect(() => {
   let cancelled = false;
 
   async function load() {
-    let localData: SavedObservationPayload | null = null;
+    let localData: SavedObservationPayload | undefined;
+
+    // 🟢 CHANGE: Load from IndexedDB first
     try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) localData = JSON.parse(raw);
-    } catch (err) { console.error("Local read error", err); }
+      localData = await get<SavedObservationPayload>(storageKey);
+
+      // 🛡️ MIGRATION: If nothing in IndexedDB, check localStorage
+      // This ensures old drafts are not lost when you switch to this new code.
+      if (!localData) {
+         const rawLegacy = localStorage.getItem(storageKey);
+         if (rawLegacy) {
+             console.log("♻️ Migrating data from LocalStorage to IndexedDB...");
+             try {
+               localData = JSON.parse(rawLegacy);
+               // Save it to IndexedDB immediately so next load is fast & modern
+               if (localData) await set(storageKey, localData);
+             } catch (e) {
+               console.error("Legacy migration failed", e);
+             }
+         }
+      }
+    } catch (err) { 
+      console.error("Local read error", err); 
+    }
 
     try {
       const row = await loadObservationFromDb(observationMeta.id);
@@ -728,6 +780,7 @@ useEffect(() => {
       const dbUpdatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
       const localUpdatedAt = localData?.updatedAt ?? 0;
 
+      // Compare Local vs Server Time
       if (localData && localUpdatedAt > dbUpdatedAt) {
         console.log("Using newer local data.");
         setIndicators(localData.indicators);
@@ -735,13 +788,14 @@ useEffect(() => {
         setScratchpadText(localData.scratchpadText ?? "");
         setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
         
-        // 🟢 FIX PART 1: Even if we use local data, we must remember the base version!
+        // Restore the "Memory" of the last sync to prevent conflicts
         if (localData.lastSync) {
            setLastServerVersion(localData.lastSync);
         }
         return; 
       }
 
+      // If Server is newer (or no local data), use Server data
       const normalizedFromDb = normalizeIndicators(row.indicators);
       setIndicators(normalizedFromDb.length > 0 ? normalizedFromDb : INITIAL_INDICATORS);
       setObservationStatus(row.status ?? "draft");
@@ -754,9 +808,7 @@ useEffect(() => {
         setObservationStatus(localData.status ?? "draft");
         setScratchpadText(localData.scratchpadText ?? "");
         
-        // 🟢 FIX PART 2 (The Amnesia Fix): 
-        // When loading offline, restore the "Memory" from local storage.
-        // This stops the app from thinking it is "Version 0" when it goes online.
+        // Restore "Memory" for offline functionality
         if (localData.lastSync) {
            setLastServerVersion(localData.lastSync);
         }
@@ -766,9 +818,11 @@ useEffect(() => {
       }
     }
   }
+  
   load();
   return () => { cancelled = true; };
 }, [storageKey, observationMeta.id]);
+
 useEffect(() => {
   if (isOnline && observationMeta.id) {
     const performSync = async () => {
@@ -819,19 +873,20 @@ const persistObservation = React.useCallback(
     setSyncError(null);
     setSaveStatus("idle");
 
-    // Phase 1: Local Save
+    // --- PHASE 1: LOCAL SAVE (IndexedDB - Unlimited Storage) ---
     try {
-      localStorage.setItem(storageKey, JSON.stringify(payload));
+      // 🟢 CHANGE: Use 'set' from idb-keyval. 
+      // This is asynchronous, so we await it.
+      await set(storageKey, payload);
+      
       setLastSavedAt(payload.updatedAt);
     } catch (err: any) {
-      if (err.name === "QuotaExceededError" || err.name === "NS_ERROR_DOM_QUOTA_REACHED") {
-        setSyncError("Storage Full - Data not safe");
-        return; 
-      }
-      console.error("Failed to write to localStorage", err);
+      console.error("Failed to write to IndexedDB", err);
+      // It is extremely rare to fill IndexedDB, but if it happens:
+      setSyncError("Disk Full - Free up space on device");
     }
 
-    // Phase 2: Cloud Sync
+    // --- PHASE 2: CLOUD SYNC (The Outbox) ---
     try {
       setIsSyncing(true);
       
@@ -841,7 +896,7 @@ const persistObservation = React.useCallback(
         meta: payload.meta,
         indicators: payload.indicators,
         updatedAt: payload.updatedAt,
-        // 🟢 FIX: Read from Ref (Silent) instead of State
+        // Read from Ref (Silent) to avoid loops
         lastSync: lastServerVersionRef.current, 
       });
 
@@ -851,27 +906,32 @@ const persistObservation = React.useCallback(
     } catch (err: any) {
       console.error("[Workspace] Sync failed", err);
 
+      // 🛡️ 1. HANDLE CONFLICT
       if (err.message && err.message.includes("CONFLICT")) {
         setSyncError("⚠️ Version Conflict: Server has newer data.");
-        if (window.confirm("Another device has saved newer data. Do you want to load the latest version? (You will lose current unsaved edits)")) {
-           localStorage.removeItem(storageKey); 
+        
+        const wantReload = window.confirm(
+          "Another device has saved newer data. Do you want to load the latest version? (You will lose current unsaved edits)"
+        );
+
+        if (wantReload) {
+           // We don't strictly need to wipe IndexedDB here since we are reloading,
+           // but it's cleaner to remove the conflicting draft if you want.
+           // await del(storageKey); 
            window.location.reload(); 
         }
         return;
       }
       
-      if (err.name === "QuotaExceededError" || err.name === "NS_ERROR_DOM_QUOTA_REACHED") {
-         setSyncError("Storage Full - Data not safe");
-         return;
-      }
-
+      // 🟢 2. HANDLE OFFLINE / NETWORK ERROR
       setSyncError(null); 
     } finally {
       setIsSyncing(false);
     }
   },
-  [storageKey] // 🟢 CRITICAL: 'lastServerVersion' must NOT be here
+  [storageKey] 
 );
+
 useEffect(() => {
   if (!observationMeta.id) return;
 
@@ -1747,10 +1807,21 @@ const toggleIncludeInTrainerSummary = (index: number) => {
             <div
               style={{
                 fontSize: 11,
-                // 🔴 Turn RED if there is an error
-                color: syncError ? "#ef4444" : "var(--text-muted)", 
+                color: syncError ? "#ef4444" : "var(--text-muted)",
                 fontWeight: syncError ? "bold" : "normal",
                 textAlign: "right",
+                // 🟢 NEW: Allow clicking if it is a storage error
+                cursor: syncError && syncError.includes("Storage") ? "pointer" : "default",
+                textDecoration: syncError && syncError.includes("Storage") ? "underline" : "none"
+              }}
+              // 🟢 NEW: The Rescue Action
+              onClick={() => {
+                if (syncError && syncError.includes("Storage")) {
+                  if (window.confirm("Storage is full. Clear all temporary data to fix this? (Your saved data is safe on the server).")) {
+                    localStorage.clear();
+                    window.location.reload();
+                  }
+                }
               }}
             >
               {syncError ? (
@@ -1764,7 +1835,7 @@ const toggleIncludeInTrainerSummary = (index: number) => {
               ) : (
                 "Auto-save enabled"
               )}
-            </div>     
+            </div>   
             
           </div>
         </div>
