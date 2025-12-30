@@ -18,7 +18,10 @@ import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
 // Update the import to include the Admin function
 import { clientMergeTeacherSheet, clientMergeAdminSheet } from './utils/clientExcelMerge';
 import { EditObservationModal } from './components/EditObservationModal';
-
+// Import the IndexedDB tools
+import { get, set } from 'idb-keyval';
+import { SyncStatusBadge } from './components/SyncStatusBadge';
+import { ConflictResolutionModal } from "./components/ConflictResolutionModal";
 
 // ✅ CORRECT (Matches your screenshots & Vercel settings)
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
@@ -37,7 +40,7 @@ export interface DashboardObservationRow {
   campus: string;
   unit: string;
   lesson: string;
-  supportType: "Training" | "LVA" | "Visit";
+  supportType: string;
   dateLabel: string;
   isoDate: string | null;
   rawDate: number | null;
@@ -45,14 +48,15 @@ export interface DashboardObservationRow {
   progress: number;
   totalIndicators: number;
   statusColor: StatusColor;
-
-  // workbook URLs (resolved from tables or meta)
-  teacherWorkbookUrl?: string | null;
-  adminWorkbookUrl?: string | null;
-  adminViewOnlyUrl?: string | null; // ✅ Added to interface
-  meta?: any;
-  admin_summary_vn?: string | null;
-  isSynced: boolean; // 🟢 NEW
+  teacherWorkbookUrl: string | null;
+  adminWorkbookUrl: string | null;
+  adminViewOnlyUrl: string | null;
+  admin_summary_vn: string | null;
+  meta: any;
+  
+  // 🟢 CHANGE: Replace 'isSynced' with 'syncStatus'
+  // isSynced: boolean; // <--- DELETE THIS LINE
+  syncStatus: 'synced' | 'local-changes' | 'server-newer' | 'conflict'; // <--- ADD THIS LINE
 }
 
 type RecentMergePanel =
@@ -534,6 +538,10 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
 const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
 
+const [isConflictModalOpen, setIsConflictModalOpen] = React.useState(false);
+const [conflictLocalData, setConflictLocalData] = React.useState<any>(null);
+const [conflictServerData, setConflictServerData] = React.useState<any>(null);
+
   // NEW: State for Edit Observation Modal
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingObservation, setEditingObservation] = useState<DashboardObservationRow | null>(null);
@@ -600,14 +608,146 @@ const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
       .limit(1);
     return data?.[0]?.admin_email || "";
   };
-  /* ------------------------------
-      LOAD OBSERVATIONS + SUMMARY META
-   --------------------------------- */
-   
-/* ------------------------------
-      LOAD OBSERVATIONS + SUMMARY META
-   --------------------------------- */
-   
+
+// 🟢 NEW: The "Safe" Push Action (Checks for Conflicts First)
+  const handlePush = async (obsId: string) => {
+    // 1. Local Check
+    const storageKey = `${STORAGE_PREFIX}${obsId}`;
+    const localData = await get<any>(storageKey);
+    
+    if (!localData) {
+      alert("Error: Could not find local data!");
+      return;
+    }
+
+    try {
+      // 2. Pre-Flight Check (Fetch Server Timestamp)
+      const { data: serverCheck, error: checkError } = await supabase
+        .from("observations")
+        .select("updated_at, id")
+        .eq("id", obsId)
+        .single();
+
+      if (serverCheck && !checkError) {
+        const serverTime = new Date(serverCheck.updated_at).getTime();
+        // Fallback to 0 handles "First Time Sync" correctly
+        const localLastSync = localData.lastSync || 0; 
+
+        // 🛑 STOP! Server is newer than the last time we synced
+        if (serverTime > localLastSync + 2000) {
+          console.warn("⚔️ Conflict detected during push!");
+          
+          // Fetch FULL server data for the modal
+          const { data: fullServerData } = await supabase
+            .from("observations").select("*").eq("id", obsId).single();
+            
+          setConflictLocalData(localData);
+          setConflictServerData(fullServerData);
+          setIsConflictModalOpen(true); // <--- The Boss Fight UI opens here
+          return; // Abort push
+        }
+      }
+
+      // 3. Safe to Push (No conflict found)
+      console.log(`🚀 Safe to Push ${obsId}...`);
+      
+      const safeMeta = localData.meta || {};
+
+      const { error } = await supabase.from("observations").upsert({
+          id: localData.id,
+          trainer_id: user?.id,
+          
+          // Required Columns
+          teacher_name: safeMeta.teacherName || "Unknown Teacher",
+          school_name: safeMeta.schoolName || "",
+          campus: safeMeta.campus || "",
+          unit: safeMeta.unit || "1",
+          lesson: safeMeta.lesson || "1",
+          support_type: safeMeta.supportType || "Visit",
+          observation_date: safeMeta.date || new Date().toISOString(),
+          
+          // Content Columns
+          meta: localData.meta,
+          indicators: localData.indicators,
+          status: localData.status,
+          admin_summary_vn: localData.adminSummaryVN,
+          scratchpad_text: localData.scratchpadText,
+          updated_at: new Date().toISOString(),
+      });
+
+      if (error) throw error;
+
+      // 4. Update Local to Green Checkmark
+      const now = Date.now();
+      const updatedLocal = { ...localData, lastSync: now, updatedAt: now };
+      await set(storageKey, updatedLocal);
+      
+      console.log("✅ Push Successful!");
+      window.location.reload();
+
+    } catch (err: any) {
+      console.error("Push failed:", err);
+      alert(`Upload failed: ${err.message || "Check internet connection"}`);
+    }
+  };
+
+  const handleConflictResolved = async (mergedData: any) => {
+    // 1. Save merged data to Local Vault (Overwrite conflict)
+    const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
+    await set(storageKey, mergedData);
+
+    // 2. Close Modal
+    setIsConflictModalOpen(false);
+
+    // 3. Retry Push immediately (It will pass now because timestamps are updated)
+    // We recursively call handlePush to do the actual upload
+    await handlePush(mergedData.id);
+  };
+
+  // 🟢 NEW: The Manual Pull Action
+  const handlePull = async (obsId: string) => {
+    // 1. Safety Check (Basic for Phase 3)
+    // In Phase 4, this will open the "Visual Diff" modal instead.
+    const confirm = window.confirm(
+      "⚠️ Warning: This will overwrite your local copy with the version from the server.\n\nAre you sure?"
+    );
+    if (!confirm) return;
+
+    try {
+      console.log(`⬇️ Pulling observation ${obsId}...`);
+
+      // 2. Fetch FULL data from Supabase
+      const { data, error } = await supabase
+        .from("observations")
+        .select("*") // Get everything (indicators, meta, etc)
+        .eq("id", obsId)
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error("Observation not found on server.");
+
+      // 3. Update the Vault (IndexedDB)
+      const storageKey = `${STORAGE_PREFIX}${obsId}`;
+      
+      // We explicitly set updatedAt to match the server so it shows as "Synced"
+      const serverTime = new Date(data.updated_at).getTime();
+      const payload = {
+        ...data,
+        updatedAt: serverTime, 
+        lastSync: serverTime // Important: Mark as synced
+      };
+
+      await set(storageKey, payload);
+      
+      console.log("✅ Pull complete.");
+      window.location.reload(); // Refresh to show new data
+
+    } catch (err) {
+      console.error("Pull failed:", err);
+      alert("Could not download update. Check connection.");
+    }
+  };
+
 React.useEffect(() => {
     if (!user) {
       setObservations([]);
@@ -617,7 +757,7 @@ React.useEffect(() => {
     const load = async () => {
       let dbData: any[] = [];
       
-      // 🟢 PHASE 1: FETCH DATA (Network First -> Cache Fallback)
+      // 🟢 PHASE 1: FETCH DATA (Network First -> IndexedDB Fallback)
       try {
         const { data, error } = await supabase
           .from("observations")
@@ -630,52 +770,59 @@ React.useEffect(() => {
 
         if (error) throw error;
 
-        // ✅ SUCCESS: Save fresh data to the "Backpack" (Backup)
+        // ✅ SUCCESS: Save fresh data to "IndexedDB Vault"
         dbData = data ?? [];
-        localStorage.setItem("dashboard_backup_list", JSON.stringify(dbData));
+        
+        // Save list to Vault (Non-blocking)
+        set("dashboard_backup_list", dbData).catch(err => 
+          console.warn("Failed to save dashboard backup", err)
+        );
         
       } catch (err) {
-        // ❌ FAIL: Network Error? Load from "Backpack"
+        // ❌ FAIL: Network Error? Load from "IndexedDB Vault"
         console.warn("[Dashboard] Offline mode detected. Loading backup...", err);
-        const backup = localStorage.getItem("dashboard_backup_list");
         
-        if (backup) {
-          dbData = JSON.parse(backup);
-        } else {
-          console.error("[Dashboard] No offline backup found.");
+        try {
+          const backup = await get<any[]>("dashboard_backup_list");
+          if (backup) {
+            console.log("📂 Loaded dashboard from IndexedDB");
+            dbData = backup;
+          } else {
+            console.error("[Dashboard] No offline backup found.");
+            // Fallback to localStorage (Migration support)
+            const oldBackup = localStorage.getItem("dashboard_backup_list");
+            if (oldBackup) dbData = JSON.parse(oldBackup);
+          }
+        } catch (readErr) {
+          console.error("Failed to read from IndexedDB", readErr);
         }
       }
 
       // 🟢 PHASE 2: PROCESS ROWS (Merge with Local Edits)
-      // Even if we loaded 'dbData' from an old backup, this logic 
-      // ensures we still see the latest "Local Edits" (Drafts) 
-      // because it checks 'STORAGE_PREFIX' for every item.
       const rows: DashboardObservationRow[] = [];
 
       try {
-        dbData.forEach((dbRow: any) => {
-          // Prefer full data from localStorage (workspace), fallback to DB meta
+        // Loop through every observation to check for local changes
+        for (const dbRow of dbData) {
           const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
           let parsed: any = null;
-          let isSynced = true; // 🟢 NEW: Default to synced
-
+          
           try {
-            const rawLocal = localStorage.getItem(storageKey);
-            if (rawLocal) {
-              parsed = JSON.parse(rawLocal);
-              
-              // 🟢 NEW: Compare local vs DB update times
-              const localUpdatedAt = parsed.updatedAt || 0;
-              const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
-
-              // If local is 2 seconds newer, it's not synced yet
-              if (localUpdatedAt > dbUpdatedAt + 2000) {
-                isSynced = false;
-              }
+            // Check IndexedDB for the specific observation data
+            const localDraft = await get<any>(storageKey);
+            
+            if (localDraft) {
+               parsed = localDraft;
+            } else {
+               // Fallback: Check localStorage
+               const rawLocal = localStorage.getItem(storageKey);
+               if (rawLocal) parsed = JSON.parse(rawLocal);
             }
           } catch (err) {
-            console.error("Error parsing local storage", err);
+            console.error("Error parsing local data", err);
           }
+
+          // If no local data exists, create a default object from DB data
           if (!parsed) {
             parsed = {
               id: dbRow.id,
@@ -689,6 +836,25 @@ React.useEffect(() => {
                 : Date.now(),
             };
           }
+
+          // --- 🟢 SYNC STATUS LOGIC (Traffic Light) ---
+          const localUpdatedAt = parsed.updatedAt || 0;
+          const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
+          
+          let syncStatus: 'synced' | 'local-changes' | 'server-newer' | 'conflict' = 'synced';
+          const BUFFER = 2000; // 2-second buffer for clock differences
+
+          if (localUpdatedAt > dbUpdatedAt + BUFFER) {
+             // ⬆️ Local is newer -> ORANGE PUSH
+             syncStatus = 'local-changes';
+          } else if (dbUpdatedAt > localUpdatedAt + BUFFER) {
+             // ⬇️ Server is newer -> BLUE PULL
+             syncStatus = 'server-newer';
+          } else {
+             // ✅ Timestamps match -> GREEN SYNCED
+             syncStatus = 'synced';
+          }
+          // ---------------------------------------------
 
           // Normalize indicators
           const indicatorsArray = Array.isArray(parsed.indicators)
@@ -749,25 +915,31 @@ React.useEffect(() => {
             progress,
             totalIndicators: total,
             statusColor,
-            
-            // Workbook Links
             teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? parsed.meta.teacherSheetUrl ?? null,
             adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? parsed.meta.adminSheetUrl ?? null,
             adminViewOnlyUrl: parsed.meta.adminViewOnlyUrl ?? parsed.meta.adminWorkbookViewUrl ?? null,
-            
-            // Summary
             admin_summary_vn: dbRow.admin_summary_vn,
-            isSynced, // 🟢 NEW: Pass this to the UI
+            syncStatus, // 🟢 CORRECTLY ADDED HERE
             meta: parsed.meta ?? {},
           });
-        });
+        }
       } catch (err) {
-        console.error("[Dashboard] unexpected error processing observations", err);
+        console.error("[Dashboard] Unexpected error processing observations", err);
       }
 
-      // ✅ ENRICH: Bulk fetch defaults for schools/teachers
-      const enrichedRows = await enrichObservationsWithDefaults(rows);
-      setObservations(enrichedRows);
+      // ✅ ENRICH: Bulk fetch defaults (Only if Online)
+      let finalRows = rows;
+      try {
+        if (navigator.onLine) {
+           finalRows = await enrichObservationsWithDefaults(rows);
+        } else {
+           console.log("⚠️ Offline: Skipping school/workbook enrichment.");
+        }
+      } catch (enrichErr) {
+        console.warn("Enrichment failed (likely offline)", enrichErr);
+      }
+      
+      setObservations(finalRows);
 
       // Load AM summary "sent" markers
       try {
@@ -1523,11 +1695,11 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         campus: obs.campus,
         unit: obs.unit,
         lesson: obs.lesson,
-        supportType: obs.supportType,
+        supportType: obs.supportType as "Training" | "LVA" | "Visit",
         date: obs.isoDate || "",
       });
     };
-    // 👇 ADD OR MOVE THIS LINE UP (so it is available for the badges)
+
   const metaAny: any = getStableMetaForRow(obs);
 
     // No-argument version — clean and safe
@@ -1580,6 +1752,15 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
               marginBottom: '4px' 
             }}>
             <div className="obs-teacher">{obs.teacherName}</div>
+
+            {/* 🟢 STEP 3: Add the Sync Status Badge here */}
+            {/* It will sit on the right side, opposite the teacher name */}
+            <SyncStatusBadge
+              status={obs.syncStatus} // ✅ NEW (Directly pass the status)
+              onPush={() => handlePush(obs.id)}
+              onPull={() => handlePull(obs.id)}
+            />
+
           </div>
 
           <div className="obs-meta">
@@ -2445,6 +2626,15 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         onClose={() => setShowEditModal(false)}
         observation={editingObservation}
         onSave={handleSaveEditedObservation}
+      />
+      {/* 🟢 ADD THIS SECTION HERE 🟢 */}
+      {/* This is the "Boss Fight" modal for conflicts */}
+      <ConflictResolutionModal 
+         isOpen={isConflictModalOpen}
+         onClose={() => setIsConflictModalOpen(false)}
+         onResolve={handleConflictResolved}
+         localData={conflictLocalData}
+         serverData={conflictServerData}
       />
     </>
   );

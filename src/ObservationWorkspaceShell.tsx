@@ -868,66 +868,33 @@ useEffect(() => {
   // 🟢 FIX 2: REMOVED 'lastServerVersion' from this list to stop the loop!
 }, [isOnline, observationMeta.id, storageKey, setIsSyncing]);
 
+// src/ObservationWorkspaceShell.tsx
+
 const persistObservation = React.useCallback(
   async (payload: SavedObservationPayload) => {
     setSyncError(null);
     setSaveStatus("idle");
 
-    // --- PHASE 1: LOCAL SAVE (IndexedDB - Unlimited Storage) ---
+    // --- PHASE 1: LOCAL SAVE (IndexedDB Only - "The Vault") ---
     try {
-      // 🟢 CHANGE: Use 'set' from idb-keyval. 
-      // This is asynchronous, so we await it.
+      // 1. Save to the local Vault
       await set(storageKey, payload);
-      
       setLastSavedAt(payload.updatedAt);
+      
+      console.log("✅ Saved to Vault (Local Only). Waiting for manual push.");
+
+      // 2. Set status to 'idle' 
+      // This ensures the UI displays: "Saved locally at X:XX (Pending Sync)"
+      setSaveStatus("idle"); 
+
     } catch (err: any) {
       console.error("Failed to write to IndexedDB", err);
-      // It is extremely rare to fill IndexedDB, but if it happens:
-      setSyncError("Disk Full - Free up space on device");
+      setSyncError("Disk Full - Free up space");
     }
 
-    // --- PHASE 2: CLOUD SYNC (The Outbox) ---
-    try {
-      setIsSyncing(true);
-      
-      await saveObservationToDb({
-        id: payload.id,
-        status: payload.status,
-        meta: payload.meta,
-        indicators: payload.indicators,
-        updatedAt: payload.updatedAt,
-        // Read from Ref (Silent) to avoid loops
-        lastSync: lastServerVersionRef.current, 
-      });
-
-      setLastServerVersion(Date.now());
-      setSaveStatus("saved");
-
-    } catch (err: any) {
-      console.error("[Workspace] Sync failed", err);
-
-      // 🛡️ 1. HANDLE CONFLICT
-      if (err.message && err.message.includes("CONFLICT")) {
-        setSyncError("⚠️ Version Conflict: Server has newer data.");
-        
-        const wantReload = window.confirm(
-          "Another device has saved newer data. Do you want to load the latest version? (You will lose current unsaved edits)"
-        );
-
-        if (wantReload) {
-           // We don't strictly need to wipe IndexedDB here since we are reloading,
-           // but it's cleaner to remove the conflicting draft if you want.
-           // await del(storageKey); 
-           window.location.reload(); 
-        }
-        return;
-      }
-      
-      // 🟢 2. HANDLE OFFLINE / NETWORK ERROR
-      setSyncError(null); 
-    } finally {
-      setIsSyncing(false);
-    }
+    // --- PHASE 2: CLOUD SYNC ---
+    // ❌ DISABLED: Auto-sync is off. 
+    // Data remains on the iPad until the user clicks "Push" on the dashboard.
   },
   [storageKey] 
 );
