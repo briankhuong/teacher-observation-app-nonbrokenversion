@@ -151,10 +151,8 @@ interface SavedObservationPayload {
   status: "draft" | "saved";
   updatedAt: number;
   scratchpadText?: string;
-  isGood?: boolean;
-  isBad?: boolean;
-  isFavorite?: boolean;
   adminSummaryVN?: string | null;
+  lastSync?: number;
 }
 
 const STORAGE_PREFIX = "obs-v1-";
@@ -548,6 +546,15 @@ const [isResizing, setIsResizing] = useState(false);
 const canvasWrapperRef = useRef<HTMLDivElement>(null);
 const startYRef = useRef(0);
 const startHeightRef = useRef(0);
+const [lastServerVersion, setLastServerVersion] = useState<number>(0);
+// Add this near your other useState hooks
+const lastServerVersionRef = useRef(lastServerVersion);
+
+// Keep the Ref in sync with the State automatically
+useEffect(() => {
+  lastServerVersionRef.current = lastServerVersion;
+}, [lastServerVersion]);
+
 
 const doCanvasResize = useCallback(
   (e: MouseEvent | TouchEvent) => {
@@ -667,7 +674,6 @@ const [activeIndex, setActiveIndex] = useState(0);
   );
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
   const isLocked = observationStatus === "saved";
-  const [isGood, setIsGood] = useState(false);
   const [isBad, setIsBad] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
 const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
@@ -689,6 +695,7 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
   const [adminPreview, setAdminPreview] = useState<AdminExportModel | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null); // 👈 Add this state
 
 
   useEffect(() => {
@@ -715,7 +722,9 @@ useEffect(() => {
     try {
       const row = await loadObservationFromDb(observationMeta.id);
       if (cancelled) return;
-
+      
+      setLastServerVersion(new Date(row.updated_at).getTime());
+      
       const dbUpdatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
       const localUpdatedAt = localData?.updatedAt ?? 0;
 
@@ -723,14 +732,13 @@ useEffect(() => {
         console.log("Using newer local data.");
         setIndicators(localData.indicators);
         setObservationStatus(localData.status ?? "draft");
-        setIsGood(localData.isGood ?? false);
-        setIsBad(localData.isBad ?? false);
-        setIsFavorite(localData.isFavorite ?? false);
         setScratchpadText(localData.scratchpadText ?? "");
-        // 🟢 NEW: Restore summary from the local draft
-          // Use '??' to fall back to DB value if local is missing/null, 
-          // or fallback to null if both are missing.
-          setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
+        setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
+        
+        // 🟢 FIX PART 1: Even if we use local data, we must remember the base version!
+        if (localData.lastSync) {
+           setLastServerVersion(localData.lastSync);
+        }
         return; 
       }
 
@@ -738,19 +746,21 @@ useEffect(() => {
       setIndicators(normalizedFromDb.length > 0 ? normalizedFromDb : INITIAL_INDICATORS);
       setObservationStatus(row.status ?? "draft");
       setAdminSummaryVN(row.admin_summary_vn ?? null);
-      setIsGood(row.is_good ?? false);
-      setIsBad(row.is_bad ?? false);
-      setIsFavorite(row.is_favorite ?? false);
 
     } catch (err) {
       console.warn("Offline: Using local backup.");
       if (localData && !cancelled) {
         setIndicators(localData.indicators);
         setObservationStatus(localData.status ?? "draft");
-        setIsGood(localData.isGood ?? false);
-        setIsBad(localData.isBad ?? false);
-        setIsFavorite(localData.isFavorite ?? false);
         setScratchpadText(localData.scratchpadText ?? "");
+        
+        // 🟢 FIX PART 2 (The Amnesia Fix): 
+        // When loading offline, restore the "Memory" from local storage.
+        // This stops the app from thinking it is "Version 0" when it goes online.
+        if (localData.lastSync) {
+           setLastServerVersion(localData.lastSync);
+        }
+
       } else if (!cancelled) {
         setIndicators(INITIAL_INDICATORS);
       }
@@ -759,7 +769,6 @@ useEffect(() => {
   load();
   return () => { cancelled = true; };
 }, [storageKey, observationMeta.id]);
-
 useEffect(() => {
   if (isOnline && observationMeta.id) {
     const performSync = async () => {
@@ -776,12 +785,25 @@ useEffect(() => {
           status: localData.status,
           meta: localData.meta,
           indicators: localData.indicators,
+          updatedAt: localData.updatedAt,
+          // 🟢 FIX 1: Read from Ref (Silent) so we don't need it in dependencies
+          lastSync: localData.lastSync ?? lastServerVersionRef.current,
         });
 
         console.log("✅ Auto-sync successful!");
         setSaveStatus("saved"); 
-      } catch (err) {
+        
+        setSyncError(null); 
+        setLastServerVersion(Date.now());
+
+      } catch (err: any) { 
         console.error("❌ Auto-sync failed", err);
+        
+        if (err.message && err.message.includes("CONFLICT")) {
+             setSyncError("⚠️ Conflict: Please refresh");
+        } else {
+             setSyncError("⚠️ Sync Failed: Retrying...");
+        }
       } finally {
         setIsSyncing(false); 
       }
@@ -789,32 +811,67 @@ useEffect(() => {
 
     performSync();
   }
+  // 🟢 FIX 2: REMOVED 'lastServerVersion' from this list to stop the loop!
 }, [isOnline, observationMeta.id, storageKey, setIsSyncing]);
 
 const persistObservation = React.useCallback(
   async (payload: SavedObservationPayload) => {
+    setSyncError(null);
+    setSaveStatus("idle");
+
+    // Phase 1: Local Save
     try {
       localStorage.setItem(storageKey, JSON.stringify(payload));
-      setLastSavedAt(payload.updatedAt); 
-    } catch (err) {
+      setLastSavedAt(payload.updatedAt);
+    } catch (err: any) {
+      if (err.name === "QuotaExceededError" || err.name === "NS_ERROR_DOM_QUOTA_REACHED") {
+        setSyncError("Storage Full - Data not safe");
+        return; 
+      }
       console.error("Failed to write to localStorage", err);
     }
 
+    // Phase 2: Cloud Sync
     try {
+      setIsSyncing(true);
+      
       await saveObservationToDb({
         id: payload.id,
         status: payload.status,
         meta: payload.meta,
         indicators: payload.indicators,
+        updatedAt: payload.updatedAt,
+        // 🟢 FIX: Read from Ref (Silent) instead of State
+        lastSync: lastServerVersionRef.current, 
       });
+
+      setLastServerVersion(Date.now());
       setSaveStatus("saved");
-    } catch (err) {
+
+    } catch (err: any) {
       console.error("[Workspace] Sync failed", err);
+
+      if (err.message && err.message.includes("CONFLICT")) {
+        setSyncError("⚠️ Version Conflict: Server has newer data.");
+        if (window.confirm("Another device has saved newer data. Do you want to load the latest version? (You will lose current unsaved edits)")) {
+           localStorage.removeItem(storageKey); 
+           window.location.reload(); 
+        }
+        return;
+      }
+      
+      if (err.name === "QuotaExceededError" || err.name === "NS_ERROR_DOM_QUOTA_REACHED") {
+         setSyncError("Storage Full - Data not safe");
+         return;
+      }
+
+      setSyncError(null); 
+    } finally {
+      setIsSyncing(false);
     }
   },
-  [storageKey]
+  [storageKey] // 🟢 CRITICAL: 'lastServerVersion' must NOT be here
 );
-
 useEffect(() => {
   if (!observationMeta.id) return;
 
@@ -830,8 +887,10 @@ useEffect(() => {
       status: observationStatus,
       updatedAt: Date.now(),
       scratchpadText,
-      isGood, isBad, isFavorite,
       adminSummaryVN: adminSummaryVN,
+      // 🟢 FIX: Use the Ref. This ensures we get the latest value 
+      // without adding 'lastServerVersion' to the dependency array (which would cause a loop).
+      lastSync: lastServerVersionRef.current, 
     };
 
     persistObservation(payload);
@@ -842,9 +901,21 @@ useEffect(() => {
     if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
   };
 }, [
-  indicators, scratchpadText, observationMeta, teacherName, schoolName, 
-  campus, unit, lesson, supportType, observationStatus, 
-  isGood, isBad, isFavorite, persistObservation,adminSummaryVN
+  indicators,
+  scratchpadText,
+  observationMeta,
+  teacherName,
+  schoolName,
+  campus,
+  unit,
+  lesson,
+  supportType,
+  observationStatus,
+  isBad,
+  isFavorite,
+  persistObservation,
+  adminSummaryVN,
+  // 🟢 NOTE: lastServerVersion is intentionally missing here to prevent the loop.
 ]);
 
   const handleBatchPolishClick = () => {
@@ -914,7 +985,6 @@ const handleManualSave = async () => {
       indicators,
       status: observationStatus,
       updatedAt: Date.now(),
-      isGood, isBad, isFavorite,
     };
 
     persistObservation(payload); 
@@ -941,7 +1011,6 @@ const handleAdminReviewSave = async () => {
         status: observationStatus,
         updatedAt: Date.now(),
         scratchpadText,
-        isGood, isBad, isFavorite,
         adminSummaryVN: translatedSummary, // <--- Ensure this is the NEW text
       };
       persistObservation(payload);
@@ -960,7 +1029,6 @@ const handleBackToDashboard = () => {
       indicators,
       status: observationStatus,
       updatedAt: Date.now(),
-      isGood, isBad, isFavorite,
       scratchpadText
     };
 
@@ -983,7 +1051,6 @@ const handleToggleLock = () => {
       status: nextStatus,
       updatedAt: Date.now(),
       scratchpadText,
-      isGood, isBad, isFavorite,
     };
 
     persistObservation(payload);
@@ -1235,18 +1302,22 @@ const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
 const [canvasDirty, setCanvasDirty] = useState(false);
 
+// Update this useEffect
 useEffect(() => {
   const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-    if (!canvasDirty) return;
+    // Block if Canvas is dirty OR if we haven't successfully synced to server yet
+    const hasUnsavedChanges = canvasDirty || saveStatus !== "saved" || syncError !== null;
+    
+    if (!hasUnsavedChanges) return;
+    
     e.preventDefault();
     // @ts-ignore
-    e.returnValue = "";
+    e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
   };
 
   window.addEventListener("beforeunload", handleBeforeUnload);
   return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-}, [canvasDirty]);
-
+}, [canvasDirty, saveStatus, syncError]);
 
 const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
   if (isLocked) return; 
@@ -1673,20 +1744,28 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                 Scratchpad
               </button>
             </div>
-
             <div
               style={{
                 fontSize: 11,
-                color: "var(--text-muted)",
+                // 🔴 Turn RED if there is an error
+                color: syncError ? "#ef4444" : "var(--text-muted)", 
+                fontWeight: syncError ? "bold" : "normal",
                 textAlign: "right",
               }}
             >
-              {lastSavedAt
-                ? saveStatus === "saved"
-                  ? `Saved ✔ at ${new Date(lastSavedAt).toLocaleTimeString()}`
-                  : `Auto-saved at ${new Date(lastSavedAt).toLocaleTimeString()}`
-                : "Auto-save enabled"}
-            </div>
+              {syncError ? (
+                <span>{syncError}</span>
+              ) : lastSavedAt ? (
+                saveStatus === "saved" ? (
+                  `Saved ✔ at ${new Date(lastSavedAt).toLocaleTimeString()}`
+                ) : (
+                  `Saved locally at ${new Date(lastSavedAt).toLocaleTimeString()} (Pending Sync...)`
+                )
+              ) : (
+                "Auto-save enabled"
+              )}
+            </div>     
+            
           </div>
         </div>
 
