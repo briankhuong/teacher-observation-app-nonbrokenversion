@@ -6,6 +6,8 @@ import { exportAdminExcel } from "./exportAdminExcel";
 import { emailTeacherReport } from "./emailTeacherReport";
 import { generateAdminSummary } from "./utils/gemini";
 import { getOptimizedInkImage } from "./utils/imageOptimizer"; // If you created this file
+// Add these imports
+import { get, set, del } from 'idb-keyval';
 
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
 const DEFAULT_CANVAS_HEIGHT = 300; 
@@ -24,6 +26,37 @@ function getPersistedCanvasHeight(): number {
   } catch (error) {
     console.error("Failed to read persisted canvas height", error);
     return DEFAULT_CANVAS_HEIGHT;
+  }
+}
+
+function cleanupOldDrafts(currentId: string): boolean {
+  console.log("🧹 Attempting to clean up old local drafts...");
+  let clearedCount = 0;
+  
+  try {
+    const keysToRemove: string[] = [];
+    
+    // 1. Scan for other drafts
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      // If it looks like an observation BUT is not the current one
+      if (key && key.startsWith("obs-v1-") && !key.includes(currentId)) {
+        keysToRemove.push(key);
+      }
+    }
+
+    // 2. Delete them
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+      clearedCount++;
+    });
+
+    console.log(`🧹 Deleted ${clearedCount} old drafts to free space.`);
+    return clearedCount > 0; // Return true if we actually deleted something
+    
+  } catch (e) {
+    console.warn("Cleanup failed", e);
+    return false;
   }
 }
 
@@ -151,10 +184,8 @@ interface SavedObservationPayload {
   status: "draft" | "saved";
   updatedAt: number;
   scratchpadText?: string;
-  isGood?: boolean;
-  isBad?: boolean;
-  isFavorite?: boolean;
   adminSummaryVN?: string | null;
+  lastSync?: number;
 }
 
 const STORAGE_PREFIX = "obs-v1-";
@@ -548,6 +579,15 @@ const [isResizing, setIsResizing] = useState(false);
 const canvasWrapperRef = useRef<HTMLDivElement>(null);
 const startYRef = useRef(0);
 const startHeightRef = useRef(0);
+const [lastServerVersion, setLastServerVersion] = useState<number>(0);
+// Add this near your other useState hooks
+const lastServerVersionRef = useRef(lastServerVersion);
+
+// Keep the Ref in sync with the State automatically
+useEffect(() => {
+  lastServerVersionRef.current = lastServerVersion;
+}, [lastServerVersion]);
+
 
 const doCanvasResize = useCallback(
   (e: MouseEvent | TouchEvent) => {
@@ -665,9 +705,9 @@ const [activeIndex, setActiveIndex] = useState(0);
   const [observationStatus, setObservationStatus] = useState<"draft" | "saved">(
     "draft"
   );
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
+
+const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("saved");
   const isLocked = observationStatus === "saved";
-  const [isGood, setIsGood] = useState(false);
   const [isBad, setIsBad] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
 const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
@@ -689,6 +729,9 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
   const [adminPreview, setAdminPreview] = useState<AdminExportModel | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null); // 👈 Add this state
+  // 🟢 NEW: Track if user has actually made changes
+  const isDirtyRef = useRef(false);
 
 
   useEffect(() => {
@@ -706,146 +749,108 @@ useEffect(() => {
   let cancelled = false;
 
   async function load() {
-    let localData: SavedObservationPayload | null = null;
+    let localData: SavedObservationPayload | undefined;
+
+    // 🟢 CHANGE: Load from IndexedDB first
     try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) localData = JSON.parse(raw);
-    } catch (err) { console.error("Local read error", err); }
+      localData = await get<SavedObservationPayload>(storageKey);
+
+      // 🛡️ MIGRATION: If nothing in IndexedDB, check localStorage
+      // This ensures old drafts are not lost when you switch to this new code.
+      if (!localData) {
+         const rawLegacy = localStorage.getItem(storageKey);
+         if (rawLegacy) {
+             console.log("♻️ Migrating data from LocalStorage to IndexedDB...");
+             try {
+               localData = JSON.parse(rawLegacy);
+               // Save it to IndexedDB immediately so next load is fast & modern
+               if (localData) await set(storageKey, localData);
+             } catch (e) {
+               console.error("Legacy migration failed", e);
+             }
+         }
+      }
+    } catch (err) { 
+      console.error("Local read error", err); 
+    }
 
     try {
       const row = await loadObservationFromDb(observationMeta.id);
       if (cancelled) return;
-
+      
+      setLastServerVersion(new Date(row.updated_at).getTime());
+      
       const dbUpdatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
       const localUpdatedAt = localData?.updatedAt ?? 0;
 
+      // Compare Local vs Server Time
       if (localData && localUpdatedAt > dbUpdatedAt) {
         console.log("Using newer local data.");
         setIndicators(localData.indicators);
         setObservationStatus(localData.status ?? "draft");
-        setIsGood(localData.isGood ?? false);
-        setIsBad(localData.isBad ?? false);
-        setIsFavorite(localData.isFavorite ?? false);
         setScratchpadText(localData.scratchpadText ?? "");
-        // 🟢 NEW: Restore summary from the local draft
-          // Use '??' to fall back to DB value if local is missing/null, 
-          // or fallback to null if both are missing.
-          setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
+        setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
+        
+        // Restore the "Memory" of the last sync to prevent conflicts
+        if (localData.lastSync) {
+           setLastServerVersion(localData.lastSync);
+        }
         return; 
       }
 
+      // If Server is newer (or no local data), use Server data
       const normalizedFromDb = normalizeIndicators(row.indicators);
       setIndicators(normalizedFromDb.length > 0 ? normalizedFromDb : INITIAL_INDICATORS);
       setObservationStatus(row.status ?? "draft");
       setAdminSummaryVN(row.admin_summary_vn ?? null);
-      setIsGood(row.is_good ?? false);
-      setIsBad(row.is_bad ?? false);
-      setIsFavorite(row.is_favorite ?? false);
 
     } catch (err) {
       console.warn("Offline: Using local backup.");
       if (localData && !cancelled) {
         setIndicators(localData.indicators);
         setObservationStatus(localData.status ?? "draft");
-        setIsGood(localData.isGood ?? false);
-        setIsBad(localData.isBad ?? false);
-        setIsFavorite(localData.isFavorite ?? false);
         setScratchpadText(localData.scratchpadText ?? "");
+        
+        // Restore "Memory" for offline functionality
+        if (localData.lastSync) {
+           setLastServerVersion(localData.lastSync);
+        }
+
       } else if (!cancelled) {
         setIndicators(INITIAL_INDICATORS);
       }
     }
   }
+  
   load();
   return () => { cancelled = true; };
 }, [storageKey, observationMeta.id]);
 
-useEffect(() => {
-  if (isOnline && observationMeta.id) {
-    const performSync = async () => {
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if (!raw) return; 
-
-        const localData: SavedObservationPayload = JSON.parse(raw);
-        
-        setIsSyncing(true); 
-        
-        await saveObservationToDb({
-          id: localData.id,
-          status: localData.status,
-          meta: localData.meta,
-          indicators: localData.indicators,
-        });
-
-        console.log("✅ Auto-sync successful!");
-        setSaveStatus("saved"); 
-      } catch (err) {
-        console.error("❌ Auto-sync failed", err);
-      } finally {
-        setIsSyncing(false); 
-      }
-    };
-
-    performSync();
-  }
-}, [isOnline, observationMeta.id, storageKey, setIsSyncing]);
-
 const persistObservation = React.useCallback(
-  async (payload: SavedObservationPayload) => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(payload));
-      setLastSavedAt(payload.updatedAt); 
-    } catch (err) {
-      console.error("Failed to write to localStorage", err);
-    }
+    async (payload: SavedObservationPayload) => {
+      setSyncError(null);
 
-    try {
-      await saveObservationToDb({
-        id: payload.id,
-        status: payload.status,
-        meta: payload.meta,
-        indicators: payload.indicators,
-      });
-      setSaveStatus("saved");
-    } catch (err) {
-      console.error("[Workspace] Sync failed", err);
-    }
-  },
-  [storageKey]
-);
+      try {
+        await set(storageKey, payload);
+        setLastSavedAt(payload.updatedAt);
+        console.log("✅ Saved to Vault.");
+        
+        setSaveStatus("saved");
+        
+        // 🟢 FIX 2: RESET DIRTY FLAG
+        // We just saved, so we are now "Clean" until the user types again.
+        isDirtyRef.current = false;
 
-useEffect(() => {
-  if (!observationMeta.id) return;
+      } catch (err: any) {
+        console.error("Failed to write to IndexedDB", err);
+        setSyncError("Disk Full");
+      }
+    },
+    [storageKey] 
+  );
+  const isFirstRun = useRef(true);
 
-  if (saveTimeoutRef.current) {
-    window.clearTimeout(saveTimeoutRef.current);
-  }
 
-  saveTimeoutRef.current = window.setTimeout(() => {
-    const payload: SavedObservationPayload = {
-      id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
-      indicators,
-      status: observationStatus,
-      updatedAt: Date.now(),
-      scratchpadText,
-      isGood, isBad, isFavorite,
-      adminSummaryVN: adminSummaryVN,
-    };
-
-    persistObservation(payload);
-    setCanvasDirty(false);
-  }, 800);
-
-  return () => {
-    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-  };
-}, [
-  indicators, scratchpadText, observationMeta, teacherName, schoolName, 
-  campus, unit, lesson, supportType, observationStatus, 
-  isGood, isBad, isFavorite, persistObservation,adminSummaryVN
-]);
 
   const handleBatchPolishClick = () => {
     const candidates = indicators
@@ -914,7 +919,10 @@ const handleManualSave = async () => {
       indicators,
       status: observationStatus,
       updatedAt: Date.now(),
-      isGood, isBad, isFavorite,
+      scratchpadText, // Ensure scratchpad is saved too
+      adminSummaryVN, // Ensure admin summary is saved too
+      // 🟢 ADD THIS LINE: Preserve the last known sync time
+      lastSync: lastServerVersionRef.current, 
     };
 
     persistObservation(payload); 
@@ -933,7 +941,6 @@ const handleAdminReviewSave = async () => {
       setAdminSummaryVN(translatedSummary);
 
       // 3. 🟢 Update Local Storage (Keep the Draft in sync!)
-      // We manually trigger the 'persistObservation' logic here
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
         meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
@@ -941,8 +948,9 @@ const handleAdminReviewSave = async () => {
         status: observationStatus,
         updatedAt: Date.now(),
         scratchpadText,
-        isGood, isBad, isFavorite,
-        adminSummaryVN: translatedSummary, // <--- Ensure this is the NEW text
+        adminSummaryVN: translatedSummary, 
+        // 🟢 ADD THIS LINE: Preserve the last known sync time
+        lastSync: lastServerVersionRef.current,
       };
       persistObservation(payload);
 
@@ -952,21 +960,27 @@ const handleAdminReviewSave = async () => {
       alert("❌ Save failed. Check console for details.");
     }
   };
-
 const handleBackToDashboard = () => {
-    const payload: SavedObservationPayload = {
-      id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
-      indicators,
-      status: observationStatus,
-      updatedAt: Date.now(),
-      isGood, isBad, isFavorite,
-      scratchpadText
-    };
-
-    persistObservation(payload);
+    // 🟢 NEW: Only update timestamp if you actually changed something!
+    if (isDirtyRef.current || canvasDirty) {
+        const payload: SavedObservationPayload = {
+          id: observationMeta.id,
+          meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+          indicators,
+          status: observationStatus,
+          updatedAt: Date.now(),
+          scratchpadText,
+          adminSummaryVN,
+          lastSync: lastServerVersionRef.current,
+        };
+    
+        persistObservation(payload);
+    }
+    
+    // Always exit, whether we saved or not
     onBack();
 };
+
 const handleToggleLock = () => { 
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -983,7 +997,9 @@ const handleToggleLock = () => {
       status: nextStatus,
       updatedAt: Date.now(),
       scratchpadText,
-      isGood, isBad, isFavorite,
+      adminSummaryVN,
+      // 🟢 ADD THIS LINE: Preserve the last known sync time
+      lastSync: lastServerVersionRef.current,
     };
 
     persistObservation(payload);
@@ -1234,19 +1250,59 @@ const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   };
 
 const [canvasDirty, setCanvasDirty] = useState(false);
+useEffect(() => {
+    if (!observationMeta.id) return;
 
+    // 🟢 FIX 1: STOP SAVE ON LOAD
+    // If the user hasn't typed (isDirty) or drawn (canvasDirty), DO NOT autosave.
+    // This prevents the "Ghost Save" when opening a file.
+    if (!isDirtyRef.current && !canvasDirty) return;
+
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = window.setTimeout(() => {
+      const payload: SavedObservationPayload = {
+        id: observationMeta.id,
+        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        indicators,
+        status: observationStatus,
+        updatedAt: Date.now(),
+        scratchpadText,
+        adminSummaryVN: adminSummaryVN,
+        lastSync: lastServerVersionRef.current, 
+      };
+
+      persistObservation(payload);
+      setCanvasDirty(false);
+    }, 800);
+
+    return () => {
+      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+    };
+  }, [
+    // Keep your existing dependencies
+    indicators, scratchpadText, observationMeta, teacherName, schoolName, 
+    campus, unit, lesson, supportType, observationStatus, isBad, isFavorite, 
+    persistObservation, adminSummaryVN, canvasDirty 
+  ]);
+// Update this useEffect
 useEffect(() => {
   const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-    if (!canvasDirty) return;
+    // Block if Canvas is dirty OR if we haven't successfully synced to server yet
+    const hasUnsavedChanges = canvasDirty || saveStatus !== "saved" || syncError !== null;
+    
+    if (!hasUnsavedChanges) return;
+    
     e.preventDefault();
     // @ts-ignore
-    e.returnValue = "";
+    e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
   };
 
   window.addEventListener("beforeunload", handleBeforeUnload);
   return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-}, [canvasDirty]);
-
+}, [canvasDirty, saveStatus, syncError]);
 
 const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
   if (isLocked) return; 
@@ -1445,7 +1501,10 @@ const toggleIncludeInTrainerSummary = (index: number) => {
   });
 };
 
-  const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
+const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
+    // 🟢 NEW: Mark as dirty so we know to save later
+    isDirtyRef.current = true;
+    
     setIndicators((prev) =>
       prev.map((ind, i) => (i === index ? { ...ind, ...patch } : ind))
     );
@@ -1673,20 +1732,39 @@ const toggleIncludeInTrainerSummary = (index: number) => {
                 Scratchpad
               </button>
             </div>
-
             <div
               style={{
                 fontSize: 11,
-                color: "var(--text-muted)",
+                color: syncError ? "#ef4444" : "var(--text-muted)",
+                fontWeight: syncError ? "bold" : "normal",
                 textAlign: "right",
+                // 🟢 NEW: Allow clicking if it is a storage error
+                cursor: syncError && syncError.includes("Storage") ? "pointer" : "default",
+                textDecoration: syncError && syncError.includes("Storage") ? "underline" : "none"
+              }}
+              // 🟢 NEW: The Rescue Action
+              onClick={() => {
+                if (syncError && syncError.includes("Storage")) {
+                  if (window.confirm("Storage is full. Clear all temporary data to fix this? (Your saved data is safe on the server).")) {
+                    localStorage.clear();
+                    window.location.reload();
+                  }
+                }
               }}
             >
-              {lastSavedAt
-                ? saveStatus === "saved"
-                  ? `Saved ✔ at ${new Date(lastSavedAt).toLocaleTimeString()}`
-                  : `Auto-saved at ${new Date(lastSavedAt).toLocaleTimeString()}`
-                : "Auto-save enabled"}
-            </div>
+              {syncError ? (
+                <span>{syncError}</span>
+              ) : lastSavedAt ? (
+                saveStatus === "saved" ? (
+                  `Saved ✔ at ${new Date(lastSavedAt).toLocaleTimeString()}`
+                ) : (
+                  `Saved locally at ${new Date(lastSavedAt).toLocaleTimeString()} (Pending Sync...)`
+                )
+              ) : (
+                "Auto-save enabled"
+              )}
+            </div>   
+            
           </div>
         </div>
 
