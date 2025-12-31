@@ -22,6 +22,7 @@ import { EditObservationModal } from './components/EditObservationModal';
 import { get, set } from 'idb-keyval';
 import { SyncStatusBadge } from './components/SyncStatusBadge';
 import { ConflictResolutionModal } from "./components/ConflictResolutionModal";
+import { loadObservationFromDb, saveObservationToDb } from "./db/observations";
 
 // ✅ CORRECT (Matches your screenshots & Vercel settings)
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
@@ -47,16 +48,15 @@ export interface DashboardObservationRow {
   status: "draft" | "saved";
   progress: number;
   totalIndicators: number;
-  statusColor: StatusColor;
+  statusColor: StatusColor; // Assumes you have this type defined elsewhere
   teacherWorkbookUrl: string | null;
   adminWorkbookUrl: string | null;
   adminViewOnlyUrl: string | null;
   admin_summary_vn: string | null;
   meta: any;
-  
-  // 🟢 CHANGE: Replace 'isSynced' with 'syncStatus'
-  // isSynced: boolean; // <--- DELETE THIS LINE
-  syncStatus: 'synced' | 'local-changes' | 'server-newer' | 'conflict'; // <--- ADD THIS LINE
+  updatedAt?: number;
+  lastSync?: number;
+  syncStatus?: string;
 }
 
 type RecentMergePanel =
@@ -609,99 +609,162 @@ const [conflictServerData, setConflictServerData] = React.useState<any>(null);
     return data?.[0]?.admin_email || "";
   };
 
-// 🟢 NEW: The "Safe" Push Action (Checks for Conflicts First)
-  const handlePush = async (obsId: string) => {
-    // 1. Local Check
-    const storageKey = `${STORAGE_PREFIX}${obsId}`;
-    const localData = await get<any>(storageKey);
-    
-    if (!localData) {
-      alert("Error: Could not find local data!");
-      return;
-    }
+// Inside src/DashboardShell.tsx
 
+// In src/DashboardShell.tsx
+
+  const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
     try {
-      // 2. Pre-Flight Check (Fetch Server Timestamp)
-      const { data: serverCheck, error: checkError } = await supabase
-        .from("observations")
-        .select("updated_at, id")
-        .eq("id", obsId)
-        .single();
-
-      if (serverCheck && !checkError) {
-        const serverTime = new Date(serverCheck.updated_at).getTime();
-        // Fallback to 0 handles "First Time Sync" correctly
-        const localLastSync = localData.lastSync || 0; 
-
-        // 🛑 STOP! Server is newer than the last time we synced
-        if (serverTime > localLastSync + 2000) {
-          console.warn("⚔️ Conflict detected during push!");
-          
-          // Fetch FULL server data for the modal
-          const { data: fullServerData } = await supabase
-            .from("observations").select("*").eq("id", obsId).single();
-            
-          setConflictLocalData(localData);
-          setConflictServerData(fullServerData);
-          setIsConflictModalOpen(true); // <--- The Boss Fight UI opens here
-          return; // Abort push
-        }
+      console.log(`☁️ Attempting Smart Sync for: ${id} (Force: ${force})`);
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert("You must be logged in to sync.");
+        return;
       }
 
-      // 3. Safe to Push (No conflict found)
-      console.log(`🚀 Safe to Push ${obsId}...`);
+      // 1. LOAD DATA (The Robust Way)
+      // If we have override data (from modal), use it.
+      // If not, try to get from IndexedDB (the Vault).
+      let localData = overrideData;
+      if (!localData) {
+         const storageKey = `${STORAGE_PREFIX}${id}`;
+         localData = await get(storageKey);
+      }
       
-      const safeMeta = localData.meta || {};
+      // 🟢 SMARTER LOGIC: If no local data exists, it means the user hasn't edited anything yet.
+      // We shouldn't error out. We should just treat it as "Already Synced".
+      if (!localData) {
+        console.log("No local changes found. Fetching latest from server to verify...");
+        // Just refresh the list to ensure UI is up to date (this runs the !parsed logic we fixed)
+        window.location.reload(); 
+        return;
+      }
 
-      const { error } = await supabase.from("observations").upsert({
-          id: localData.id,
-          trainer_id: user?.id,
-          
-          // Required Columns
-          teacher_name: safeMeta.teacherName || "Unknown Teacher",
-          school_name: safeMeta.schoolName || "",
-          campus: safeMeta.campus || "",
-          unit: safeMeta.unit || "1",
-          lesson: safeMeta.lesson || "1",
-          support_type: safeMeta.supportType || "Visit",
-          observation_date: safeMeta.date || new Date().toISOString(),
-          
-          // Content Columns
-          meta: localData.meta,
-          indicators: localData.indicators,
-          status: localData.status,
-          admin_summary_vn: localData.adminSummaryVN,
-          scratchpad_text: localData.scratchpadText,
-          updated_at: new Date().toISOString(),
-      });
+      // 2. CHECK FOR CONFLICTS (Unless Forced)
+      if (!force) {
+        const { data: serverRows } = await supabase
+          .from("observations")
+          .select("updated_at, teacher_name, school_name, indicators") 
+          .eq("id", id);
 
-      if (error) throw error;
+        const serverRow = serverRows?.[0];
+        
+        if (serverRow) {
+          const serverTime = new Date(serverRow.updated_at).getTime();
+          // Safety: ensure lastSync exists, default to 0
+          const localLastSync = localData.lastSync || 0;
 
-      // 4. Update Local to Green Checkmark
+          // 🛑 CONFLICT LOGIC:
+          // Only show modal if Server is Newer AND we are trying to push older/different data
+          // (Simple check: Server Time > Local Receipt Time)
+          if (serverTime > localLastSync) {
+             console.log("⚔️ Conflict Detected! Server is newer.");
+             setConflictLocalData(localData);
+             setConflictServerData(serverRow);
+             setIsConflictModalOpen(true);
+             return; // <--- STOP HERE. Modal takes over.
+          }
+        }
+      } else {
+        console.log("🛡️ Force Push enabled. Skipping server conflict check.");
+      }
+
+      // 3. PUSH TO SERVER
+      console.log("🚀 No conflict. Pushing data...");
+      
+      // Construct Meta Safely to prevent DB errors
+      const safeMeta = localData.meta || {
+        teacherName: localData.teacherName || "",
+        schoolName: localData.schoolName || "",
+        campus: localData.campus || "",
+        unit: localData.unit || "",
+        lesson: localData.lesson || "",
+        supportType: localData.supportType || "Visit",
+        date: localData.date || new Date().toISOString()
+      };
+      
+      const payload = {
+        id: localData.id,
+        trainer_id: user.id, 
+        
+        teacher_name: safeMeta.teacherName,
+        school_name: safeMeta.schoolName,
+        campus: safeMeta.campus,
+        unit: safeMeta.unit,
+        lesson: safeMeta.lesson,
+        support_type: safeMeta.supportType,
+        observation_date: safeMeta.date,
+
+        meta: safeMeta,
+
+        indicators: localData.indicators,
+        status: localData.status,
+        updated_at: new Date(localData.updatedAt || Date.now()).toISOString(),
+        admin_summary_vn: localData.adminSummaryVN,
+      };
+
+      const { error } = await supabase.from("observations").upsert(payload);
+      
+      if (error) {
+        console.error("Supabase Error Details:", error);
+        throw error;
+      }
+
+      // 4. STAMP RECEIPT
+      // 🟢 FIX: Update the local storage so it knows we are now 100% in sync
       const now = Date.now();
-      const updatedLocal = { ...localData, lastSync: now, updatedAt: now };
-      await set(storageKey, updatedLocal);
+      const storageKey = `${STORAGE_PREFIX}${localData.id}`;
+      const finalPayload = {
+        ...localData,
+        lastSync: now // <--- THE IMPORTANT PART
+      };
       
-      console.log("✅ Push Successful!");
-      window.location.reload();
+      await set(storageKey, finalPayload);
+
+      // 5. UPDATE UI INSTANTLY
+      // @ts-ignore
+      setObservations(prev => prev.map(obs => {
+        if (obs.id === id) {
+          return { 
+            ...obs, 
+            lastSync: now, 
+            syncStatus: 'synced',
+            updatedAt: localData.updatedAt 
+          };
+        }
+        return obs;
+      }));
+
+      console.log("✅ Sync Complete!");
 
     } catch (err: any) {
-      console.error("Push failed:", err);
-      alert(`Upload failed: ${err.message || "Check internet connection"}`);
+      console.error("Sync failed:", err);
+      alert("Sync failed: " + err.message);
     }
   };
 
-  const handleConflictResolved = async (mergedData: any) => {
-    // 1. Save merged data to Local Vault (Overwrite conflict)
-    const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
-    await set(storageKey, mergedData);
+const handleConflictResolved = async (mergedData: any) => {
+    try {
+      console.log("💾 Saving resolved data & Force Pushing...", mergedData);
+      
+      // 1. Save to Disk
+      // 🟢 FIX: Ensure we write to the correct key
+      const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
+      await set(storageKey, mergedData);
+      
+      // 2. Close Modal
+      setIsConflictModalOpen(false);
 
-    // 2. Close Modal
-    setIsConflictModalOpen(false);
-
-    // 3. Retry Push immediately (It will pass now because timestamps are updated)
-    // We recursively call handlePush to do the actual upload
-    await handlePush(mergedData.id);
+      // 3. 🟢 FORCE PUSH
+      // Pass 'true' as the 3rd argument to skip the conflict check
+      // because we JUST resolved the conflict!
+      await handlePush(mergedData.id, mergedData, true);
+      
+    } catch (err) {
+      console.error("❌ Failed to save resolved conflict:", err);
+      alert("Error saving your changes. Please try again.");
+    }
   };
 
   // 🟢 NEW: The Manual Pull Action
@@ -823,17 +886,25 @@ React.useEffect(() => {
           }
 
           // If no local data exists, create a default object from DB data
+          // If no local data exists, create a default object from DB data
           if (!parsed) {
+            // 1. Calculate the Server Time first
+            const dbTime = dbRow.updated_at
+                ? new Date(dbRow.updated_at).getTime()
+                : dbRow.created_at
+                ? new Date(dbRow.created_at).getTime()
+                : Date.now();
+
             parsed = {
               id: dbRow.id,
               meta: dbRow.meta ?? {},
               indicators: dbRow.indicators ?? [],
               status: dbRow.status ?? "draft",
-              updatedAt: dbRow.updated_at
-                ? new Date(dbRow.updated_at).getTime()
-                : dbRow.created_at
-                ? new Date(dbRow.created_at).getTime()
-                : Date.now(),
+              
+              // 2. Set BOTH timestamps to the Server Time.
+              // This tells the UI: "We are perfectly in sync with the server."
+              updatedAt: dbTime,
+              lastSync: dbTime, 
             };
           }
 
@@ -919,8 +990,10 @@ React.useEffect(() => {
             adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? parsed.meta.adminSheetUrl ?? null,
             adminViewOnlyUrl: parsed.meta.adminViewOnlyUrl ?? parsed.meta.adminWorkbookViewUrl ?? null,
             admin_summary_vn: dbRow.admin_summary_vn,
-            syncStatus, // 🟢 CORRECTLY ADDED HERE
+            syncStatus,
             meta: parsed.meta ?? {},
+            lastSync: parsed.lastSync || 0,
+            updatedAt: parsed.updatedAt || 0,
           });
         }
       } catch (err) {
@@ -1719,6 +1792,63 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     const showLinks =
       !!teacherWorkbookUrl || !!adminViewOnlyUrl || !!adminWorkbookUrl;
 
+    // -------------------------------------------------------------------------
+    // 🟢 NEW: SMART SYNC UI LOGIC
+    // -------------------------------------------------------------------------
+    // Cast to 'any' to avoid TS errors if you haven't updated the Interface yet
+    const safeObs = obs as any; 
+    const lastSync = safeObs.lastSync || 0;
+    const updatedAt = safeObs.updatedAt || 0;
+
+    // It is synced if we have a record of syncing AND it happened after the last edit
+    const isSynced = lastSync > 0 && lastSync >= updatedAt;
+
+    let actionButton;
+
+    if (isSynced) {
+      // ✅ CASE A: Synced (Green Badge)
+      actionButton = (
+        <div 
+          onClick={(e) => e.stopPropagation()}
+          title={`Last Sync: ${new Date(lastSync).toLocaleTimeString()}`}
+          style={{
+            display: "flex", alignItems: "center", gap: "4px",
+            fontSize: "11px", fontWeight: "bold", 
+            color: "#10b981", // Emerald-500
+            background: "rgba(16, 185, 129, 0.1)", 
+            border: "1px solid rgba(16, 185, 129, 0.3)",
+            padding: "2px 8px", borderRadius: "4px", cursor: "default"
+          }}
+        >
+          <span>✓ Synced</span>
+        </div>
+      );
+    } else {
+      // ☁️ CASE B: Not Synced (Blue Button)
+      // Handles BOTH "Push" (Local changes) and "Sync/Pull" (Server changes)
+      actionButton = (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handlePush(obs.id); // <--- This now triggers the Conflict Check!
+          }}
+          title="Sync with Server"
+          style={{
+            display: "flex", alignItems: "center", gap: "4px",
+            fontSize: "11px", fontWeight: "bold",
+            color: "white",
+            background: "#4f46e5", // Indigo-600 (Blue/Purple)
+            border: "none",
+            padding: "4px 10px", borderRadius: "4px", 
+            cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
+          }}
+        >
+          <span>☁️ Sync Now</span>
+        </button>
+      );
+    }
+    // -------------------------------------------------------------------------
+
     return (
       <div
         key={obs.id}
@@ -1751,16 +1881,8 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
               width: '100%',
               marginBottom: '4px' 
             }}>
-            <div className="obs-teacher">{obs.teacherName}</div>
-
-            {/* 🟢 STEP 3: Add the Sync Status Badge here */}
-            {/* It will sit on the right side, opposite the teacher name */}
-            <SyncStatusBadge
-              status={obs.syncStatus} // ✅ NEW (Directly pass the status)
-              onPush={() => handlePush(obs.id)}
-              onPull={() => handlePull(obs.id)}
-            />
-
+            <div className="obs-teacher">{obs.teacherName}</div>  
+            {actionButton}            
           </div>
 
           <div className="obs-meta">

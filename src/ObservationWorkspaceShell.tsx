@@ -705,7 +705,8 @@ const [activeIndex, setActiveIndex] = useState(0);
   const [observationStatus, setObservationStatus] = useState<"draft" | "saved">(
     "draft"
   );
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
+
+const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("saved");
   const isLocked = observationStatus === "saved";
   const [isBad, setIsBad] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
@@ -729,6 +730,8 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null); // 👈 Add this state
+  // 🟢 NEW: Track if user has actually made changes
+  const isDirtyRef = useRef(false);
 
 
   useEffect(() => {
@@ -823,127 +826,31 @@ useEffect(() => {
   return () => { cancelled = true; };
 }, [storageKey, observationMeta.id]);
 
-useEffect(() => {
-  if (isOnline && observationMeta.id) {
-    const performSync = async () => {
-      try {
-        const raw = localStorage.getItem(storageKey);
-        if (!raw) return; 
-
-        const localData: SavedObservationPayload = JSON.parse(raw);
-        
-        setIsSyncing(true); 
-        
-        await saveObservationToDb({
-          id: localData.id,
-          status: localData.status,
-          meta: localData.meta,
-          indicators: localData.indicators,
-          updatedAt: localData.updatedAt,
-          // 🟢 FIX 1: Read from Ref (Silent) so we don't need it in dependencies
-          lastSync: localData.lastSync ?? lastServerVersionRef.current,
-        });
-
-        console.log("✅ Auto-sync successful!");
-        setSaveStatus("saved"); 
-        
-        setSyncError(null); 
-        setLastServerVersion(Date.now());
-
-      } catch (err: any) { 
-        console.error("❌ Auto-sync failed", err);
-        
-        if (err.message && err.message.includes("CONFLICT")) {
-             setSyncError("⚠️ Conflict: Please refresh");
-        } else {
-             setSyncError("⚠️ Sync Failed: Retrying...");
-        }
-      } finally {
-        setIsSyncing(false); 
-      }
-    };
-
-    performSync();
-  }
-  // 🟢 FIX 2: REMOVED 'lastServerVersion' from this list to stop the loop!
-}, [isOnline, observationMeta.id, storageKey, setIsSyncing]);
-
-// src/ObservationWorkspaceShell.tsx
-
 const persistObservation = React.useCallback(
-  async (payload: SavedObservationPayload) => {
-    setSyncError(null);
-    setSaveStatus("idle");
+    async (payload: SavedObservationPayload) => {
+      setSyncError(null);
 
-    // --- PHASE 1: LOCAL SAVE (IndexedDB Only - "The Vault") ---
-    try {
-      // 1. Save to the local Vault
-      await set(storageKey, payload);
-      setLastSavedAt(payload.updatedAt);
-      
-      console.log("✅ Saved to Vault (Local Only). Waiting for manual push.");
+      try {
+        await set(storageKey, payload);
+        setLastSavedAt(payload.updatedAt);
+        console.log("✅ Saved to Vault.");
+        
+        setSaveStatus("saved");
+        
+        // 🟢 FIX 2: RESET DIRTY FLAG
+        // We just saved, so we are now "Clean" until the user types again.
+        isDirtyRef.current = false;
 
-      // 2. Set status to 'idle' 
-      // This ensures the UI displays: "Saved locally at X:XX (Pending Sync)"
-      setSaveStatus("idle"); 
+      } catch (err: any) {
+        console.error("Failed to write to IndexedDB", err);
+        setSyncError("Disk Full");
+      }
+    },
+    [storageKey] 
+  );
+  const isFirstRun = useRef(true);
 
-    } catch (err: any) {
-      console.error("Failed to write to IndexedDB", err);
-      setSyncError("Disk Full - Free up space");
-    }
 
-    // --- PHASE 2: CLOUD SYNC ---
-    // ❌ DISABLED: Auto-sync is off. 
-    // Data remains on the iPad until the user clicks "Push" on the dashboard.
-  },
-  [storageKey] 
-);
-
-useEffect(() => {
-  if (!observationMeta.id) return;
-
-  if (saveTimeoutRef.current) {
-    window.clearTimeout(saveTimeoutRef.current);
-  }
-
-  saveTimeoutRef.current = window.setTimeout(() => {
-    const payload: SavedObservationPayload = {
-      id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
-      indicators,
-      status: observationStatus,
-      updatedAt: Date.now(),
-      scratchpadText,
-      adminSummaryVN: adminSummaryVN,
-      // 🟢 FIX: Use the Ref. This ensures we get the latest value 
-      // without adding 'lastServerVersion' to the dependency array (which would cause a loop).
-      lastSync: lastServerVersionRef.current, 
-    };
-
-    persistObservation(payload);
-    setCanvasDirty(false);
-  }, 800);
-
-  return () => {
-    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-  };
-}, [
-  indicators,
-  scratchpadText,
-  observationMeta,
-  teacherName,
-  schoolName,
-  campus,
-  unit,
-  lesson,
-  supportType,
-  observationStatus,
-  isBad,
-  isFavorite,
-  persistObservation,
-  adminSummaryVN,
-  // 🟢 NOTE: lastServerVersion is intentionally missing here to prevent the loop.
-]);
 
   const handleBatchPolishClick = () => {
     const candidates = indicators
@@ -1012,6 +919,10 @@ const handleManualSave = async () => {
       indicators,
       status: observationStatus,
       updatedAt: Date.now(),
+      scratchpadText, // Ensure scratchpad is saved too
+      adminSummaryVN, // Ensure admin summary is saved too
+      // 🟢 ADD THIS LINE: Preserve the last known sync time
+      lastSync: lastServerVersionRef.current, 
     };
 
     persistObservation(payload); 
@@ -1030,7 +941,6 @@ const handleAdminReviewSave = async () => {
       setAdminSummaryVN(translatedSummary);
 
       // 3. 🟢 Update Local Storage (Keep the Draft in sync!)
-      // We manually trigger the 'persistObservation' logic here
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
         meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
@@ -1038,7 +948,9 @@ const handleAdminReviewSave = async () => {
         status: observationStatus,
         updatedAt: Date.now(),
         scratchpadText,
-        adminSummaryVN: translatedSummary, // <--- Ensure this is the NEW text
+        adminSummaryVN: translatedSummary, 
+        // 🟢 ADD THIS LINE: Preserve the last known sync time
+        lastSync: lastServerVersionRef.current,
       };
       persistObservation(payload);
 
@@ -1048,20 +960,27 @@ const handleAdminReviewSave = async () => {
       alert("❌ Save failed. Check console for details.");
     }
   };
-
 const handleBackToDashboard = () => {
-    const payload: SavedObservationPayload = {
-      id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
-      indicators,
-      status: observationStatus,
-      updatedAt: Date.now(),
-      scratchpadText
-    };
-
-    persistObservation(payload);
+    // 🟢 NEW: Only update timestamp if you actually changed something!
+    if (isDirtyRef.current || canvasDirty) {
+        const payload: SavedObservationPayload = {
+          id: observationMeta.id,
+          meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+          indicators,
+          status: observationStatus,
+          updatedAt: Date.now(),
+          scratchpadText,
+          adminSummaryVN,
+          lastSync: lastServerVersionRef.current,
+        };
+    
+        persistObservation(payload);
+    }
+    
+    // Always exit, whether we saved or not
     onBack();
 };
+
 const handleToggleLock = () => { 
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -1078,6 +997,9 @@ const handleToggleLock = () => {
       status: nextStatus,
       updatedAt: Date.now(),
       scratchpadText,
+      adminSummaryVN,
+      // 🟢 ADD THIS LINE: Preserve the last known sync time
+      lastSync: lastServerVersionRef.current,
     };
 
     persistObservation(payload);
@@ -1328,7 +1250,43 @@ const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   };
 
 const [canvasDirty, setCanvasDirty] = useState(false);
+useEffect(() => {
+    if (!observationMeta.id) return;
 
+    // 🟢 FIX 1: STOP SAVE ON LOAD
+    // If the user hasn't typed (isDirty) or drawn (canvasDirty), DO NOT autosave.
+    // This prevents the "Ghost Save" when opening a file.
+    if (!isDirtyRef.current && !canvasDirty) return;
+
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = window.setTimeout(() => {
+      const payload: SavedObservationPayload = {
+        id: observationMeta.id,
+        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        indicators,
+        status: observationStatus,
+        updatedAt: Date.now(),
+        scratchpadText,
+        adminSummaryVN: adminSummaryVN,
+        lastSync: lastServerVersionRef.current, 
+      };
+
+      persistObservation(payload);
+      setCanvasDirty(false);
+    }, 800);
+
+    return () => {
+      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+    };
+  }, [
+    // Keep your existing dependencies
+    indicators, scratchpadText, observationMeta, teacherName, schoolName, 
+    campus, unit, lesson, supportType, observationStatus, isBad, isFavorite, 
+    persistObservation, adminSummaryVN, canvasDirty 
+  ]);
 // Update this useEffect
 useEffect(() => {
   const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -1543,7 +1501,10 @@ const toggleIncludeInTrainerSummary = (index: number) => {
   });
 };
 
-  const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
+const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
+    // 🟢 NEW: Mark as dirty so we know to save later
+    isDirtyRef.current = true;
+    
     setIndicators((prev) =>
       prev.map((ind, i) => (i === index ? { ...ind, ...patch } : ind))
     );
