@@ -11,431 +11,211 @@ interface Props {
 
 type SourceType = 'local' | 'server' | 'manual';
 
-// --- STYLES (iPad & Mobile Optimized) ---
+// --- LINEAR-INSPIRED STYLES ---
 const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.85)', 
-    backdropFilter: 'blur(5px)',
-    WebkitBackdropFilter: 'blur(5px)',
-    zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    touchAction: 'none'
+    backgroundColor: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)', zIndex: 99999, display: 'flex', 
+    alignItems: 'center', justifyContent: 'center',
+    fontFamily: 'Inter, -apple-system, sans-serif',
   },
   modal: {
-    backgroundColor: '#0f172a',
-    width: '95%', maxWidth: '1100px', height: '90vh',
-    borderRadius: '12px', border: '1px solid #334155', display: 'flex', flexDirection: 'column',
-    overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', color: '#f1f5f9'
+    backgroundColor: '#0a0a0c', width: '96%', maxWidth: '1000px', height: '92vh',
+    borderRadius: '16px', border: '1px solid #27272a', display: 'flex', flexDirection: 'column',
+    overflow: 'hidden', boxShadow: '0 0 0 1px rgba(255,255,255,0.05), 0 20px 50px rgba(0,0,0,0.5)', 
+    color: '#f4f4f5'
   },
   header: {
-    padding: '16px 24px', borderBottom: '1px solid #334155', backgroundColor: '#1e293b',
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    flexShrink: 0
+    padding: '20px 28px', borderBottom: '1px solid #18181b', backgroundColor: '#0a0a0c',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0
   },
   body: {
-    flex: 1, 
-    overflowY: 'auto', 
-    padding: '20px', 
-    backgroundColor: '#020617', 
-    position: 'relative',
+    flex: 1, overflowY: 'auto', padding: '24px', backgroundColor: '#0a0a0c',
     WebkitOverflowScrolling: 'touch'
   },
-  rowContainer: {
-    marginBottom: '30px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155', overflow: 'hidden',
-    transition: 'border-color 0.2s ease'
+  // THE CARD
+  cardContainer: {
+    marginBottom: '32px', position: 'relative', borderRadius: '12px',
+    backgroundColor: '#111113', border: '1px solid #27272a', overflow: 'hidden',
   },
-  rowTitle: {
-    padding: '10px 16px', backgroundColor: '#334155', color: '#e2e8f0', fontWeight: 'bold', fontSize: '14px', borderBottom: '1px solid #475569',
+  statusStrip: {
+    position: 'absolute', left: 0, top: 0, bottom: 0, width: '4px',
+  },
+  indicatorTitle: {
+    padding: '16px 20px 8px', fontSize: '15px', fontWeight: '600', color: '#a1a1aa',
     display: 'flex', alignItems: 'center', gap: '8px'
   },
   comparisonGrid: {
-    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', backgroundColor: '#334155'
+    display: 'flex', gap: '16px', padding: '12px 20px'
   },
-  card: {
-    padding: '16px', cursor: 'pointer', backgroundColor: '#1e293b', transition: 'all 0.2s ease', position: 'relative', borderBottom: '4px solid transparent',
-    WebkitTapHighlightColor: 'transparent'
+  choiceCard: {
+    flex: 1, padding: '16px', borderRadius: '8px', cursor: 'pointer',
+    border: '1px solid #27272a', backgroundColor: '#18181b', transition: 'all 0.15s ease-in-out',
+    display: 'flex', flexDirection: 'column', gap: '10px', position: 'relative'
   },
-  cardLocalSelected: { backgroundColor: 'rgba(79, 70, 229, 0.1)', borderBottomColor: '#6366f1' },
-  cardServerSelected: { backgroundColor: 'rgba(14, 165, 233, 0.1)', borderBottomColor: '#0ea5e9' },
-  cardLabel: { fontSize: '13px', fontWeight: 'bold', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  textBoxPreview: {
-    fontSize: '13px', lineHeight: '1.5', color: '#cbd5e1', whiteSpace: 'pre-wrap', minHeight: '60px'
+  choiceSelected: {
+    borderColor: '#6366f1', backgroundColor: 'rgba(99, 102, 241, 0.05)', 
+    boxShadow: '0 0 15px rgba(99, 102, 241, 0.1)'
   },
-  resultArea: {
-    padding: '16px', backgroundColor: '#1e293b', borderTop: '1px solid #334155'
+  checkCircle: {
+    position: 'absolute', top: '12px', right: '12px', width: '18px', height: '18px',
+    borderRadius: '50%', border: '2px solid #27272a', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', fontSize: '10px'
   },
-  resultLabel: { fontSize: '13px', fontWeight: 'bold', color: '#10b981', marginBottom: '8px', display: 'block' },
+  checkCircleActive: {
+    backgroundColor: '#6366f1', borderColor: '#6366f1', color: 'white'
+  },
+  resultBox: {
+    margin: '12px 20px 20px', padding: '16px', borderRadius: '8px',
+    backgroundColor: '#0a0a0c', border: '1px dashed #3f3f46'
+  },
   textarea: {
-    width: '100%', minHeight: '80px', padding: '10px', borderRadius: '4px',
-    fontSize: '16px',
-    lineHeight: '1.4', border: '1px solid #10b981',
-    backgroundColor: '#020617', color: '#e2e8f0', whiteSpace: 'pre-wrap', outline: 'none', resize: 'vertical',
-    fontFamily: 'inherit',
-    WebkitAppearance: 'none'
+    width: '100%', minHeight: '60px', padding: '12px', borderRadius: '6px',
+    fontSize: '14px', lineHeight: '1.6', border: '1px solid #27272a',
+    backgroundColor: '#111113', color: '#e4e4e7', outline: 'none', resize: 'vertical'
   },
-  btn: {
-    cursor: 'pointer', padding: '8px 16px', borderRadius: '6px', border: 'none',
-    fontSize: '13px', fontWeight: '600', transition: 'all 0.2s',
-    WebkitAppearance: 'none'
+  footer: {
+    padding: '16px 28px', borderTop: '1px solid #18181b', backgroundColor: '#0a0a0c',
+    display: 'flex', justifyContent: 'flex-end', gap: '12px', flexShrink: 0
+  },
+  primaryBtn: {
+    backgroundColor: '#6366f1', color: 'white', padding: '10px 20px', borderRadius: '8px',
+    fontWeight: '600', fontSize: '14px', border: 'none', cursor: 'pointer',
+    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
   },
   badge: {
-    display: 'inline-block', padding: '2px 6px', borderRadius: '4px', fontSize: '11px',
-    fontWeight: 'bold', border: '1px solid', marginRight: '6px', marginBottom: '6px'
-  },
-  selectedIcon: { fontSize: '16px' }
+    display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '4px',
+    fontSize: '11px', fontWeight: '600', textTransform: 'uppercase' as any, letterSpacing: '0.02em'
+  }
 };
 
-const Badge = ({ type, active }: { type: 'good' | 'growth', active: boolean }) => {
-  if (!active) return <span style={{ ...styles.badge, borderColor: '#555', color: '#777', opacity: 0.4 }}>⚪ {type}</span>;
-  return type === 'good' 
-    ? <span style={{ ...styles.badge, backgroundColor: '#064e3b', borderColor: '#059669', color: '#ecfdf5' }}>✅ Strength</span>
-    : <span style={{ ...styles.badge, backgroundColor: '#7f1d1d', borderColor: '#dc2626', color: '#fef2f2' }}>🌱 Growth</span>;
+const StatusBadge = ({ type, active }: { type: 'good' | 'growth', active: boolean }) => {
+  if (!active) return null;
+  return type === 'good'
+    ? <span style={{ ...styles.badge, color: '#4ade80', backgroundColor: 'rgba(74, 222, 128, 0.1)' }}>Strength</span>
+    : <span style={{ ...styles.badge, color: '#f87171', backgroundColor: 'rgba(248, 113, 113, 0.1)' }}>Growth</span>;
 };
 
-export const ConflictResolutionModal: React.FC<Props> = ({
-  isOpen,
-  onClose,
-  onResolve,
-  localData,
-  serverData,
-}) => {
+export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onResolve, localData, serverData }) => {
   const [resolvedIndicators, setResolvedIndicators] = useState<any[]>([]);
-  const [hasConflicts, setHasConflicts] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
-  }, []);
+  useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
 
-  // 🟢 LOAD DATA & DETECT META CONFLICTS
   useEffect(() => {
     if (isOpen && localData && serverData) {
       const allItems: any[] = [];
-      let conflictFound = false;
-
-      // 1. 🟢 CHECK METADATA (Teacher Name, School, etc.)
       const localMeta = localData.meta || {};
-      
       const lTeacher = (localMeta.teacherName || "").trim();
       const sTeacher = (serverData.teacher_name || "").trim();
-      const lSchool = (localMeta.schoolName || "").trim();
-      const sSchool = (serverData.school_name || "").trim();
-
-      const metaDiffers = lTeacher !== sTeacher || lSchool !== sSchool;
       
-      if (metaDiffers) {
-        conflictFound = true;
-        // Construct a special "fake indicator" for Metadata
+      if (lTeacher !== sTeacher || (localMeta.schoolName || "").trim() !== (serverData.school_name || "").trim()) {
         allItems.push({
-          id: 'META_CONFLICT',
-          number: 'ℹ️',
-          title: 'Observation Details (Teacher / School)',
-          isMeta: true, 
-          
-          _localText: `Teacher: ${lTeacher}\nSchool: ${lSchool}`,
-          _serverText: `Teacher: ${sTeacher}\nSchool: ${sSchool}`,
-          
-          commentText: `Teacher: ${lTeacher}\nSchool: ${lSchool}`,
-          
-          _isConflict: true,
-          _selectedSource: 'local' as SourceType
+          id: 'META_CONFLICT', number: 'ID', title: 'Header Information', isMeta: true,
+          _localText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
+          _serverText: `Teacher: ${sTeacher}\nSchool: ${serverData.school_name}`,
+          commentText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
+          _isConflict: true, _selectedSource: 'local'
         });
       }
 
-      // 2. CHECK INDICATORS
-      const localInds = localData.indicators || [];
-      const serverInds = serverData.indicators || [];
-      const serverMap = new Map(serverInds.map((i: any) => [i.id, i]));
-
-      const mergedInds = localInds.map((lInd: any) => {
-        const sInd = serverMap.get(lInd.id) as any;
-        
-        const localText = lInd.commentText || "";
-        const serverText = sInd?.commentText || ""; 
-
-        const hasTextDiff = localText.trim() !== serverText.trim();
-        const hasFlagDiff = (lInd.good !== sInd?.good) || (lInd.growth !== sInd?.growth);
-        const isConflict = hasTextDiff || hasFlagDiff || !sInd;
-
-        if (isConflict) conflictFound = true;
-
+      const mergedInds = (localData.indicators || []).map((lInd: any) => {
+        const sInd = (serverData.indicators || []).find((i: any) => i.id === lInd.id);
+        const isConflict = (lInd.commentText || "").trim() !== (sInd?.commentText || "").trim() || (lInd.good !== sInd?.good);
         return {
-          ...lInd, 
-          _localText: localText,
-          _serverText: serverText,
-          
-          // 🟢 NEW: Capture Local Snapshots so the card doesn't flip when we change the result
-          _localGood: lInd.good,
-          _localGrowth: lInd.growth,
-
-          _serverVersion: sInd,
-          _isConflict: isConflict, 
-          _selectedSource: 'local' as SourceType 
+          ...lInd, _localText: lInd.commentText, _serverText: sInd?.commentText || "",
+          _localGood: lInd.good, _localGrowth: lInd.growth, _serverVersion: sInd,
+          _isConflict: isConflict, _selectedSource: 'local'
         };
       });
-
-      // Combine Metadata Item + Indicators
       setResolvedIndicators([...allItems, ...mergedInds]);
-      setHasConflicts(conflictFound);
     }
   }, [isOpen, localData, serverData]);
 
-  if (!isOpen || !localData || !serverData || !mounted) return null;
+  if (!isOpen || !mounted) return null;
 
-  // 🟢 ACTIONS
-  const handleSelectSource = (index: number, source: 'local' | 'server') => {
+  const handleSelect = (idx: number, src: 'local' | 'server') => {
     setResolvedIndicators(prev => {
       const copy = [...prev];
-      const item = copy[index];
-      const sInd = item._serverVersion;
-
-      let newCommentText = item.commentText;
-      let newGood = item.good;
-      let newGrowth = item.growth;
-
-      if (source === 'local') {
-        newCommentText = item._localText;
-        newGood = item._localGood;
-        newGrowth = item._localGrowth;
-      } else if (source === 'server') {
-        newCommentText = item._serverText;
-        if (sInd) {
-           newGood = sInd.good;
-           newGrowth = sInd.growth;
-        }
-      }
-
-      copy[index] = {
-        ...item,
-        commentText: newCommentText,
-        good: newGood,
-        growth: newGrowth,
-        _selectedSource: source,
-        _isConflict: false 
+      const item = copy[idx];
+      copy[idx] = { 
+        ...item, _selectedSource: src, _isConflict: false,
+        commentText: src === 'local' ? item._localText : item._serverText,
+        good: src === 'local' ? item._localGood : item._serverVersion?.good,
+        growth: src === 'local' ? item._localGrowth : item._serverVersion?.growth,
       };
       return copy;
     });
   };
 
-  const handleManualEdit = (index: number, text: string) => {
-    setResolvedIndicators(prev => prev.map((item, i) => i === index ? { 
-        ...item,
-        commentText: text,
-        _selectedSource: 'manual',
-        _isConflict: false
-    } : item));
-  };
-
-  const handleKeepAllMine = () => {
-    setResolvedIndicators(prev => prev.map(item => {
-      if (!item._isConflict) return item;
-      return {
-        ...item,
-        commentText: item._localText,
-        good: item._localGood,     
-        growth: item._localGrowth, 
-        _selectedSource: 'local',
-        _isConflict: false
-      };
-    }));
-  };
-
   const handleFinalize = () => {
-    console.log("📝 Generating Final Payload...");
-    
-    // Separate Metadata item from normal indicators
-    const metaItem = resolvedIndicators.find(i => i.isMeta);
-    const normalIndicators = resolvedIndicators.filter(i => !i.isMeta);
-
-    // Clean indicators
-    const cleanIndicators = normalIndicators.map(ind => {
-      const { 
-        _localText, _serverText, _serverVersion, _isConflict, _selectedSource, 
-        _localGood, _localGrowth, 
-        isMeta, ...clean 
-      } = ind;
-      return clean;
-    });
-
-    let finalMeta = { ...localData.meta };
-
-    if (metaItem) {
-      const lines = metaItem.commentText.split('\n');
-      const teacherLine = lines.find((l: string) => l.startsWith('Teacher:'));
-      const schoolLine = lines.find((l: string) => l.startsWith('School:'));
-      
-      if (teacherLine) finalMeta.teacherName = teacherLine.replace('Teacher:', '').trim();
-      if (schoolLine) finalMeta.schoolName = schoolLine.replace('School:', '').trim();
-    }
-
-    const finalPayload = {
-      ...localData,
-      teacherName: finalMeta.teacherName,
-      schoolName: finalMeta.schoolName,
-      meta: finalMeta,
-      indicators: cleanIndicators,
-      updatedAt: Date.now(),
-      lastSync: Date.now() 
-    };
-
-    console.log("✅ Final Payload Ready:", finalPayload);
-    onResolve(finalPayload);
+    const cleanIndicators = resolvedIndicators.filter(i => !i.isMeta).map(({ _localText, _serverText, _serverVersion, _isConflict, _selectedSource, _localGood, _localGrowth, ...clean }) => clean);
+    onResolve({ ...localData, indicators: cleanIndicators, updatedAt: Date.now(), lastSync: Date.now() });
   };
 
-  const remainingConflicts = resolvedIndicators.some(i => i._isConflict);
-
-  const modalContent = (
+  return ReactDOM.createPortal(
     <div style={styles.overlay}>
       <div style={styles.modal}>
-        
-        {/* HEADER */}
         <div style={styles.header}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '20px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>⚔️</span> Conflict Resolution
-            </h2>
-            <p style={{ margin: '4px 0 0', color: '#94a3b8', fontSize: '13px' }}>
-              Review the differences below.
-            </p>
+          <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
+            <span style={{fontSize:'20px'}}>⚡</span>
+            <h2 style={{margin:0, fontSize:'18px', fontWeight:600}}>Review Conflicts</h2>
           </div>
-          <div style={{display: 'flex', gap: '10px'}}>
-             {hasConflicts && remainingConflicts && (
-                 <button onClick={handleKeepAllMine} style={{...styles.btn, backgroundColor: '#334155', color: '#a5b4fc', border: '1px solid #4f46e5'}}>
-                    ⚡ Keep All Mine
-                 </button>
-             )}
-             <button onClick={onClose} style={{ ...styles.btn, backgroundColor: '#1e293b', color: '#cbd5e1', border: '1px solid #475569' }}>Cancel</button>
-          </div>
+          <button onClick={onClose} style={{...styles.btn, backgroundColor:'transparent', color:'#71717a'}}>Close</button>
         </div>
 
-        {/* BODY */}
         <div style={styles.body}>
-          {resolvedIndicators.map((ind, idx) => {
-            const sInd = ind._serverVersion;
-            const isLocalSelected = ind._selectedSource === 'local';
-            const isServerSelected = ind._selectedSource === 'server';
-            const isMeta = ind.isMeta;
-            
-            // 🟢 HIGHLIGHT LOGIC
-            const isConflict = ind._isConflict;
-            
-            let borderColor = '#334155'; // Default Grey
-            let titleBg = '#334155'; // Default Grey
-            
-            if (isMeta) {
-                borderColor = '#f59e0b'; // Orange
-                titleBg = 'rgba(245, 158, 11, 0.2)';
-            } else if (isConflict) {
-                borderColor = '#ef4444'; // Red for Conflict
-                titleBg = 'rgba(239, 68, 68, 0.25)'; // Reddish Header
-            }
-
-            return (
-              <div key={ind.id} style={{
-                 ...styles.rowContainer, 
-                 border: `1px solid ${borderColor}`
-              }}>
-                {/* TITLE */}
-                <div style={{
-                    ...styles.rowTitle, 
-                    backgroundColor: titleBg,
-                    color: isConflict || isMeta ? '#fff' : '#e2e8f0'
-                }}>
-                    {isConflict && !isMeta && <span style={{marginRight: 4}}>⚠️</span>}
-                    {ind.number} {ind.title}
-                </div>
-                
-                {/* CARDS */}
-                <div style={styles.comparisonGrid}>
-                  <div 
-                    onClick={() => handleSelectSource(idx, 'local')}
-                    style={{ ...styles.card, ...(isLocalSelected ? styles.cardLocalSelected : {}) }}
-                  >
-                    <div style={{ ...styles.cardLabel, color: isLocalSelected ? '#818cf8' : '#94a3b8' }}>
-                      <span>📱 Your iPad</span>
-                      {isLocalSelected && <span style={styles.selectedIcon}>✅</span>}
-                    </div>
-                    
-                    {!isMeta && (
-                        <div style={{marginBottom: '8px'}}>
-                        <Badge type="good" active={ind._localGood} />
-                        <Badge type="growth" active={ind._localGrowth} />
-                        </div>
-                    )}
-                    
-                    <div style={styles.textBoxPreview}>
-                      {ind._localText || <em style={{opacity: 0.5}}>(Empty)</em>}
-                    </div>
-                  </div>
-
-                  <div 
-                    onClick={() => handleSelectSource(idx, 'server')}
-                    style={{ ...styles.card, ...(isServerSelected ? styles.cardServerSelected : {}), borderLeft: '1px solid #334155' }}
-                  >
-                    <div style={{ ...styles.cardLabel, color: isServerSelected ? '#38bdf8' : '#94a3b8' }}>
-                      <span>☁️ Server Version</span>
-                      {isServerSelected && <span style={styles.selectedIcon}>✅</span>}
-                    </div>
-                     {!isMeta && (
-                        <div style={{marginBottom: '8px'}}>
-                        <Badge type="good" active={sInd?.good} />
-                        <Badge type="growth" active={sInd?.growth} />
-                        </div>
-                    )}
-                    <div style={styles.textBoxPreview}>
-                      {ind._serverText || <em style={{color: '#f87171'}}>Missing / Empty</em>}
-                    </div>
-                  </div>
-                </div>
-
-                 {/* FINAL RESULT */}
-                <div style={styles.resultArea}>
-                   <label style={{...styles.resultLabel, color: isMeta ? '#f59e0b' : styles.resultLabel.color}}>
-                       Final Result (Editable)
-                   </label>
-                   <textarea 
-                     style={styles.textarea}
-                     value={ind.commentText}
-                     onChange={(e) => handleManualEdit(idx, e.target.value)}
-                   />
-                </div>
+          {resolvedIndicators.map((ind, idx) => (
+            <div key={ind.id} style={styles.cardContainer}>
+              <div style={{...styles.statusStrip, backgroundColor: ind._isConflict ? '#ef4444' : '#10b981'}} />
+              
+              <div style={styles.indicatorTitle}>
+                <span style={{color:'#6366f1'}}>{ind.number}</span> {ind.title}
               </div>
-            );
-          })}
-          
-          {!hasConflicts && (
-            <div style={{ textAlign: 'center', padding: '50px', color: '#64748b' }}>
-              <div style={{ fontSize: '40px', marginBottom: '16px' }}>🎉</div>
-              <h3>No data conflicts found.</h3>
-              <p>Timestamps differed, but content is identical.</p>
+
+              <div style={styles.comparisonGrid}>
+                {['local', 'server'].map((src) => {
+                  const isSelected = ind._selectedSource === src;
+                  return (
+                    <div key={src} 
+                         onClick={() => handleSelect(idx, src as any)}
+                         style={{...styles.choiceCard, ...(isSelected ? styles.choiceSelected : {})}}>
+                      <div style={styles.checkCircle}>
+                        {isSelected && "✓"}
+                      </div>
+                      <div style={{fontSize:'12px', color:'#71717a', fontWeight:600, textTransform:'uppercase'}}>
+                        {src === 'local' ? 'On iPad' : 'On Server'}
+                      </div>
+                      <div style={{display:'flex', gap:'8px'}}>
+                        <StatusBadge type="good" active={src === 'local' ? ind._localGood : ind._serverVersion?.good} />
+                        <StatusBadge type="growth" active={src === 'local' ? ind._localGrowth : ind._serverVersion?.growth} />
+                      </div>
+                      <div style={{fontSize:'14px', color: isSelected ? '#fff' : '#a1a1aa', whiteSpace:'pre-wrap'}}>
+                        {(src === 'local' ? ind._localText : ind._serverText) || <span style={{fontStyle:'italic', opacity:0.3}}>No comment</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={styles.resultBox}>
+                <div style={{fontSize:'11px', color:'#71717a', marginBottom:'8px', fontWeight:600}}>RESULTING COMMENT</div>
+                <textarea 
+                  style={styles.textarea} 
+                  value={ind.commentText} 
+                  onChange={(e) => setResolvedIndicators(prev => prev.map((item, i) => i === idx ? {...item, commentText: e.target.value, _selectedSource:'manual', _isConflict:false} : item))}
+                />
+              </div>
             </div>
-          )}
+          ))}
         </div>
 
-        {/* FOOTER */}
-        <div style={{ padding: '16px 24px', borderTop: '1px solid #334155', backgroundColor: '#1e293b', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
-           {remainingConflicts && (
-             <span style={{color: '#f87171', fontSize: '13px', fontWeight: 'bold'}}>Resolve conflicts to save.</span>
-           )}
-           {/* 🟢 FIX: Button is ALWAYS Green & Clickable */}
-           <button 
-             onClick={handleFinalize}
-             style={{ 
-               ...styles.btn, padding: '10px 24px', fontSize: '14px',
-               backgroundColor: '#059669', 
-               color: '#fff',
-               cursor: 'pointer',
-               boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.3)'
-             }}
-          >
-            💾 Save & Sync Now
-          </button>
+        <div style={styles.footer}>
+          <button onClick={handleFinalize} style={styles.primaryBtn}>Update & Sync</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
-
-  return ReactDOM.createPortal(modalContent, document.body);
 };
