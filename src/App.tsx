@@ -135,7 +135,7 @@ const App: React.FC = () => {
     <div className="app-root">
       <header className="top-bar">
         <div className="top-bar-left">
-          <div className="app-title">WebNotes • Teacher Observation</div>
+          <div className="app-title">GSVN • Trainer Webnotes</div>
         </div>
 
         <div className="top-bar-right">
