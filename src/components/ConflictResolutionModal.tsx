@@ -1,13 +1,5 @@
 import React, { useState, useEffect } from "react";
-
-// Helper: Check if a specific indicator is different
-const hasChanged = (local: any, server: any) => {
-  if (!local || !server) return true;
-  if (local.commentText !== server.commentText) return true;
-  if (local.good !== server.good) return true;
-  if (local.growth !== server.growth) return true;
-  return false;
-};
+import ReactDOM from "react-dom";
 
 interface Props {
   isOpen: boolean;
@@ -17,6 +9,83 @@ interface Props {
   serverData: any;
 }
 
+// Use a type alias for clarity
+type SourceType = 'local' | 'server' | 'manual';
+
+// --- INLINE STYLES (Guaranteed to work) ---
+const styles: Record<string, React.CSSProperties> = {
+  overlay: {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(5px)',
+    zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+  },
+  modal: {
+    backgroundColor: '#0f172a', // slate-900
+    width: '95%', maxWidth: '1100px', height: '90vh',
+    borderRadius: '12px', border: '1px solid #334155', display: 'flex', flexDirection: 'column',
+    overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', color: '#f1f5f9'
+  },
+  header: {
+    padding: '16px 24px', borderBottom: '1px solid #334155', backgroundColor: '#1e293b',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+  },
+  body: {
+    flex: 1, overflowY: 'auto', padding: '20px', backgroundColor: '#020617', position: 'relative'
+  },
+  // Conflict Row Container
+  rowContainer: {
+    marginBottom: '30px', backgroundColor: '#1e293b', borderRadius: '8px', border: '1px solid #334155', overflow: 'hidden'
+  },
+  rowTitle: {
+    padding: '10px 16px', backgroundColor: '#334155', color: '#e2e8f0', fontWeight: 'bold', fontSize: '14px', borderBottom: '1px solid #475569'
+  },
+  comparisonGrid: {
+    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', backgroundColor: '#334155' // Gap creates border effect
+  },
+  // Clickable Card Styles
+  card: {
+    padding: '16px', cursor: 'pointer', backgroundColor: '#1e293b', transition: 'all 0.2s ease', position: 'relative', borderBottom: '4px solid transparent'
+  },
+  cardLocalSelected: {
+    backgroundColor: 'rgba(79, 70, 229, 0.1)', borderBottomColor: '#6366f1' // Indigo
+  },
+  cardServerSelected: {
+    backgroundColor: 'rgba(14, 165, 233, 0.1)', borderBottomColor: '#0ea5e9' // Sky blue
+  },
+  cardLabel: { fontSize: '13px', fontWeight: 'bold', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  textBoxPreview: {
+    fontSize: '13px', lineHeight: '1.5', color: '#cbd5e1', whiteSpace: 'pre-wrap', minHeight: '60px'
+  },
+  // Final Result Area underneath cards
+  resultArea: {
+    padding: '16px', backgroundColor: '#1e293b', borderTop: '1px solid #334155'
+  },
+  resultLabel: { fontSize: '13px', fontWeight: 'bold', color: '#10b981', marginBottom: '8px', display: 'block' },
+  textarea: {
+    width: '100%', minHeight: '80px', padding: '10px', borderRadius: '4px',
+    fontSize: '13px', lineHeight: '1.4', border: '1px solid #10b981',
+    backgroundColor: '#020617', color: '#e2e8f0', whiteSpace: 'pre-wrap', outline: 'none', resize: 'vertical'
+  },
+  btn: {
+    cursor: 'pointer', padding: '8px 16px', borderRadius: '6px', border: 'none',
+    fontSize: '13px', fontWeight: '600', transition: 'all 0.2s'
+  },
+  badge: {
+    display: 'inline-block', padding: '2px 6px', borderRadius: '4px', fontSize: '11px',
+    fontWeight: 'bold', border: '1px solid', marginRight: '6px', marginBottom: '6px'
+  },
+  selectedIcon: { fontSize: '16px' }
+};
+
+// Helper: Badge Component
+const Badge = ({ type, active }: { type: 'good' | 'growth', active: boolean }) => {
+  if (!active) return <span style={{ ...styles.badge, borderColor: '#555', color: '#777', opacity: 0.4 }}>⚪ {type}</span>;
+  return type === 'good' 
+    ? <span style={{ ...styles.badge, backgroundColor: '#064e3b', borderColor: '#059669', color: '#ecfdf5' }}>✅ Strength</span>
+    : <span style={{ ...styles.badge, backgroundColor: '#7f1d1d', borderColor: '#dc2626', color: '#fef2f2' }}>🌱 Growth</span>;
+};
+
 export const ConflictResolutionModal: React.FC<Props> = ({
   isOpen,
   onClose,
@@ -24,179 +93,259 @@ export const ConflictResolutionModal: React.FC<Props> = ({
   localData,
   serverData,
 }) => {
+  // We add _selectedSource to track which card was clicked
   const [resolvedIndicators, setResolvedIndicators] = useState<any[]>([]);
+  const [hasConflicts, setHasConflicts] = useState(false);
 
-  // 🟢 Load Data on Open
+  // 🟢 LOAD DATA ON OPEN
   useEffect(() => {
     if (isOpen && localData && serverData) {
-      // We map over LOCAL indicators. If the server has a matching ID, we compare.
-      // Default Strategy: Keep LOCAL version initially, but flag conflicts.
-      const merged = localData.indicators.map((lInd: any) => {
-        const sInd = serverData.indicators.find((s: any) => s.id === lInd.id);
+      const localInds = localData.indicators || [];
+      const serverInds = serverData.indicators || [];
+      const serverMap = new Map(serverInds.map((i: any) => [i.id, i]));
+
+      let conflictFound = false;
+
+      const merged = localInds.map((lInd: any) => {
+        const sInd = serverMap.get(lInd.id) as any;
         
+        const localText = lInd.commentText || "";
+        const serverText = sInd?.commentText || ""; 
+
+        const hasTextDiff = localText.trim() !== serverText.trim();
+        const hasFlagDiff = (lInd.good !== sInd?.good) || (lInd.growth !== sInd?.growth);
+        const isConflict = hasTextDiff || hasFlagDiff || !sInd;
+
+        if (isConflict) conflictFound = true;
+
         return {
           ...lInd, 
-          _serverVersion: sInd, 
-          // It's a conflict if server exists AND data is different
-          _isConflict: sInd && hasChanged(lInd, sInd)
+          // Store versions for reference
+          _localText: localText,
+          _serverText: serverText,
+          _serverVersion: sInd,
+          // Flag used for UI filtering
+          _isConflict: isConflict, 
+          // Track user choice. Default to local for preview, but keep conflict flag true.
+          _selectedSource: 'local' as SourceType 
         };
       });
       setResolvedIndicators(merged);
+      setHasConflicts(conflictFound);
     }
   }, [isOpen, localData, serverData]);
 
   if (!isOpen || !localData || !serverData) return null;
 
-  // 🟢 Merge Logic (The Core Feature)
-  const handleMergeAction = (index: number, action: 'keep_local' | 'keep_server' | 'combine') => {
+  // 🟢 HANDLE CARD CLICK (The "Click to Pick" Logic)
+  const handleSelectSource = (index: number, source: 'local' | 'server') => {
     setResolvedIndicators(prev => {
       const copy = [...prev];
-      const current = copy[index];
-      const server = current._serverVersion;
+      const item = copy[index];
+      const sInd = item._serverVersion;
 
-      if (!server) return prev;
+      let newCommentText = item.commentText;
+      let newGood = item.good;
+      let newGrowth = item.growth;
 
-      if (action === 'keep_local') {
-        // Just force local values
-        copy[index] = { ...current, ...current, _isConflict: false }; 
-        // We keep _serverVersion hidden but accessible just in case
-      } 
-      else if (action === 'keep_server') {
-        // Overwrite with server values
-        copy[index] = { ...server, _serverVersion: server, _isConflict: false };
-      } 
-      else if (action === 'combine') {
-        // 🧠 Smart Merge: Concat text
-        const combinedText = [
-          current.commentText?.trim(),
-          "----------------",
-          "[Server Update]:",
-          server.commentText?.trim()
-        ].filter(Boolean).join("\n");
-
-        copy[index] = {
-          ...current,
-          commentText: combinedText,
-          // Union flags: If either said "Good", it's Good.
-          good: current.good || server.good,
-          growth: current.growth || server.growth,
-          _isConflict: false // Mark resolved
-        };
+      if (source === 'local') {
+        newCommentText = item._localText;
+        // keep local flags
+      } else if (source === 'server' && sInd) {
+        newCommentText = item._serverText;
+        newGood = sInd.good;
+        newGrowth = sInd.growth;
       }
+
+      copy[index] = {
+        ...item,
+        commentText: newCommentText,
+        good: newGood,
+        growth: newGrowth,
+        _selectedSource: source,
+        // CRITICAL: Mark resolved the moment they pick one
+        _isConflict: false 
+      };
       return copy;
     });
   };
 
+  // 🟢 FIXED: Variable name fixed from idx to index
+  const handleManualEdit = (index: number, text: string) => {
+    setResolvedIndicators(prev => prev.map((item, i) => i === index ? {
+        ...item,
+        commentText: text,
+        _selectedSource: 'manual',
+        _isConflict: false // Manual edit also resolves it
+      } : item));
+  };
+
+  // Quick action: Keep all local versions
+  const handleKeepAllMine = () => {
+    setResolvedIndicators(prev => prev.map(item => {
+      if (!item._isConflict) return item;
+      return {
+        ...item,
+        commentText: item._localText,
+        // keep local flags
+        _selectedSource: 'local',
+        _isConflict: false
+      };
+    }));
+  };
+
   const handleFinalize = () => {
-    // Clean up internal flags before saving
-    const cleanIndicators = resolvedIndicators.map(({ _serverVersion, _isConflict, ...rest }) => rest);
+    // Clean up internal props before saving
+    const cleanIndicators = resolvedIndicators.map(({ _localText, _serverText, _serverVersion, _isConflict, _selectedSource, ...rest }) => rest);
     
     const finalPayload = {
-      ...localData, // Keep local meta fields (Teacher Name etc) by default
+      ...localData,
       indicators: cleanIndicators,
-      updatedAt: Date.now(), // Bump timestamp so WE become the "Newest" version
+      // IMPORTANT: Update timestamps so this becomes the newest version
+      updatedAt: Date.now(),
+      lastSync: Date.now() 
     };
-
     onResolve(finalPayload);
   };
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 text-sm">
-      <div className="bg-slate-900 w-full max-w-6xl h-[90vh] flex flex-col rounded-xl border border-slate-700 shadow-2xl overflow-hidden">
+  // Are there any conflicts left unresolved?
+  const remainingConflicts = resolvedIndicators.some(i => i._isConflict);
+
+  const modalContent = (
+    <div style={styles.overlay}>
+      <div style={styles.modal}>
         
         {/* HEADER */}
-        <div className="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-center">
+        <div style={styles.header}>
           <div>
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              <span className="text-red-500">⚔️</span> 
-              Conflict Detected
+            <h2 style={{ margin: 0, fontSize: '20px', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>⚔️</span> Conflict Resolution
             </h2>
-            <p className="text-slate-400">
-              The server has a newer version. Review changes below to prevent data loss.
+            <p style={{ margin: '4px 0 0', color: '#94a3b8', fontSize: '13px' }}>
+              Click the version you want to keep for each item below.
             </p>
           </div>
-          <button onClick={onClose} className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded">
-            Cancel
-          </button>
+          <div style={{display: 'flex', gap: '10px'}}>
+             {hasConflicts && remainingConflicts && (
+                 <button onClick={handleKeepAllMine} style={{...styles.btn, backgroundColor: '#334155', color: '#a5b4fc', border: '1px solid #4f46e5'}}>
+                    ⚡ Keep All Mine
+                 </button>
+             )}
+             <button onClick={onClose} style={{ ...styles.btn, backgroundColor: '#1e293b', color: '#cbd5e1', border: '1px solid #475569' }}>Cancel</button>
+          </div>
         </div>
 
-        {/* SCROLLABLE BODY */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/95">
-          
-          <div className="grid grid-cols-3 gap-4 mb-2 font-bold text-slate-300 uppercase tracking-wider text-xs">
-            <div className="text-center p-2 bg-indigo-900/40 rounded border border-indigo-500/20">📱 Your iPad</div>
-            <div className="text-center p-2 bg-sky-900/40 rounded border border-sky-500/20">☁️ Server</div>
-            <div className="text-center p-2 bg-emerald-900/40 rounded border border-emerald-500/20">✅ Result</div>
-          </div>
-
+        {/* BODY */}
+        <div style={styles.body}>
           {resolvedIndicators.map((ind, idx) => {
-            if (!ind._isConflict) return null; // Hide non-conflicts to reduce noise
+            // Only show items that were originally conflicts
+            if (!hasConflicts && !ind._isConflict) return null;
+            // If it was a conflict, show it until resolved, or if we are showing all for context
+            if (!ind._isConflict && hasConflicts) {
+               // Optional: hide resolved rows to clean up UI? For now let's keep them visible but look "done".
+            }
+
             const sInd = ind._serverVersion;
+            const isLocalSelected = ind._selectedSource === 'local';
+            const isServerSelected = ind._selectedSource === 'server';
 
             return (
-              <div key={ind.id} className="grid grid-cols-3 gap-4 bg-slate-800/40 p-4 rounded-lg border border-slate-700">
+              <div key={ind.id} style={styles.rowContainer}>
+                {/* ROW TITLE */}
+                <div style={styles.rowTitle}>{ind.number} {ind.title}</div>
                 
-                {/* 1. LOCAL */}
-                <div className="space-y-2">
-                  <div className="font-bold text-indigo-400">{ind.number} {ind.title}</div>
-                  <div className="p-2 bg-slate-900 rounded border border-slate-700 text-slate-300 min-h-[60px] whitespace-pre-wrap">
-                    {localData.indicators.find((x:any) => x.id === ind.id)?.commentText || <span className="opacity-50">Empty</span>}
+                {/* COMPARISON CARDS */}
+                <div style={styles.comparisonGrid}>
+                  
+                  {/* LOCAL CARD (Clickable) */}
+                  <div 
+                    onClick={() => handleSelectSource(idx, 'local')}
+                    style={{ ...styles.card, ...(isLocalSelected ? styles.cardLocalSelected : {}) }}
+                  >
+                    <div style={{ ...styles.cardLabel, color: isLocalSelected ? '#818cf8' : '#94a3b8' }}>
+                      <span>📱 Your iPad</span>
+                      {isLocalSelected && <span style={styles.selectedIcon}>✅</span>}
+                    </div>
+                    <div style={{marginBottom: '8px'}}>
+                      <Badge type="good" active={ind.good} />
+                      <Badge type="growth" active={ind.growth} />
+                    </div>
+                    <div style={styles.textBoxPreview}>
+                      {ind._localText || <em style={{opacity: 0.5}}>(Empty)</em>}
+                    </div>
                   </div>
-                  <button onClick={() => handleMergeAction(idx, 'keep_local')} className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold">
-                    Keep Mine
-                  </button>
-                </div>
 
-                {/* 2. SERVER */}
-                <div className="space-y-2">
-                  <div className="font-bold text-sky-400 text-right">Server Version</div>
-                  <div className="p-2 bg-slate-900 rounded border border-slate-700 text-slate-300 min-h-[60px] whitespace-pre-wrap">
-                    {sInd.commentText || <span className="opacity-50">Empty</span>}
+                  {/* SERVER CARD (Clickable) */}
+                  <div 
+                    onClick={() => handleSelectSource(idx, 'server')}
+                    style={{ ...styles.card, ...(isServerSelected ? styles.cardServerSelected : {}), borderLeft: '1px solid #334155' }}
+                  >
+                    <div style={{ ...styles.cardLabel, color: isServerSelected ? '#38bdf8' : '#94a3b8' }}>
+                      <span>☁️ Server Version</span>
+                      {isServerSelected && <span style={styles.selectedIcon}>✅</span>}
+                    </div>
+                     <div style={{marginBottom: '8px'}}>
+                      <Badge type="good" active={sInd?.good} />
+                      <Badge type="growth" active={sInd?.growth} />
+                    </div>
+                    <div style={styles.textBoxPreview}>
+                      {ind._serverText || <em style={{color: '#f87171'}}>Missing / Empty</em>}
+                    </div>
                   </div>
-                  <button onClick={() => handleMergeAction(idx, 'keep_server')} className="w-full py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded font-bold">
-                    Use Server's
-                  </button>
                 </div>
 
-                {/* 3. RESULT */}
-                <div className="space-y-2 relative">
-                  <div className="font-bold text-emerald-400 text-center">Merged Output</div>
-                  <textarea 
-                    className="w-full h-[60px] bg-black text-white p-2 rounded border border-emerald-500/50 focus:ring-1 focus:ring-emerald-500"
-                    value={ind.commentText}
-                    onChange={(e) => {
-                       const val = e.target.value;
-                       setResolvedIndicators(prev => prev.map((x, i) => i === idx ? { ...x, commentText: val } : x));
-                    }}
-                  />
-                  <button onClick={() => handleMergeAction(idx, 'combine')} className="w-full py-1.5 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded">
-                    🔗 Combine Both
-                  </button>
+                 {/* FINAL RESULT EDIT AREA */}
+                <div style={styles.resultArea}>
+                   <label style={styles.resultLabel}>Final Result (Editable)</label>
+                   <textarea 
+                     style={styles.textarea}
+                     value={ind.commentText}
+                     onChange={(e) => handleManualEdit(idx, e.target.value)}
+                   />
                 </div>
-
               </div>
             );
           })}
 
-          {resolvedIndicators.every(i => !i._isConflict) && (
-            <div className="flex flex-col items-center justify-center h-40 text-slate-500">
-              <div className="text-4xl mb-2">🎉</div>
-              <div>No conflicts found in text content.</div>
+          {!hasConflicts && (
+            <div style={{ textAlign: 'center', padding: '50px', color: '#64748b' }}>
+              <div style={{ fontSize: '40px', marginBottom: '16px' }}>🎉</div>
+              <h3>No data conflicts found.</h3>
+              <p>Timestamps differed, but the content is identical.</p>
+            </div>
+          )}
+           {hasConflicts && !remainingConflicts && (
+            <div style={{ textAlign: 'center', padding: '30px', color: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px' }}>
+              <h3>✅ All selections made!</h3>
+              <p>You can now save your changes.</p>
             </div>
           )}
         </div>
 
         {/* FOOTER */}
-        <div className="p-4 border-t border-slate-700 bg-slate-800 flex justify-end gap-4">
-          <button onClick={onClose} className="px-4 py-2 text-slate-300">Close</button>
-          <button 
-            onClick={handleFinalize}
-            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded shadow-lg shadow-emerald-900/50"
+        <div style={{ padding: '16px 24px', borderTop: '1px solid #334155', backgroundColor: '#1e293b', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '16px' }}>
+           {remainingConflicts && (
+             <span style={{color: '#f87171', fontSize: '13px', fontWeight: 'bold'}}>
+               Resolve remaining conflicts to save.
+             </span>
+           )}
+           <button 
+             onClick={handleFinalize}
+             disabled={remainingConflicts}
+             style={{ 
+               ...styles.btn, padding: '10px 24px', fontSize: '14px',
+               backgroundColor: remainingConflicts ? '#475569' : '#059669', 
+               color: remainingConflicts ? '#94a3b8' : '#fff',
+               cursor: remainingConflicts ? 'not-allowed' : 'pointer',
+               boxShadow: remainingConflicts ? 'none' : '0 4px 6px -1px rgba(5, 150, 105, 0.3)'
+             }}
           >
-            💾 Save & Sync
+            💾 Save & Sync Now
           </button>
         </div>
       </div>
     </div>
   );
+
+  return ReactDOM.createPortal(modalContent, document.body);
 };
