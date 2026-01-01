@@ -11,7 +11,7 @@ interface Props {
 
 type SourceType = 'local' | 'server' | 'manual';
 
-// --- LINEAR-INSPIRED STYLES ---
+// --- UPDATED STYLES ---
 const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -34,13 +34,14 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1, overflowY: 'auto', padding: '24px', backgroundColor: '#0a0a0c',
     WebkitOverflowScrolling: 'touch'
   },
-  // THE CARD
   cardContainer: {
     marginBottom: '32px', position: 'relative', borderRadius: '12px',
     backgroundColor: '#111113', border: '1px solid #27272a', overflow: 'hidden',
+    transition: 'background-color 0.3s ease' // Smooth transition for purple highlight
   },
   statusStrip: {
-    position: 'absolute', left: 0, top: 0, bottom: 0, width: '4px',
+    position: 'absolute', left: 0, top: 0, bottom: 0, width: '6px', // Slightly wider for impact
+    transition: 'background-color 0.3s ease'
   },
   indicatorTitle: {
     padding: '16px 20px 8px', fontSize: '15px', fontWeight: '600', color: '#a1a1aa',
@@ -62,9 +63,6 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'absolute', top: '12px', right: '12px', width: '18px', height: '18px',
     borderRadius: '50%', border: '2px solid #27272a', display: 'flex', alignItems: 'center',
     justifyContent: 'center', fontSize: '10px'
-  },
-  checkCircleActive: {
-    backgroundColor: '#6366f1', borderColor: '#6366f1', color: 'white'
   },
   resultBox: {
     margin: '12px 20px 20px', padding: '16px', borderRadius: '8px',
@@ -109,24 +107,43 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
       const localMeta = localData.meta || {};
       const lTeacher = (localMeta.teacherName || "").trim();
       const sTeacher = (serverData.teacher_name || "").trim();
+      const lSchool = (localMeta.schoolName || "").trim();
+      const sSchool = (serverData.school_name || "").trim();
       
-      if (lTeacher !== sTeacher || (localMeta.schoolName || "").trim() !== (serverData.school_name || "").trim()) {
+      const isMetaConflict = lTeacher !== sTeacher || lSchool !== sSchool;
+
+      if (isMetaConflict) {
         allItems.push({
           id: 'META_CONFLICT', number: 'ID', title: 'Header Information', isMeta: true,
-          _localText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
-          _serverText: `Teacher: ${sTeacher}\nSchool: ${serverData.school_name}`,
-          commentText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
+          _localText: `Teacher: ${lTeacher}\nSchool: ${lSchool}`,
+          _serverText: `Teacher: ${sTeacher}\nSchool: ${sSchool}`,
+          commentText: `Teacher: ${lTeacher}\nSchool: ${lSchool}`,
+          _textMismatch: true,
           _isConflict: true, _selectedSource: 'local'
         });
       }
 
       const mergedInds = (localData.indicators || []).map((lInd: any) => {
         const sInd = (serverData.indicators || []).find((i: any) => i.id === lInd.id);
-        const isConflict = (lInd.commentText || "").trim() !== (sInd?.commentText || "").trim() || (lInd.good !== sInd?.good);
+        const lText = (lInd.commentText || "").trim();
+        const sText = (sInd?.commentText || "").trim();
+        
+        // Logical Conflict: Content or Rating differs
+        const isConflict = lText !== sText || lInd.good !== sInd?.good || lInd.growth !== sInd?.growth;
+        
+        // Specific highlight: The comments themselves are different
+        const isTextMismatch = lText !== sText;
+
         return {
-          ...lInd, _localText: lInd.commentText, _serverText: sInd?.commentText || "",
-          _localGood: lInd.good, _localGrowth: lInd.growth, _serverVersion: sInd,
-          _isConflict: isConflict, _selectedSource: 'local'
+          ...lInd, 
+          _localText: lInd.commentText, 
+          _serverText: sInd?.commentText || "",
+          _localGood: lInd.good, 
+          _localGrowth: lInd.growth, 
+          _serverVersion: sInd,
+          _textMismatch: isTextMismatch, 
+          _isConflict: isConflict, 
+          _selectedSource: 'local'
         };
       });
       setResolvedIndicators([...allItems, ...mergedInds]);
@@ -150,7 +167,7 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
   };
 
   const handleFinalize = () => {
-    const cleanIndicators = resolvedIndicators.filter(i => !i.isMeta).map(({ _localText, _serverText, _serverVersion, _isConflict, _selectedSource, _localGood, _localGrowth, ...clean }) => clean);
+    const cleanIndicators = resolvedIndicators.filter(i => !i.isMeta).map(({ _localText, _serverText, _serverVersion, _isConflict, _selectedSource, _localGood, _localGrowth, _textMismatch, ...clean }) => clean);
     onResolve({ ...localData, indicators: cleanIndicators, updatedAt: Date.now(), lastSync: Date.now() });
   };
 
@@ -166,49 +183,61 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
         </div>
 
         <div style={styles.body}>
-          {resolvedIndicators.map((ind, idx) => (
-            <div key={ind.id} style={styles.cardContainer}>
-              <div style={{...styles.statusStrip, backgroundColor: ind._isConflict ? '#ef4444' : '#10b981'}} />
-              
-              <div style={styles.indicatorTitle}>
-                <span style={{color:'#6366f1'}}>{ind.number}</span> {ind.title}
-              </div>
+          {resolvedIndicators.map((ind, idx) => {
+            // STRIP LOGIC: Based on currently selected rating
+            const stripColor = ind.growth ? '#ef4444' : (ind.good ? '#10b981' : '#27272a');
+            
+            // BACKGROUND LOGIC: Highlight the whole card if comments don't match
+            const cardBg = ind._textMismatch ? 'rgba(168, 85, 247, 0.06)' : '#111113';
+            const cardBorder = ind._textMismatch ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid #27272a';
 
-              <div style={styles.comparisonGrid}>
-                {['local', 'server'].map((src) => {
-                  const isSelected = ind._selectedSource === src;
-                  return (
-                    <div key={src} 
-                         onClick={() => handleSelect(idx, src as any)}
-                         style={{...styles.choiceCard, ...(isSelected ? styles.choiceSelected : {})}}>
-                      <div style={styles.checkCircle}>
-                        {isSelected && "✓"}
-                      </div>
-                      <div style={{fontSize:'12px', color:'#71717a', fontWeight:600, textTransform:'uppercase'}}>
-                        {src === 'local' ? 'On iPad' : 'On Server'}
-                      </div>
-                      <div style={{display:'flex', gap:'8px'}}>
-                        <StatusBadge type="good" active={src === 'local' ? ind._localGood : ind._serverVersion?.good} />
-                        <StatusBadge type="growth" active={src === 'local' ? ind._localGrowth : ind._serverVersion?.growth} />
-                      </div>
-                      <div style={{fontSize:'14px', color: isSelected ? '#fff' : '#a1a1aa', whiteSpace:'pre-wrap'}}>
-                        {(src === 'local' ? ind._localText : ind._serverText) || <span style={{fontStyle:'italic', opacity:0.3}}>No comment</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            return (
+              <div key={ind.id} style={{...styles.cardContainer, backgroundColor: cardBg, border: cardBorder}}>
+                {/* 🔴 OUTER STRIP */}
+                <div style={{...styles.statusStrip, backgroundColor: stripColor}} />
+                
+                <div style={styles.indicatorTitle}>
+                  <span style={{color: ind._textMismatch ? '#a855f7' : '#6366f1'}}>{ind.number}</span> 
+                  {ind.title}
+                  {ind._textMismatch && <span style={{fontSize: '10px', color: '#a855f7', fontWeight: 700, marginLeft: 'auto'}}>CONTENT MISMATCH</span>}
+                </div>
 
-              <div style={styles.resultBox}>
-                <div style={{fontSize:'11px', color:'#71717a', marginBottom:'8px', fontWeight:600}}>RESULTING COMMENT</div>
-                <textarea 
-                  style={styles.textarea} 
-                  value={ind.commentText} 
-                  onChange={(e) => setResolvedIndicators(prev => prev.map((item, i) => i === idx ? {...item, commentText: e.target.value, _selectedSource:'manual', _isConflict:false} : item))}
-                />
+                <div style={styles.comparisonGrid}>
+                  {['local', 'server'].map((src) => {
+                    const isSelected = ind._selectedSource === src;
+                    return (
+                      <div key={src} 
+                           onClick={() => handleSelect(idx, src as any)}
+                           style={{...styles.choiceCard, ...(isSelected ? styles.choiceSelected : {})}}>
+                        <div style={{...styles.checkCircle, ...(isSelected ? {backgroundColor:'#6366f1', borderColor:'#6366f1', color:'white'} : {})}}>
+                          {isSelected && "✓"}
+                        </div>
+                        <div style={{fontSize:'12px', color:'#71717a', fontWeight:600, textTransform:'uppercase'}}>
+                          {src === 'local' ? 'On iPad' : 'On Server'}
+                        </div>
+                        <div style={{display:'flex', gap:'8px'}}>
+                          <StatusBadge type="good" active={src === 'local' ? ind._localGood : ind._serverVersion?.good} />
+                          <StatusBadge type="growth" active={src === 'local' ? ind._localGrowth : ind._serverVersion?.growth} />
+                        </div>
+                        <div style={{fontSize:'14px', color: isSelected ? '#fff' : '#a1a1aa', whiteSpace:'pre-wrap'}}>
+                          {(src === 'local' ? ind._localText : ind._serverText) || <span style={{fontStyle:'italic', opacity:0.3}}>No comment</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={styles.resultBox}>
+                  <div style={{fontSize:'11px', color:'#71717a', marginBottom:'8px', fontWeight:600}}>RESULTING COMMENT</div>
+                  <textarea 
+                    style={styles.textarea} 
+                    value={ind.commentText} 
+                    onChange={(e) => setResolvedIndicators(prev => prev.map((item, i) => i === idx ? {...item, commentText: e.target.value, _selectedSource:'manual', _isConflict:false} : item))}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div style={styles.footer}>
