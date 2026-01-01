@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
 import ImportSchoolsBtn from "./components/ImportSchoolsBtn";
+import { getGraphAccessToken } from "./msal/getGraphToken";
 import {
   useReactTable,
   getCoreRowModel,
@@ -15,8 +16,11 @@ import type {
   SortingState,
   ColumnResizeMode,
   VisibilityState,
-  Table, // NEW
+  Table,
 } from "@tanstack/react-table";
+
+// 🟢 NEW: Server URL
+const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 export interface SchoolRow {
   id: string;
@@ -32,7 +36,7 @@ export interface SchoolRow {
   district: string | null;
   city: string | null;
   notes: string | null;
-  admin_workbook_url: string | null; // NEW: Admin workbook link
+  admin_workbook_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,7 +53,7 @@ type SchoolFormState = {
   district: string;
   city: string;
   notes: string;
-  admin_workbook_url: string; // NEW: Admin workbook link
+  admin_workbook_url: string;
 };
 
 const emptyForm: SchoolFormState = {
@@ -64,15 +68,17 @@ const emptyForm: SchoolFormState = {
   district: "",
   city: "",
   notes: "",
-  admin_workbook_url: "", // NEW
+  admin_workbook_url: "",
 };
 
 interface SchoolFormModalProps {
   open: boolean;
   mode: "create" | "edit";
   initial?: SchoolFormState;
+  existingSchools: SchoolRow[];
   onCancel: () => void;
-  onSubmit: (values: SchoolFormState) => Promise<void>;
+  // 🟢 UPDATED: Accepts optional token
+  onSubmit: (values: SchoolFormState, autoCreateToken?: string) => Promise<void>;
 }
 
 interface SchoolViewModalProps {
@@ -194,11 +200,15 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
 }) => {
   const [form, setForm] = useState<SchoolFormState>(initial ?? emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  
+  // 🟢 NEW: Auto-create state
+  const [autoCreate, setAutoCreate] = useState(false);
 
   useEffect(() => {
     if (open) {
       setForm(initial ?? emptyForm);
       setSubmitting(false);
+      setAutoCreate(false);
     }
   }, [open, initial]);
 
@@ -217,9 +227,25 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       return;
     }
 
+    setSubmitting(true);
+    let token: string | undefined = undefined;
+
+    // 🟢 NEW: Get Token Logic
+    if (mode === "create" && autoCreate) {
+      try {
+        token = await getGraphAccessToken();
+      } catch (err: any) {
+        console.error("Token error", err);
+        const cont = window.confirm(`Could not sign in to Microsoft: ${err.message}\n\nCreate school anyway (without workbook)?`);
+        if (!cont) {
+          setSubmitting(false);
+          return;
+        }
+      }
+    }
+
     try {
-      setSubmitting(true);
-      await onSubmit(form);
+      await onSubmit(form, token);
     } finally {
       setSubmitting(false);
     }
@@ -356,13 +382,24 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
 
           <div className="form-row">
             <label>Admin Workbook URL</label>
-            <input
-              className="input"
-              type="url"
-              value={form.admin_workbook_url}
-              onChange={handleChange("admin_workbook_url")}
-              placeholder="Paste Admin workbook URL (e.g., OneDrive/SharePoint link)…"
-            />
+            
+            {/* 🟢 NEW: Auto-Create Checkbox */}
+            {mode === 'create' && (
+               <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
+                 <input type="checkbox" id="chk-auto-school" checked={autoCreate} onChange={(e) => setAutoCreate(e.target.checked)} style={{width:'auto', margin:0}} />
+                 <label htmlFor="chk-auto-school" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>✨ Auto-create Admin Workbook?</label>
+               </div>
+            )}
+
+            {!autoCreate && (
+              <input
+                className="input"
+                type="url"
+                value={form.admin_workbook_url}
+                onChange={handleChange("admin_workbook_url")}
+                placeholder="Paste Admin workbook URL (e.g., OneDrive/SharePoint link)…"
+              />
+            )}
           </div>
 
           <div className="modal-footer">
@@ -400,18 +437,19 @@ export const SchoolsScreen: React.FC = () => {
   const [rows, setRows] = useState<SchoolRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  
+  // 🟢 NEW: Background Task Tracking
+  const [provisioningIds, setProvisioningIds] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingRow, setEditingRow] = useState<SchoolRow | null>(null);
 
-  // NEW: View Modal state
   const [viewingRow, setViewingRow] = useState<SchoolRow | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
 
-  // NEW: Table State
-  const [refreshKey, setRefreshKey] = useState(0); // To trigger data reload
+  const [refreshKey, setRefreshKey] = useState(0); 
   const [sorting, setSorting] = useState<SortingState>([
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
@@ -423,7 +461,6 @@ export const SchoolsScreen: React.FC = () => {
     } catch (e) {
       console.error("Failed to load column visibility from local storage", e);
     }
-    // Default hidden columns
     return {
       campus_name: false,
       admin_phone: false,
@@ -437,7 +474,47 @@ export const SchoolsScreen: React.FC = () => {
       updated_at: false,
     };
   });
-  const [showColumnMenu, setShowColumnMenu] = useState(false); // For column visibility modal
+  const [showColumnMenu, setShowColumnMenu] = useState(false); 
+
+  // 🟢 NEW: Background Provisioning Logic
+  const runBackgroundProvisioning = async (school: SchoolRow, token: string) => {
+    try {
+      setProvisioningIds(prev => new Set(prev).add(school.id));
+
+      const resp = await fetch(`${MERGE_SERVER_BASE}/api/provision-school`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          schoolName: school.school_name,
+          trainerId: user?.id 
+        })
+      });
+      const result = await resp.json();
+
+      if (!result.ok) throw new Error(result.error || "Provisioning failed");
+
+      // Update DB
+      const { error } = await supabase
+        .from("schools")
+        .update({ admin_workbook_url: result.workbookUrl })
+        .eq("id", school.id);
+      
+      if (error) throw error;
+
+      // Update UI
+      setRows(prev => prev.map(r => r.id === school.id ? { ...r, admin_workbook_url: result.workbookUrl } : r));
+
+    } catch (err: any) {
+      console.error("Background task failed", err);
+      alert(`⚠️ Failed to create workbook for ${school.school_name}: ${err.message}`);
+    } finally {
+      setProvisioningIds(prev => {
+        const next = new Set(prev);
+        next.delete(school.id);
+        return next;
+      });
+    }
+  };
 
   // Define Columns
   const columns = useMemo<ColumnDef<SchoolRow>[]>(
@@ -535,8 +612,19 @@ export const SchoolsScreen: React.FC = () => {
         accessorKey: "admin_workbook_url",
         header: "Admin Workbook",
         enableSorting: false,
-        cell: (info) => (
-          info.getValue() ? (
+        cell: (info) => {
+          const row = info.row.original;
+          
+          // 🟢 NEW: Spinner logic
+          if (provisioningIds.has(row.id)) {
+            return (
+              <div style={{color: '#2563eb', display:'flex', alignItems:'center', gap:'6px', fontWeight:500}}>
+                <span className="spinner-small"></span> Creating...
+              </div>
+            );
+          }
+
+          return info.getValue() ? (
             <a
               href={info.getValue() as string}
               target="_blank"
@@ -548,8 +636,8 @@ export const SchoolsScreen: React.FC = () => {
             </a>
           ) : (
             <span>—</span>
-          )
-        ),
+          );
+        },
         minSize: 120,
         size: 180,
       },
@@ -605,7 +693,7 @@ export const SchoolsScreen: React.FC = () => {
         ),
       },
     ],
-    [setShowColumnMenu]
+    [setShowColumnMenu, provisioningIds] // 🟢 NEW: dependency on provisioningIds
   );
 
   const table = useReactTable({
@@ -614,16 +702,15 @@ export const SchoolsScreen: React.FC = () => {
     state: {
       sorting,
       globalFilter: search,
-      columnVisibility, // NEW
+      columnVisibility,
     },
     onSortingChange: setSorting,
-    onColumnVisibilityChange: setColumnVisibility, // NEW
+    onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
 
-  // Effect to persist column visibility
   useEffect(() => {
     try {
       localStorage.setItem("schoolsColumnVisibility", JSON.stringify(columnVisibility));
@@ -633,7 +720,6 @@ export const SchoolsScreen: React.FC = () => {
   }, [columnVisibility]);
 
   if (!user) {
-    // AuthGate should prevent this, but just in case
     return (
       <div className="card">
         <div className="card-header">
@@ -648,7 +734,6 @@ export const SchoolsScreen: React.FC = () => {
 
   const trainerId = user.id;
 
-  // Load schools for this trainer
   useEffect(() => {
     let cancelled = false;
 
@@ -703,32 +788,17 @@ export const SchoolsScreen: React.FC = () => {
     };
   }, [trainerId, refreshKey]);
 
-  // Search/filtering is now handled by TanStack Table (getFilteredRowModel)
-  // const filteredRows = useMemo(() => {
-  //   const q = search.trim().toLowerCase();
-  //   if (!q) return rows;
-  //   return rows.filter((r) => {
-  //     return (
-  //       r.school_name.toLowerCase().includes(q) ||
-  //       r.campus_name.toLowerCase().includes(q) ||
-  //       (r.city ?? "").toLowerCase().includes(q) ||
-  //       (r.district ?? "").toLowerCase().includes(q)
-  //     );
-  //   });
-  // }, [rows, search]);
-
   const openCreate = () => {
     setFormMode("create");
     setEditingRow(null);
     setShowForm(true);
-    setViewingRow(null); // Close view modal if open
+    setViewingRow(null);
     setShowViewModal(false);
   };
 
   const openView = (row: SchoolRow) => {
     setViewingRow(row);
     setShowViewModal(true);
-    // Ensure form is closed
     setShowForm(false);
   }
 
@@ -736,21 +806,17 @@ export const SchoolsScreen: React.FC = () => {
     setFormMode("edit");
     setEditingRow(row);
     setShowForm(true);
-    // Ensure view is closed
     setViewingRow(null);
     setShowViewModal(false);
   };
 
-  // Re-define openEdit for view modal usage (allows seamless transition)
   const openEditFromView = (row: SchoolRow) => {
     setFormMode("edit");
     setEditingRow(row);
     setShowForm(true);
-    // Close view modal
     setViewingRow(null);
     setShowViewModal(false);
   };
-
 
   const handleDelete = async (row: SchoolRow) => {
     const ok = window.confirm(
@@ -777,7 +843,7 @@ export const SchoolsScreen: React.FC = () => {
     }
   };
 
-  const submitForm = async (values: SchoolFormState) => {
+  const submitForm = async (values: SchoolFormState, autoCreateToken?: string) => {
     if (formMode === "create") {
       const { data, error } = await supabase
         .from("schools")
@@ -794,28 +860,9 @@ export const SchoolsScreen: React.FC = () => {
           district: values.district.trim() || null,
           city: values.city.trim() || null,
           notes: values.notes.trim() || null,
-          admin_workbook_url: values.admin_workbook_url.trim() || null, // NEW
+          admin_workbook_url: values.admin_workbook_url.trim() || null,
         })
-        .select(
-          `
-          id,
-          trainer_id,
-          school_name,
-          campus_name,
-          admin_name,
-          admin_email,
-          admin_phone,
-          am_name,
-          am_email,
-          address,
-          district,
-          city,
-          notes,
-          admin_workbook_url,
-          created_at,
-          updated_at
-        `
-        )
+        .select()
         .single();
 
       if (error) {
@@ -828,6 +875,11 @@ export const SchoolsScreen: React.FC = () => {
       setRows((prev) => [...prev, newRow]);
       openView(newRow); // Open View Modal on creation
       setShowForm(false);
+
+      // 🟢 Trigger Background Task if requested
+      if (autoCreateToken) {
+        runBackgroundProvisioning(newRow, autoCreateToken);
+      }
       return;
     }
 
@@ -847,34 +899,15 @@ export const SchoolsScreen: React.FC = () => {
         district: values.district.trim() || null,
         city: values.city.trim() || null,
         notes: values.notes.trim() || null,
-        admin_workbook_url: values.admin_workbook_url.trim() || null, // NEW
+        admin_workbook_url: values.admin_workbook_url.trim() || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", editingRow.id)
       .eq("trainer_id", trainerId)
-      .select(
-        `
-        id,
-        trainer_id,
-        school_name,
-        campus_name,
-        admin_name,
-        admin_email,
-        admin_phone,
-        am_name,
-        am_email,
-        address,
-        district,
-        city,
-        notes,
-        admin_workbook_url,
-        created_at,
-        updated_at
-      `
-      )
+      .select()
       .single();
 
-  if (error) {
+    if (error) {
       console.error("[DB] update school error", error);
       alert("Could not save changes. Please try again.");
       return;
@@ -884,7 +917,7 @@ export const SchoolsScreen: React.FC = () => {
     setRows((prev) =>
       prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
-    openView(updated); // Open View Modal after update
+    openView(updated);
     setShowForm(false);
   };
 
@@ -971,9 +1004,9 @@ export const SchoolsScreen: React.FC = () => {
               <div
                 style={{
                   position: "absolute",
-                  top: "1px", // Adjust to align with table header row
+                  top: "1px",
                   right: "8px",
-                  zIndex: 10, // Ensure it's above table
+                  zIndex: 10,
                 }}
               >
                 {showColumnMenu && (
@@ -993,10 +1026,9 @@ export const SchoolsScreen: React.FC = () => {
                   >
                     <div className="modal-body" style={{ marginTop: 0, gap: "6px" }}>
                       {table.getAllLeafColumns().map((column) => (
-                        column.id !== "actions" && ( // Exclude the actions column from the toggle list
+                        column.id !== "actions" && (
                           <div key={column.id} className="form-row" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                             <label style={{ fontSize: "13px", color: "var(--text)" }}>
-                              {/* Use the column header text or a capitalized ID if header is a component */}
                               {typeof column.columnDef.header === 'string'
                                 ? column.columnDef.header
                                 : column.id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -1055,7 +1087,7 @@ export const SchoolsScreen: React.FC = () => {
                 </thead>
                 <tbody>
                   {table.getRowModel().rows.map((row) => {
-                    const isActive = row.original.id === viewingRow?.id; // Highlight viewing row
+                    const isActive = row.original.id === viewingRow?.id;
                     return (
                       <tr
                         key={row.id}
@@ -1091,6 +1123,7 @@ export const SchoolsScreen: React.FC = () => {
         open={showForm}
         mode={formMode}
         initial={formInitial}
+        existingSchools={rows}
         onCancel={() => setShowForm(false)}
         onSubmit={submitForm}
       />
@@ -1102,6 +1135,14 @@ export const SchoolsScreen: React.FC = () => {
         onEdit={openEditFromView}
         onDelete={handleDelete}
       />
+
+      {/* 🟢 NEW: Spinner Style */}
+      <style>{`
+        .spinner-small {
+          width: 12px; height: 12px; border: 2px solid #ccc; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </>
   );
 };

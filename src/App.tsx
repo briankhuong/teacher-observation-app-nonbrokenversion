@@ -7,6 +7,7 @@ import { TeachersScreen } from "./TeachersScreen";
 import { SchoolsScreen } from "./SchoolsScreen";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
+import { TrainerSettingsModal } from "./components/TrainerSettingsModal";
 
 
 // --- Types ---
@@ -35,6 +36,7 @@ const App: React.FC = () => {
   // Local state for session handling (The Login Fix)
 
   const [showNewObservationForm, setShowNewObservationForm] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [selectedObservation, setSelectedObservation] =
     useState<SelectedObservationMeta | null>(null);
@@ -139,8 +141,21 @@ const App: React.FC = () => {
         </div>
 
         <div className="top-bar-right">
-         <span className="badge">
+        <span 
+          className="badge" 
+          onClick={() => {
+            if (trainerName) setShowSettings(true);
+          }}
+          style={{ 
+            cursor: trainerName ? 'pointer' : 'default',
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '6px' 
+          }}
+          title="Click to open Trainer Settings"
+        >
           {trainerName ? `Trainer: ${trainerName}` : 'Not Signed In'}
+          {trainerName && <span>⚙️</span>} {/* Optional: Visual cue */}
         </span>
         {/* 🟢 NEW: Offline/Online Indicator */}
           <span className={`badge ${isOnline ? 'badge-success' : 'badge-warning'}`}>
@@ -201,6 +216,10 @@ const App: React.FC = () => {
           onOpenSchools={goToSchools}
         />
       )}
+      <TrainerSettingsModal 
+        open={showSettings} 
+        onClose={() => setShowSettings(false)} 
+      />
     </div>
   );
 };

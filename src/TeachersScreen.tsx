@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
 import ImportTeachersBtn from "./components/ImportTeachersBtn";
+import { getGraphAccessToken } from "./msal/getGraphToken";
 import {
   useReactTable,
   getCoreRowModel,
@@ -11,6 +12,9 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState } from "@tanstack/react-table";
+
+// 🟢 NEW: Server URL
+const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 export interface TeacherRow {
   id: string;
@@ -44,8 +48,10 @@ interface TeacherFormModalProps {
   open: boolean;
   mode: "create" | "edit";
   initial?: TeacherFormState;
+  existingTeachers: TeacherRow[]; // Added for validation
   onCancel: () => void;
-  onSubmit: (values: TeacherFormState) => Promise<void>;
+  // 🟢 UPDATED: Accepts optional token
+  onSubmit: (values: TeacherFormState, autoCreateToken?: string) => Promise<void>;
 }
 
 interface TeacherViewModalProps {
@@ -160,24 +166,64 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
   open,
   mode,
   initial,
+  existingTeachers,
   onCancel,
   onSubmit,
 }) => {
+  const { user } = useAuth();
   const [form, setForm] = useState<TeacherFormState>(initial ?? emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  
+  // 🟢 NEW: Auto-create state
+  const [autoCreate, setAutoCreate] = useState(false);
+
+  // 🟢 NEW: Schools Data for Dropdowns
+  const [schools, setSchools] = useState<{ id: string; school_name: string; campus_name: string }[]>([]);
+  const [loadingSchools, setLoadingSchools] = useState(false);
 
   useEffect(() => {
     if (open) {
       setForm(initial ?? emptyForm);
       setSubmitting(false);
+      setAutoCreate(false);
+      loadSchools(); // 🟢 Load schools when modal opens
     }
   }, [open, initial]);
+
+  // 🟢 Helper to fetch schools
+  async function loadSchools() {
+    if (!user) return;
+    setLoadingSchools(true);
+    const { data } = await supabase
+      .from("schools")
+      .select("id, school_name, campus_name")
+      .eq("trainer_id", user.id)
+      .order("school_name", { ascending: true });
+    
+    if (data) setSchools(data);
+    setLoadingSchools(false);
+  }
+
+  // 🟢 Memoized Lists for Dropdowns
+  const uniqueSchoolNames = useMemo(() => {
+    const names = schools.map(s => s.school_name).filter(Boolean);
+    return Array.from(new Set(names)).sort();
+  }, [schools]);
+
+  const availableCampuses = useMemo(() => {
+    if (!form.school_name) return [];
+    const campuses = schools
+      .filter(s => s.school_name === form.school_name)
+      .map(s => s.campus_name)
+      .filter(Boolean);
+    return Array.from(new Set(campuses)).sort();
+  }, [schools, form.school_name]);
 
   if (!open) return null;
 
   const handleChange =
     (field: keyof TeacherFormState) =>
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
@@ -188,9 +234,37 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
       return;
     }
 
+    if (mode === "create") {
+        const isDuplicate = existingTeachers.some(t => 
+          t.school_name.toLowerCase() === form.school_name.trim().toLowerCase() && 
+          t.name.toLowerCase() === form.name.trim().toLowerCase()
+        );
+  
+        if (isDuplicate) {
+          alert(`⚠️ Name Conflict!\n\nA teacher named "${form.name}" already exists at "${form.school_name}".\n\nPlease use a distinct display name (e.g., "${form.name} B") to ensure they get their own workbook.`);
+          return;
+        }
+    }
+
+    setSubmitting(true);
+    let token: string | undefined = undefined;
+
+    // 🟢 NEW: Get Token Logic
+    if (mode === "create" && autoCreate) {
+      try {
+        token = await getGraphAccessToken();
+      } catch (err: any) {
+        console.error("Token error", err);
+        const cont = window.confirm(`Could not sign in to Microsoft: ${err.message}\n\nCreate teacher anyway (without workbook)?`);
+        if (!cont) {
+          setSubmitting(false);
+          return;
+        }
+      }
+    }
+
     try {
-      setSubmitting(true);
-      await onSubmit(form);
+      await onSubmit(form, token);
     } finally {
       setSubmitting(false);
     }
@@ -231,37 +305,71 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
             />
           </div>
 
+          {/* 🟢 RESTORED: School Dropdown */}
           <div className="form-row">
             <label>School *</label>
-            <input
-              className="input"
-              type="text"
-              value={form.school_name}
-              onChange={handleChange("school_name")}
-              placeholder="e.g. VSK Sunshine"
-            />
+            <select 
+                className="select" 
+                value={form.school_name} 
+                onChange={(e) => {
+                    // Reset campus when school changes
+                    setForm(prev => ({ ...prev, school_name: e.target.value, campus: "" }));
+                }} 
+                disabled={loadingSchools}
+            >
+              <option value="">{loadingSchools ? "Loading..." : "Select School..."}</option>
+              {uniqueSchoolNames.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
           </div>
 
+          {/* 🟢 RESTORED: Campus Filter Dropdown */}
           <div className="form-row">
             <label>Campus *</label>
-            <input
-              className="input"
-              type="text"
-              value={form.campus}
-              onChange={handleChange("campus")}
-              placeholder="e.g. Cổ Nhuế"
-            />
+            {availableCampuses.length > 0 ? (
+                <select 
+                    className="select" 
+                    value={form.campus} 
+                    onChange={handleChange("campus")} 
+                    disabled={!form.school_name}
+                >
+                    <option value="">Select Campus...</option>
+                    {availableCampuses.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                    ))}
+                </select>
+            ) : (
+                <input
+                    className="input"
+                    type="text"
+                    value={form.campus}
+                    onChange={handleChange("campus")}
+                    placeholder={form.school_name ? "Enter campus name" : "Select a school first"}
+                    disabled={!form.school_name}
+                />
+            )}
           </div>
 
           <div className="form-row">
             <label>Worksheet link</label>
-            <input
-              className="input"
-              type="url"
-              value={form.worksheet_url}
-              onChange={handleChange("worksheet_url")}
-              placeholder="Paste OneDrive workbook URL…"
-            />
+            {/* 🟢 NEW: Auto-Create Checkbox */}
+            {mode === 'create' && (
+               <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
+                 <input type="checkbox" id="chk-auto" checked={autoCreate} onChange={(e) => setAutoCreate(e.target.checked)} style={{width:'auto', margin:0}} />
+                 <label htmlFor="chk-auto" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>✨ Auto-create Excel Workbook?</label>
+               </div>
+            )}
+
+            {!autoCreate && (
+                <input
+                className="input"
+                type="url"
+                value={form.worksheet_url}
+                onChange={handleChange("worksheet_url")}
+                placeholder="Paste OneDrive workbook URL…"
+                />
+            )}
           </div>
 
           <div className="modal-footer">
@@ -299,6 +407,9 @@ export const TeachersScreen: React.FC = () => {
   const [rows, setRows] = useState<TeacherRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  
+  // 🟢 NEW: Background Task Tracking
+  const [provisioningIds, setProvisioningIds] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -331,8 +442,37 @@ export const TeachersScreen: React.FC = () => {
     { id: "school_campus", desc: false }, // Custom ID for combined column
     { id: "name", desc: false },
   ]);
-  // const [columnResizeMode] = useState<ColumnResizeMode>("onEnd"); // REMOVED
-  // const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({}); // REMOVED
+
+  // 🟢 NEW: Background Provisioning Logic
+  const runBackgroundProvisioning = async (teacher: TeacherRow, token: string) => {
+    try {
+      setProvisioningIds(prev => new Set(prev).add(teacher.id));
+
+      const resp = await fetch(`${MERGE_SERVER_BASE}/api/provision-teacher`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ teacherName: teacher.name, schoolName: teacher.school_name, trainerId: user?.id })
+      });
+      const result = await resp.json();
+
+      if (!result.ok) throw new Error(result.error || "Provisioning failed");
+
+      const { error } = await supabase.from("teachers").update({ worksheet_url: result.workbookUrl }).eq("id", teacher.id);
+      if (error) throw error;
+
+      setRows(prev => prev.map(r => r.id === teacher.id ? { ...r, worksheet_url: result.workbookUrl } : r));
+
+    } catch (err: any) {
+      console.error("Background task failed", err);
+      alert(`⚠️ Background task failed for ${teacher.name}: ${err.message}`);
+    } finally {
+      setProvisioningIds(prev => {
+        const next = new Set(prev);
+        next.delete(teacher.id);
+        return next;
+      });
+    }
+  };
 
   // Define Columns
   const columns = useMemo<ColumnDef<TeacherRow>[]>(
@@ -378,6 +518,17 @@ export const TeachersScreen: React.FC = () => {
         header: "Worksheet",
         enableSorting: false,
         cell: (info) => {
+          const row = info.row.original;
+          
+          // 🟢 NEW: Spinner logic
+          if (provisioningIds.has(row.id)) {
+            return (
+              <div style={{color: '#2563eb', display:'flex', alignItems:'center', gap:'6px', fontWeight:500}}>
+                <span className="spinner-small"></span> Creating...
+              </div>
+            );
+          }
+
           const url = info.getValue() as string | null;
           if (!url) {
             return <span className="entity-cell-sub">Not set</span>;
@@ -451,7 +602,7 @@ export const TeachersScreen: React.FC = () => {
         ),
       },
     ],
-    [setShowColumnMenu]
+    [setShowColumnMenu, provisioningIds]
   );
 
   const table = useReactTable({
@@ -544,21 +695,6 @@ export const TeachersScreen: React.FC = () => {
     };
   }, [trainerId, refreshKey]);
 
-  // Search/filtering is now handled by TanStack Table (getFilteredRowModel)
-  // const filteredRows = useMemo(() => {
-  //   const q = search.trim().toLowerCase();
-  //   if (!q) return rows;
-  //   return rows.filter((r) => {
-  //     return (
-  //       r.name.toLowerCase().includes(q) ||
-  //       r.school_name.toLowerCase().includes(q) ||
-  //       r.campus.toLowerCase().includes(q) ||
-  //       (r.email ?? "").toLowerCase().includes(q)
-  //     );
-  //   });
-  // }, [rows, search]);
-
-  // UI helpers
   const openCreate = () => {
     setFormMode("create");
     setEditingRow(null);
@@ -617,7 +753,7 @@ export const TeachersScreen: React.FC = () => {
     }
   };
 
-  const submitForm = async (values: TeacherFormState) => {
+  const submitForm = async (values: TeacherFormState, autoCreateToken?: string) => {
     if (formMode === "create") {
       const { data, error } = await supabase
         .from("teachers")
@@ -654,6 +790,11 @@ export const TeachersScreen: React.FC = () => {
       setRows((prev) => [...prev, newRow]);
       openView(newRow); // Open View Modal on creation
       setShowForm(false);
+
+      // 🟢 Trigger Background Task if requested
+      if (autoCreateToken) {
+        runBackgroundProvisioning(newRow, autoCreateToken);
+      }
       return;
     }
 
@@ -710,12 +851,6 @@ export const TeachersScreen: React.FC = () => {
           worksheet_url: editingRow.worksheet_url ?? "",
         }
       : undefined;
-
-  // Open worksheet link is now handled in the View Modal
-  // const handleOpenWorksheet = (row: TeacherRow) => {
-  //   if (!row.worksheet_url) return;
-  //   window.open(row.worksheet_url, "_blank", "noopener,noreferrer");
-  // };
 
   return (
     <>
@@ -902,6 +1037,7 @@ export const TeachersScreen: React.FC = () => {
         open={showForm}
         mode={formMode}
         initial={formInitial}
+        existingTeachers={rows}
         onCancel={() => setShowForm(false)}
         onSubmit={submitForm}
       />
@@ -913,6 +1049,12 @@ export const TeachersScreen: React.FC = () => {
         onEdit={openEditFromView}
         onDelete={handleDelete}
       />
+
+      {/* 🟢 NEW: Spinner Style */}
+      <style>{`
+        .spinner-small { width: 12px; height: 12px; border: 2px solid #ccc; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </>
   );
 };

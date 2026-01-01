@@ -1,6 +1,7 @@
 // server/supabaseHelpers.js
 import dotenv from "dotenv";
-dotenv.config({ path: ".env.azure" }); // ✅ load envs for server-side Supabase
+// Ensure this points to the correct env file for your server
+dotenv.config({ path: ".env.azure" }); 
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -70,9 +71,9 @@ export async function getObservationWithRelations(observationId) {
  *
  * Example payload:
  * {
- *   observationId: "uuid",
- *   teacherWorkbookUrl?: "https://...",
- *   adminWorkbookUrl?: "https://..."
+ * observationId: "uuid",
+ * teacherWorkbookUrl?: "https://...",
+ * adminWorkbookUrl?: "https://..."
  * }
  */
 export async function updateObservationMetaLinks(payload) {
@@ -122,11 +123,6 @@ export async function updateObservationMetaLinks(payload) {
 
 /**
  * Update the *view-only* workbook URL on a school.
- *
- * We make the signature flexible so mergeRoutes.js can call it either as:
- *   updateSchoolViewOnlyUrl(schoolId, viewUrl)
- * or:
- *   updateSchoolViewOnlyUrl({ schoolId, viewOnlyUrl })
  */
 export async function updateSchoolViewOnlyUrl(arg1, arg2) {
   let schoolId;
@@ -158,8 +154,7 @@ export async function updateSchoolViewOnlyUrl(arg1, arg2) {
   }
 
   // 🔑 This assumes your Supabase column is named:
-  //     admin_workbook_view_url
-  // (from our earlier plan in Stage 2)
+  //      admin_workbook_view_url
   const { data, error } = await supabaseAdmin
     .from("schools")
     .update({ admin_workbook_view_url: viewOnlyUrl })
@@ -172,5 +167,20 @@ export async function updateSchoolViewOnlyUrl(arg1, arg2) {
     throw error;
   }
 
+  return data;
+}
+
+// ✅ NEW: Get Trainer Settings for Automation
+export async function getTrainerSettings(trainerId) {
+  const { data, error } = await supabaseAdmin
+    .from('trainer_settings')
+    .select('*')
+    .eq('trainer_id', trainerId)
+    .single();
+
+  if (error) {
+    console.error("Error fetching trainer settings:", error);
+    return null;
+  }
   return data;
 }
