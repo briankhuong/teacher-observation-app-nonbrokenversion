@@ -1,3 +1,4 @@
+// server/msGraphWorkbook.js
 import ExcelJS from "exceljs";
 import fetch from "node-fetch"; 
 
@@ -16,7 +17,7 @@ function excelSafeSheetName(input) {
 }
 
 // ------------------------------
-// GRAPH API
+// GRAPH API CORE
 // ------------------------------
 async function getDriveItemInfo(workbookUrl, token) {
   const shareId = shareIdFromUrl(workbookUrl);
@@ -41,7 +42,6 @@ async function downloadWorkbook(driveId, itemId, token) {
   return await resp.arrayBuffer();
 }
 
-// 🔹 EXPORTED: Smart Link Creator (Used by Route now)
 export async function createViewOnlyLink(driveId, itemId, token) {
   const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/createLink`;
   
@@ -59,11 +59,8 @@ export async function createViewOnlyLink(driveId, itemId, token) {
   };
 
   try {
-    // 1. Try Anonymous
     let result = await tryScope("anonymous");
-    // 2. Try Organization (Fallback)
     if (!result) result = await tryScope("organization");
-
     if (result) return result.link.webUrl;
     return null;
   } catch (err) {
@@ -120,6 +117,20 @@ async function uploadWorkbook(driveId, itemId, token, buffer, originalName) {
 // ------------------------------
 // EXCELJS LOGIC
 // ------------------------------
+function cleanWorksheet(worksheet) {
+  let realLastRow = 1;
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (row.hasValues) {
+      realLastRow = rowNumber;
+    }
+  });
+  const rowCount = worksheet.rowCount;
+  if (rowCount > realLastRow + 5) {
+    const rowsToDelete = rowCount - (realLastRow + 5);
+    worksheet.spliceRows(realLastRow + 5, rowsToDelete);
+  }
+}
+
 function copyConditionalFormatting(sourceSheet, targetSheet) {
   if (!sourceSheet.conditionalFormattings) return;
   sourceSheet.conditionalFormattings.forEach((cf) => {
@@ -205,7 +216,7 @@ export async function mergeTeacherSheet({ workbookUrl, sheetName, model, token }
 }
 
 // ======================================================
-// ADMIN MERGE (Fast Response)
+// ADMIN MERGE
 // ======================================================
 export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) {
   if (!model) throw new Error("Missing model.");
@@ -216,7 +227,6 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fileBuffer);
 
-  // 🟢 NEW: Clean the template
   const adminTemplate = wb.getWorksheet("_ADMIN_TEMPLATE");
   if (adminTemplate) cleanWorksheet(adminTemplate);
 
@@ -245,41 +255,105 @@ export async function mergeAdminSheet({ workbookUrl, sheetName, model, token }) 
   });
 
   const newBuffer = await wb.xlsx.writeBuffer();
-  // 1. Upload & Get ID (Blocking, but usually fast)
   const uploadResult = await uploadWorkbook(driveId, itemId, token, newBuffer, fileName);
   
-  // 2. Return data for Background Processing
   return {
     sheetUrl: `${workbookUrl}#sheet=${encodeURIComponent(finalName)}`,
     sheetName: finalName,
     usedCopy: true,
-    // Return IDs so the Router can generate the link in background
     driveId: driveId,
     itemId: uploadResult.id,
     formattingWarning: uploadResult.warning || null
   };
 }
 
-// 🧹 HELPER: Remove "Ghost" Rows to fix slow performance
-function cleanWorksheet(worksheet) {
-  // 1. Find the real last row with actual text/numbers
-  let realLastRow = 1;
-  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (row.hasValues) {
-      realLastRow = rowNumber;
-    }
+// ========================================================
+// ⚡ PROVISIONING FUNCTIONS (Required for "Auto-create")
+// ========================================================
+
+export async function ensureFolderExists(driveId, parentId, folderName, token) {
+  // 1. Check if it already exists
+  const childrenUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${parentId}/children?filter=name eq '${encodeURIComponent(folderName)}'`;
+  const checkResp = await fetch(childrenUrl, {
+    headers: { Authorization: `Bearer ${token}` }
   });
-
-  // 2. Identify the "Ghost" Zone (rows that exist but have no data)
-  const rowCount = worksheet.rowCount;
-
-  // If we have more than 5 empty rows at the end, delete them
-  if (rowCount > realLastRow + 5) {
-    const rowsToDelete = rowCount - (realLastRow + 5);
-    if (rowsToDelete > 0) {
-      console.log(`[Cleanup] Deleting ${rowsToDelete} empty 'ghost' rows (detected last data at ${realLastRow}).`);
-      // ExcelJS spliceRows is the magic command
-      worksheet.spliceRows(realLastRow + 5, rowsToDelete);
+  
+  if (checkResp.ok) {
+    const data = await checkResp.json();
+    if (data.value && data.value.length > 0) {
+      return data.value[0].id; // Found it!
     }
   }
+
+  // 2. If not, create it
+  const createUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${parentId}/children`;
+  const createResp = await fetch(createUrl, {
+    method: "POST",
+    headers: { 
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name: folderName,
+      folder: {}, 
+      "@microsoft.graph.conflictBehavior": "rename"
+    })
+  });
+
+  if (!createResp.ok) {
+    const txt = await createResp.text();
+    throw new Error(`Failed to create folder: ${txt}`);
+  }
+
+  const created = await createResp.json();
+  return created.id;
+}
+
+export async function copyFile(driveId, itemId, targetDriveId, targetParentId, newName, token) {
+  const copyUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/copy`;
+  
+  const payload = {
+    parentReference: {
+      driveId: targetDriveId,
+      id: targetParentId
+    },
+    name: newName
+  };
+
+  const resp = await fetch(copyUrl, {
+    method: "POST",
+    headers: { 
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (resp.status !== 202) {
+    const txt = await resp.text();
+    throw new Error(`Copy failed (Status ${resp.status}): ${txt}`);
+  }
+
+  const monitorUrl = resp.headers.get("Location");
+  if (!monitorUrl) throw new Error("Copy started but no monitor URL returned.");
+
+  // Poll for completion (Wait up to 30 seconds)
+  let resourceId = null;
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 2000)); // Wait 2s
+    
+    const statusResp = await fetch(monitorUrl);
+    const statusData = await statusResp.json();
+
+    if (statusData.status === "completed") {
+      resourceId = statusData.resourceId; 
+      break;
+    }
+    if (statusData.status === "failed") {
+      throw new Error("Copy operation failed on Microsoft server.");
+    }
+  }
+
+  if (!resourceId) throw new Error("Copy timed out.");
+  return resourceId;
 }
