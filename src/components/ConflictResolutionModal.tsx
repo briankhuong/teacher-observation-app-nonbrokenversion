@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
 
 type SourceType = 'local' | 'server' | 'manual';
 
-// --- UPDATED STYLES ---
+// --- LINEAR-INSPIRED STYLES ---
 const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -21,26 +21,43 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'Inter, -apple-system, sans-serif',
   },
   modal: {
-    backgroundColor: '#0a0a0c', width: '96%', maxWidth: '1000px', height: '92vh',
+    backgroundColor: '#0a0a0c', width: '96%', maxWidth: '1100px', height: '92vh',
     borderRadius: '16px', border: '1px solid #27272a', display: 'flex', flexDirection: 'column',
     overflow: 'hidden', boxShadow: '0 0 0 1px rgba(255,255,255,0.05), 0 20px 50px rgba(0,0,0,0.5)', 
-    color: '#f4f4f5'
+    color: '#f4f4f5', position: 'relative'
   },
   header: {
-    padding: '20px 28px', borderBottom: '1px solid #18181b', backgroundColor: '#0a0a0c',
+    padding: '16px 28px', borderBottom: '1px solid #18181b', backgroundColor: '#0a0a0c',
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0
+  },
+  navBar: {
+    padding: '12px 24px', backgroundColor: '#0f0f12', borderBottom: '1px solid #18181b',
+    display: 'flex', gap: '8px', overflowX: 'auto', flexShrink: 0, whiteSpace: 'nowrap',
+    msOverflowStyle: 'none', scrollbarWidth: 'none'
+  },
+  navToken: {
+    padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+    cursor: 'pointer', border: '1px solid #27272a', transition: 'all 0.2s',
+    display: 'flex', alignItems: 'center', gap: '6px'
   },
   body: {
     flex: 1, overflowY: 'auto', padding: '24px', backgroundColor: '#0a0a0c',
-    WebkitOverflowScrolling: 'touch'
+    WebkitOverflowScrolling: 'touch', scrollBehavior: 'smooth'
+  },
+  scrollTopBtn: {
+    position: 'absolute', bottom: '80px', right: '30px', width: '44px', height: '44px',
+    borderRadius: '50%', backgroundColor: '#1e1e22', border: '1px solid #3f3f46',
+    color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.5)', zIndex: 10,
+    transition: 'opacity 0.3s'
   },
   cardContainer: {
     marginBottom: '32px', position: 'relative', borderRadius: '12px',
     backgroundColor: '#111113', border: '1px solid #27272a', overflow: 'hidden',
-    transition: 'background-color 0.3s ease' // Smooth transition for purple highlight
+    transition: 'background-color 0.3s ease'
   },
   statusStrip: {
-    position: 'absolute', left: 0, top: 0, bottom: 0, width: '6px', // Slightly wider for impact
+    position: 'absolute', left: 0, top: 0, bottom: 0, width: '6px',
     transition: 'background-color 0.3s ease'
   },
   indicatorTitle: {
@@ -78,9 +95,17 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex', justifyContent: 'flex-end', gap: '12px', flexShrink: 0
   },
   primaryBtn: {
-    backgroundColor: '#6366f1', color: 'white', padding: '10px 20px', borderRadius: '8px',
+    backgroundColor: '#059669', color: 'white', padding: '10px 20px', borderRadius: '8px',
     fontWeight: '600', fontSize: '14px', border: 'none', cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
+    boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)'
+  },
+  stepperContainer: {
+    display: 'flex', alignItems: 'center', gap: '8px', marginRight: 'auto'
+  },
+  stepperBtn: {
+    backgroundColor: '#18181b', color: '#a1a1aa', border: '1px solid #27272a',
+    padding: '8px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: '600',
+    cursor: 'pointer'
   },
   badge: {
     display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '4px',
@@ -98,6 +123,10 @@ const StatusBadge = ({ type, active }: { type: 'good' | 'growth', active: boolea
 export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onResolve, localData, serverData }) => {
   const [resolvedIndicators, setResolvedIndicators] = useState<any[]>([]);
   const [mounted, setMounted] = useState(false);
+  const [showTopBtn, setShowTopBtn] = useState(false);
+  
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
 
@@ -107,19 +136,14 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
       const localMeta = localData.meta || {};
       const lTeacher = (localMeta.teacherName || "").trim();
       const sTeacher = (serverData.teacher_name || "").trim();
-      const lSchool = (localMeta.schoolName || "").trim();
-      const sSchool = (serverData.school_name || "").trim();
       
-      const isMetaConflict = lTeacher !== sTeacher || lSchool !== sSchool;
-
-      if (isMetaConflict) {
+      if (lTeacher !== sTeacher || (localMeta.schoolName || "").trim() !== (serverData.school_name || "").trim()) {
         allItems.push({
           id: 'META_CONFLICT', number: 'ID', title: 'Header Information', isMeta: true,
-          _localText: `Teacher: ${lTeacher}\nSchool: ${lSchool}`,
-          _serverText: `Teacher: ${sTeacher}\nSchool: ${sSchool}`,
-          commentText: `Teacher: ${lTeacher}\nSchool: ${lSchool}`,
-          _textMismatch: true,
-          _isConflict: true, _selectedSource: 'local'
+          _localText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
+          _serverText: `Teacher: ${sTeacher}\nSchool: ${serverData.school_name}`,
+          commentText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
+          _textMismatch: true, _isConflict: true, _selectedSource: 'local'
         });
       }
 
@@ -127,30 +151,31 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
         const sInd = (serverData.indicators || []).find((i: any) => i.id === lInd.id);
         const lText = (lInd.commentText || "").trim();
         const sText = (sInd?.commentText || "").trim();
-        
-        // Logical Conflict: Content or Rating differs
         const isConflict = lText !== sText || lInd.good !== sInd?.good || lInd.growth !== sInd?.growth;
-        
-        // Specific highlight: The comments themselves are different
         const isTextMismatch = lText !== sText;
 
         return {
-          ...lInd, 
-          _localText: lInd.commentText, 
-          _serverText: sInd?.commentText || "",
-          _localGood: lInd.good, 
-          _localGrowth: lInd.growth, 
-          _serverVersion: sInd,
-          _textMismatch: isTextMismatch, 
-          _isConflict: isConflict, 
-          _selectedSource: 'local'
+          ...lInd, _localText: lInd.commentText, _serverText: sInd?.commentText || "",
+          _localGood: lInd.good, _localGrowth: lInd.growth, _serverVersion: sInd,
+          _textMismatch: isTextMismatch, _isConflict: isConflict, _selectedSource: 'local'
         };
       });
       setResolvedIndicators([...allItems, ...mergedInds]);
     }
   }, [isOpen, localData, serverData]);
 
-  if (!isOpen || !mounted) return null;
+  const handleScroll = () => {
+    if (bodyRef.current) setShowTopBtn(bodyRef.current.scrollTop > 300);
+  };
+
+  const scrollToIndicator = (id: string) => {
+    cardRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const findNextConflict = (dir: 'next' | 'prev') => {
+    const conflicts = resolvedIndicators.filter(i => i._isConflict);
+    if (conflicts.length > 0) scrollToIndicator(conflicts[0].id);
+  };
 
   const handleSelect = (idx: number, src: 'local' | 'server') => {
     setResolvedIndicators(prev => {
@@ -171,6 +196,8 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
     onResolve({ ...localData, indicators: cleanIndicators, updatedAt: Date.now(), lastSync: Date.now() });
   };
 
+  if (!isOpen || !mounted) return null;
+
   return ReactDOM.createPortal(
     <div style={styles.overlay}>
       <div style={styles.modal}>
@@ -182,32 +209,47 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
           <button onClick={onClose} style={{...styles.btn, backgroundColor:'transparent', color:'#71717a'}}>Close</button>
         </div>
 
-        <div style={styles.body}>
+        <div style={styles.navBar}>
+          <span style={{color: '#52525b', fontSize: '11px', fontWeight: 700, alignSelf: 'center', marginRight: '8px'}}>PROGRESS:</span>
+          {resolvedIndicators.map((ind) => {
+            const isResolved = !ind._isConflict;
+            return (
+              <div key={`nav-${ind.id}`} onClick={() => scrollToIndicator(ind.id)}
+                style={{
+                  ...styles.navToken,
+                  borderColor: isResolved ? '#27272a' : (ind._textMismatch ? '#a855f7' : '#27272a'),
+                  backgroundColor: isResolved ? 'transparent' : (ind._textMismatch ? 'rgba(168, 85, 247, 0.1)' : '#18181b'),
+                  opacity: isResolved ? 0.5 : 1
+                }}>
+                {isResolved && <span style={{fontSize: '10px'}}>✓</span>}
+                {ind.number}
+                {!isResolved && <div style={{width:'6px', height:'6px', borderRadius:'50%', backgroundColor: ind.growth ? '#ef4444' : (ind.good ? '#10b981' : '#3f3f46')}} />}
+              </div>
+            );
+          })}
+        </div>
+
+        {showTopBtn && <div style={styles.scrollTopBtn} onClick={() => bodyRef.current?.scrollTo({top:0, behavior:'smooth'})}>↑</div>}
+
+        <div style={styles.body} ref={bodyRef} onScroll={handleScroll}>
           {resolvedIndicators.map((ind, idx) => {
-            // STRIP LOGIC: Based on currently selected rating
             const stripColor = ind.growth ? '#ef4444' : (ind.good ? '#10b981' : '#27272a');
-            
-            // BACKGROUND LOGIC: Highlight the whole card if comments don't match
             const cardBg = ind._textMismatch ? 'rgba(168, 85, 247, 0.06)' : '#111113';
             const cardBorder = ind._textMismatch ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid #27272a';
 
             return (
-              <div key={ind.id} style={{...styles.cardContainer, backgroundColor: cardBg, border: cardBorder}}>
-                {/* 🔴 OUTER STRIP */}
+              <div key={ind.id} ref={(el) => { cardRefs.current[ind.id] = el; }}
+                style={{...styles.cardContainer, backgroundColor: cardBg, border: cardBorder}}>
                 <div style={{...styles.statusStrip, backgroundColor: stripColor}} />
-                
                 <div style={styles.indicatorTitle}>
-                  <span style={{color: ind._textMismatch ? '#a855f7' : '#6366f1'}}>{ind.number}</span> 
-                  {ind.title}
-                  {ind._textMismatch && <span style={{fontSize: '10px', color: '#a855f7', fontWeight: 700, marginLeft: 'auto'}}>CONTENT MISMATCH</span>}
+                  <span style={{color: ind._textMismatch ? '#a855f7' : '#6366f1'}}>{ind.number}</span> {ind.title}
+                  {ind._textMismatch && <span style={{fontSize:'10px', color:'#a855f7', fontWeight:700, marginLeft:'auto'}}>CONTENT MISMATCH</span>}
                 </div>
-
                 <div style={styles.comparisonGrid}>
                   {['local', 'server'].map((src) => {
                     const isSelected = ind._selectedSource === src;
                     return (
-                      <div key={src} 
-                           onClick={() => handleSelect(idx, src as any)}
+                      <div key={src} onClick={() => handleSelect(idx, src as any)}
                            style={{...styles.choiceCard, ...(isSelected ? styles.choiceSelected : {})}}>
                         <div style={{...styles.checkCircle, ...(isSelected ? {backgroundColor:'#6366f1', borderColor:'#6366f1', color:'white'} : {})}}>
                           {isSelected && "✓"}
@@ -226,14 +268,10 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
                     );
                   })}
                 </div>
-
                 <div style={styles.resultBox}>
                   <div style={{fontSize:'11px', color:'#71717a', marginBottom:'8px', fontWeight:600}}>RESULTING COMMENT</div>
-                  <textarea 
-                    style={styles.textarea} 
-                    value={ind.commentText} 
-                    onChange={(e) => setResolvedIndicators(prev => prev.map((item, i) => i === idx ? {...item, commentText: e.target.value, _selectedSource:'manual', _isConflict:false} : item))}
-                  />
+                  <textarea style={styles.textarea} value={ind.commentText} 
+                    onChange={(e) => setResolvedIndicators(prev => prev.map((item, i) => i === idx ? {...item, commentText: e.target.value, _selectedSource:'manual', _isConflict:false} : item))} />
                 </div>
               </div>
             );
@@ -241,6 +279,10 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
         </div>
 
         <div style={styles.footer}>
+          <div style={styles.stepperContainer}>
+            <button style={styles.stepperBtn} onClick={() => findNextConflict('prev')}>← Prev Conflict</button>
+            <button style={{...styles.stepperBtn, borderColor:'#6366f1', color:'#6366f1'}} onClick={() => findNextConflict('next')}>Next Conflict →</button>
+          </div>
           <button onClick={handleFinalize} style={styles.primaryBtn}>Update & Sync</button>
         </div>
       </div>
