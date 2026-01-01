@@ -609,9 +609,7 @@ const [conflictServerData, setConflictServerData] = React.useState<any>(null);
     return data?.[0]?.admin_email || "";
   };
 
-// Inside src/DashboardShell.tsx
 
-// In src/DashboardShell.tsx
 
   const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
     try {
@@ -1515,17 +1513,16 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
   };
 
 
-
-// ✅ MERGE TEACHER HANDLER (With 60s Timeout Protection)
-
-// ✅ CLIENT-SIDE MERGE HANDLER
-  const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     setMergingTeacherId(obs.id);
     setActionModal(null);
 
     // 1. Basic Validation
-    const full = loadFullObservation(obs.id);
-    if (!full) { alert("Missing data"); setMergingTeacherId(null); return; }
+    // 🔴 REPLACED: const full = loadFullObservation(obs.id);
+    // 🟢 FIXED: Fetch asynchronously from IndexedDB
+    const full = await get(`${STORAGE_PREFIX}${obs.id}`);
+
+    if (!full) { alert("Missing data (Check IndexedDB)"); setMergingTeacherId(null); return; }
     
     const workbookUrl = obs.teacherWorkbookUrl;
     if (!workbookUrl) { alert("No Workbook URL"); setMergingTeacherId(null); return; }
@@ -1579,13 +1576,16 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     }
   };
 
-// ✅ CLIENT-SIDE MERGE ADMIN HANDLER (With Translation Fix)
- const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+  // ✅ CLIENT-SIDE MERGE ADMIN HANDLER (With Translation Fix)
+  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     setMergingAdminId(obs.id);
     setActionModal(null);
 
-    const full = loadFullObservation(obs.id);
-    if (!full) { alert("Missing local data"); setMergingAdminId(null); return; }
+    // 🔴 REPLACED: const full = loadFullObservation(obs.id);
+    // 🟢 FIXED: Fetch asynchronously from IndexedDB
+    const full = await get(`${STORAGE_PREFIX}${obs.id}`);
+
+    if (!full) { alert("Missing local data (Check IndexedDB)"); setMergingAdminId(null); return; }
 
     const adminWorkbookUrl = obs.adminWorkbookUrl;
     if (!adminWorkbookUrl) { alert("Admin workbook URL not found."); setMergingAdminId(null); return; }
@@ -1662,6 +1662,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       setMergingAdminId(null);
     }
   };
+
 
   // ✅ DELETE HANDLER
   const handleDeleteObservation = async (obs: DashboardObservationRow) => {
