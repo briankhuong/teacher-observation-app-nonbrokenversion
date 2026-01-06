@@ -61,17 +61,19 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
       });
 
       // 3. Deduplicate: Prefer rows with URLs
+      // 🟢 IMPROVED: Use pipe '|' separator to prevent merging errors
       const uniqueMap = new Map();
       
       for (const t of rawTeachers) {
-          // Unique Key: Name + Email + School + Campus
-          const emailPart = t.email ? t.email.toLowerCase() : 'no-email';
-          const uniqueKey = `${t.name}-${emailPart}-${t.school_name}-${t.campus}`.toLowerCase();
+          const emailPart = t.email ? t.email.toLowerCase().trim() : 'no-email';
+          // Using | is safer than - 
+          const uniqueKey = `${t.name.toLowerCase().trim()}|${emailPart}|${t.school_name.toLowerCase().trim()}|${t.campus.toLowerCase().trim()}`;
           
           if (uniqueMap.has(uniqueKey)) {
              const existing = uniqueMap.get(uniqueKey);
+             // If existing has no URL but new one does, upgrade it
              if (!existing.worksheet_url && t.worksheet_url) {
-                 uniqueMap.set(uniqueKey, t); // Upgrade to the one with URL
+                 uniqueMap.set(uniqueKey, t); 
              }
           } else {
               uniqueMap.set(uniqueKey, t);

@@ -43,10 +43,20 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
         throw new Error("No valid rows found. Ensure 'School Name' (Col B) and 'Campus Name' (Col C) are filled.");
       }
 
+      // 🟢 NEW: Remove Duplicates (Fixes "row affected second time" error)
+      const uniqueSchools = Object.values(
+        schoolsToUpsert.reduce((acc: any, school: any) => {
+          // Use pipe | to separate fields safely
+          const key = `${school.school_name}|${school.campus_name}`.toLowerCase().trim();
+          acc[key] = school; 
+          return acc;
+        }, {})
+      );
+
       // Upsert based on the SQL constraint we created
       const { error } = await supabase
         .from('schools')
-        .upsert(schoolsToUpsert, { 
+        .upsert(uniqueSchools, { 
             onConflict: 'trainer_id, school_name, campus_name' 
         });
 
