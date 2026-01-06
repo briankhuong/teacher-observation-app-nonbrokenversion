@@ -227,8 +227,9 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+
     if (!form.name.trim() || !form.school_name.trim() || !form.campus.trim()) {
       alert("Please fill in Teacher, School and Campus.");
       return;
@@ -249,13 +250,14 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
     setSubmitting(true);
     let token: string | undefined = undefined;
 
-    // 🟢 NEW: Get Token Logic
-    if (mode === "create" && autoCreate) {
+    // 🟢 UPDATED: Get Token Logic
+    // Allow getting token if autoCreate is checked, regardless of mode
+    if (autoCreate) {
       try {
         token = await getGraphAccessToken();
       } catch (err: any) {
         console.error("Token error", err);
-        const cont = window.confirm(`Could not sign in to Microsoft: ${err.message}\n\nCreate teacher anyway (without workbook)?`);
+        const cont = window.confirm(`Could not sign in to Microsoft: ${err.message}\n\nSave teacher anyway (without workbook)?`);
         if (!cont) {
           setSubmitting(false);
           return;
@@ -270,6 +272,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
     }
   };
 
+  // Inside TeacherFormModal...
   return (
     <div className="modal-backdrop">
       <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
@@ -282,7 +285,8 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
           </button>
         </div>
 
-        <form className="modal-body" onSubmit={handleSubmit} style={{ flexGrow: 1, overflowY: "auto" }}>
+        {/* 🔴 FIX 1: Removed onSubmit={handleSubmit} because this is a DIV, not a form */}
+        <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="form-row">
             <label>Teacher name *</label>
             <input
@@ -305,14 +309,12 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
             />
           </div>
 
-          {/* 🟢 RESTORED: School Dropdown */}
           <div className="form-row">
             <label>School *</label>
             <select 
                 className="select" 
                 value={form.school_name} 
                 onChange={(e) => {
-                    // Reset campus when school changes
                     setForm(prev => ({ ...prev, school_name: e.target.value, campus: "" }));
                 }} 
                 disabled={loadingSchools}
@@ -324,7 +326,6 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
             </select>
           </div>
 
-          {/* 🟢 RESTORED: Campus Filter Dropdown */}
           <div className="form-row">
             <label>Campus *</label>
             {availableCampuses.length > 0 ? (
@@ -353,21 +354,28 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
 
           <div className="form-row">
             <label>Worksheet link</label>
-            {/* 🟢 NEW: Auto-Create Checkbox */}
-            {mode === 'create' && (
+            {(mode === 'create' || !initial?.worksheet_url) && (
                <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
-                 <input type="checkbox" id="chk-auto" checked={autoCreate} onChange={(e) => setAutoCreate(e.target.checked)} style={{width:'auto', margin:0}} />
-                 <label htmlFor="chk-auto" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>✨ Auto-create Excel Workbook?</label>
+                 <input 
+                   type="checkbox" 
+                   id="chk-auto" 
+                   checked={autoCreate} 
+                   onChange={(e) => setAutoCreate(e.target.checked)} 
+                   style={{width:'auto', margin:0}} 
+                 />
+                 <label htmlFor="chk-auto" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>
+                   {mode === 'create' ? '✨ Auto-create Excel Workbook?' : '✨ Create missing workbook?'}
+                 </label>
                </div>
             )}
 
             {!autoCreate && (
                 <input
-                className="input"
-                type="url"
-                value={form.worksheet_url}
-                onChange={handleChange("worksheet_url")}
-                placeholder="Paste OneDrive workbook URL…"
+                  className="input"
+                  type="url"
+                  value={form.worksheet_url}
+                  onChange={handleChange("worksheet_url")}
+                  placeholder="Paste OneDrive workbook URL…"
                 />
             )}
           </div>
@@ -381,9 +389,12 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
             >
               Cancel
             </button>
+            
+            {/* 🔴 FIX 2: Changed type="button" and added onClick handler */}
             <button
-              type="submit"
+              type="button" 
               className="btn btn-primary"
+              onClick={() => handleSubmit()} 
               disabled={submitting}
             >
               {submitting
@@ -395,7 +406,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
                 : "Save changes"}
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -451,7 +462,7 @@ export const TeachersScreen: React.FC = () => {
       const resp = await fetch(`${MERGE_SERVER_BASE}/api/provision-teacher`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ teacherName: teacher.name, schoolName: teacher.school_name, trainerId: user?.id })
+        body: JSON.stringify({ teacherName: teacher.name, schoolName: teacher.school_name, trainerId: user?.id,teacherId: teacher.id })
       });
       const result = await resp.json();
 
@@ -837,6 +848,11 @@ export const TeachersScreen: React.FC = () => {
     setRows((prev) =>
       prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
+
+if (autoCreateToken) {
+        runBackgroundProvisioning(updated, autoCreateToken);
+    }
+
     openView(updated); // Open View Modal after update
     setShowForm(false);
   };

@@ -6,7 +6,6 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
   const [loading, setLoading] = useState(false);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // ... (Logic kept exactly the same) ...
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -15,6 +14,7 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not logged in.");
 
+      // 1. Fetch existing schools for matching
       const { data: schools, error: schoolErr } = await supabase
         .from('schools')
         .select('id, official_code, school_name, campus_name')
@@ -24,73 +24,83 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
       if (!schools || schools.length === 0) throw new Error("No schools found. Please import Schools first.");
 
       const rows = await readXlsxFile(file);
-      const dataRows = rows.slice(1);
+      const dataRows = rows.slice(1); // Skip header
+      
       let rawTeachers: any[] = []; 
       const errors: string[] = [];
 
       dataRows.forEach((row, index) => {
+        // Col 0: Name, 1: Email, 2: School Code/Name, 3: Campus, 4: Url
         const name = row[0]?.toString().trim();       
         const email = row[1]?.toString().trim();      
-        const code = row[2]?.toString().trim();       
+        const schoolIdentifier = row[2]?.toString().trim();       
         const campus = row[3]?.toString().trim();     
         const url = row[4]?.toString().trim();        
 
-        if (!name || !code || !campus) {
-           errors.push(`Row ${index + 2}: Missing Name, Code, or Campus.`);
-           return;
-        }
+        if (!name || !schoolIdentifier || !campus) return; // Skip invalid rows
+
+        // 2. Find School (Try Code first, then Name)
         const matchedSchool = schools.find(s => 
-            s.official_code?.toLowerCase() === code.toLowerCase() &&
-            s.campus_name?.toLowerCase() === campus.toLowerCase()
+            (s.official_code && s.official_code.toLowerCase() === schoolIdentifier.toLowerCase() && s.campus_name?.toLowerCase() === campus.toLowerCase()) ||
+            (s.school_name.toLowerCase() === schoolIdentifier.toLowerCase() && s.campus_name?.toLowerCase() === campus.toLowerCase())
         );
+
         if (matchedSchool) {
           rawTeachers.push({
             trainer_id: user.id,            
             name: name,                     
             school_name: matchedSchool.school_name, 
-            campus: campus,                 
-            email: email || null,
+            campus: matchedSchool.campus_name, 
+            email: email || null, // Null matches specific SQL constraints better than empty string
             worksheet_url: url || null,
-            school_id: matchedSchool.id,    
             updated_at: new Date().toISOString()
           });
         } else {
-          errors.push(`Row ${index + 2}: School Code "${code}" + Campus "${campus}" not found.`);
+          errors.push(`Row ${index + 2}: School "${schoolIdentifier}" + Campus "${campus}" not found.`);
         }
       });
 
-      rawTeachers.sort((a, b) => {
-          if (a.worksheet_url && !b.worksheet_url) return -1;
-          if (!a.worksheet_url && b.worksheet_url) return 1;
-          return 0;
-      });
-
+      // 3. Deduplicate: Prefer rows with URLs
       const uniqueMap = new Map();
-      const teachersToUpsert: any[] = [];
-      for (const teacher of rawTeachers) {
-          const uniqueKey = `${teacher.name}-${teacher.email || 'no-email'}-${teacher.campus}`.toLowerCase();
-          if (!uniqueMap.has(uniqueKey)) {
-              uniqueMap.set(uniqueKey, true);
-              teachersToUpsert.push(teacher);
+      
+      for (const t of rawTeachers) {
+          // Unique Key: Name + Email + School + Campus
+          const emailPart = t.email ? t.email.toLowerCase() : 'no-email';
+          const uniqueKey = `${t.name}-${emailPart}-${t.school_name}-${t.campus}`.toLowerCase();
+          
+          if (uniqueMap.has(uniqueKey)) {
+             const existing = uniqueMap.get(uniqueKey);
+             if (!existing.worksheet_url && t.worksheet_url) {
+                 uniqueMap.set(uniqueKey, t); // Upgrade to the one with URL
+             }
+          } else {
+              uniqueMap.set(uniqueKey, t);
           }
       }
       
-      const duplicateCount = rawTeachers.length - teachersToUpsert.length;
+      const teachersToUpsert = Array.from(uniqueMap.values());
+
       if (errors.length > 0) {
-        const proceed = confirm(`Found ${rawTeachers.length} rows (${duplicateCount} duplicates removed) and ${errors.length} errors.\nFirst error: ${errors[0]}\nProceed?`);
+        const proceed = confirm(`Found ${teachersToUpsert.length} valid teachers.\n\n${errors.length} rows had errors (school not found).\n\nProceed?`);
         if (!proceed) { setLoading(false); e.target.value = ''; return; }
       }
 
       if (teachersToUpsert.length > 0) {
+        // 4. Upsert using the Email-aware constraint
         const { error } = await supabase
           .from('teachers')
-          .upsert(teachersToUpsert, { onConflict: 'trainer_id, name, school_name, campus' });
+          .upsert(teachersToUpsert, { 
+            onConflict: 'trainer_id, email, name, school_name, campus' 
+          });
+        
         if (error) throw error;
+        
         alert(`Success! Imported ${teachersToUpsert.length} teachers.`);
         onUploadComplete();
       } else {
-        alert("No valid teachers found.");
+        alert("No valid teachers found to import.");
       }
+
     } catch (err: any) {
       console.error(err);
       alert('Error: ' + err.message);
@@ -102,19 +112,15 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
 
   return (
     <div className="flex items-center gap-2">
-      {/* 1. Download Template (Outline Pill) */}
       <a
         href="/templates/teachers_template.xlsx"
         download
-        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
+        className="btn btn-outline"
+        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
       >
-        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-        </svg>
-        Template
+        <span>📥</span> Template
       </a>
 
-      {/* 2. Import Button (Blue Pill) */}
       <div>
         <input
           type="file"
@@ -126,13 +132,10 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
         />
         <label
           htmlFor="file-upload-teachers"
-          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-full shadow-sm cursor-pointer transition-colors ${
-            loading ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
-          }`}
+          className="btn btn-primary"
+          style={{ cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
         >
-          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
+          <span>👩‍🏫</span>
           {loading ? 'Processing...' : 'Import Teachers'}
         </label>
       </div>

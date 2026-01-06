@@ -15,23 +15,35 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
       if (!user) throw new Error("You must be logged in to upload.");
 
       const rows = await readXlsxFile(file);
+      // Skip header row (Row 1)
       const dataRows = rows.slice(1);
+      
       if (dataRows.length === 0) throw new Error("File is empty.");
 
-      const schoolsToUpsert = dataRows.map((row) => ({
-        trainer_id: user.id,
-        official_code:      row[0]?.toString().trim() || null, 
-        school_name:        row[1]?.toString().trim(), 
-        campus_name:        row[2]?.toString().trim(), 
-        address:            row[3]?.toString().trim() || null,
-        admin_name:         row[4]?.toString().trim() || null,
-        admin_email:        row[5]?.toString().trim() || null,
-        admin_phone:        row[6]?.toString().trim() || null,
-        am_name:            row[7]?.toString().trim() || null,
-        am_email:           row[8]?.toString().trim() || null,
-        admin_workbook_url: row[9]?.toString().trim() || null,
-      }));
+      // Map Excel Columns to DB Columns
+      // Col 0: Code, 1: School*, 2: Campus*, 3: Address, 4: AdminName, 5: Email, 6: Phone, 7: AM, 8: AMEmail, 9: WorkbookURL
+      const schoolsToUpsert = dataRows
+        .filter(row => row[1] && row[2]) // Ensure School Name and Campus exist
+        .map((row) => ({
+          trainer_id: user.id,
+          official_code:      row[0]?.toString().trim() || null, 
+          school_name:        row[1]?.toString().trim(), 
+          campus_name:        row[2]?.toString().trim(), 
+          address:            row[3]?.toString().trim() || null,
+          admin_name:         row[4]?.toString().trim() || null,
+          admin_email:        row[5]?.toString().trim() || null,
+          admin_phone:        row[6]?.toString().trim() || null,
+          am_name:            row[7]?.toString().trim() || null,
+          am_email:           row[8]?.toString().trim() || null,
+          admin_workbook_url: row[9]?.toString().trim() || null,
+          updated_at:         new Date().toISOString(),
+        }));
 
+      if (schoolsToUpsert.length === 0) {
+        throw new Error("No valid rows found. Ensure 'School Name' (Col B) and 'Campus Name' (Col C) are filled.");
+      }
+
+      // Upsert based on the SQL constraint we created
       const { error } = await supabase
         .from('schools')
         .upsert(schoolsToUpsert, { 
@@ -39,8 +51,10 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
         });
 
       if (error) throw error;
-      alert(`Success! Processed ${schoolsToUpsert.length} rows.`);
+
+      alert(`Success! Processed ${schoolsToUpsert.length} schools.`);
       onUploadComplete(); 
+
     } catch (err: any) {
       console.error(err);
       alert('Error importing schools: ' + err.message);
@@ -52,19 +66,17 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
 
   return (
     <div className="flex items-center gap-2">
-      {/* 1. Download Template (Outline Pill) */}
+      {/* 1. Download Template Button */}
       <a
         href="/templates/schools_template.xlsx"
         download
-        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-full hover:bg-gray-50 transition-colors shadow-sm"
+        className="btn btn-outline"
+        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
       >
-        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-        </svg>
-        Template
+        <span>📥</span> Template
       </a>
 
-      {/* 2. Import Button (Green Pill) */}
+      {/* 2. Import Button */}
       <div>
         <input
           type="file"
@@ -76,13 +88,10 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
         />
         <label
           htmlFor="file-upload-schools"
-          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-full shadow-sm cursor-pointer transition-colors ${
-            loading ? "bg-green-400 cursor-wait" : "bg-green-600 hover:bg-green-700"
-          }`}
+          className="btn btn-primary"
+          style={{ cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
         >
-          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
+          <span>🏫</span>
           {loading ? 'Processing...' : 'Import Schools'}
         </label>
       </div>

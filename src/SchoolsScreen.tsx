@@ -1,4 +1,3 @@
-// src/SchoolsScreen.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
@@ -220,8 +219,8 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!form.school_name.trim() || !form.campus_name.trim()) {
       alert("Please fill in School name and Campus.");
       return;
@@ -230,13 +229,14 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
     setSubmitting(true);
     let token: string | undefined = undefined;
 
-    // 🟢 NEW: Get Token Logic
-    if (mode === "create" && autoCreate) {
+    // 🟢 UPDATED: Get Token Logic
+    // If autoCreate is checked (regardless of mode), try to get the token
+    if (autoCreate) {
       try {
         token = await getGraphAccessToken();
       } catch (err: any) {
         console.error("Token error", err);
-        const cont = window.confirm(`Could not sign in to Microsoft: ${err.message}\n\nCreate school anyway (without workbook)?`);
+        const cont = window.confirm(`Could not sign in to Microsoft: ${err.message}\n\nSave school anyway (without workbook)?`);
         if (!cont) {
           setSubmitting(false);
           return;
@@ -251,7 +251,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
     }
   };
 
-  return (
+return (
     <div className="modal-backdrop">
       <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
         <div className="modal-header">
@@ -263,7 +263,8 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           </button>
         </div>
 
-        <form className="modal-body" onSubmit={handleSubmit} style={{ flexGrow: 1, overflowY: "auto" }}>
+        {/* 🟢 FIX 1: Changed <form> to <div> and removed onSubmit */}
+        <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="form-row">
             <label>School name *</label>
             <input
@@ -383,11 +384,19 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           <div className="form-row">
             <label>Admin Workbook URL</label>
             
-            {/* 🟢 NEW: Auto-Create Checkbox */}
-            {mode === 'create' && (
+            {/* Auto-Create Checkbox Logic */}
+            {(mode === 'create' || !initial?.admin_workbook_url) && (
                <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
-                 <input type="checkbox" id="chk-auto-school" checked={autoCreate} onChange={(e) => setAutoCreate(e.target.checked)} style={{width:'auto', margin:0}} />
-                 <label htmlFor="chk-auto-school" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>✨ Auto-create Admin Workbook?</label>
+                 <input 
+                   type="checkbox" 
+                   id="chk-auto-school" 
+                   checked={autoCreate} 
+                   onChange={(e) => setAutoCreate(e.target.checked)} 
+                   style={{width:'auto', margin:0}} 
+                 />
+                 <label htmlFor="chk-auto-school" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>
+                   {mode === 'create' ? '✨ Auto-create Admin Workbook?' : '✨ Create missing workbook?'}
+                 </label>
                </div>
             )}
 
@@ -411,9 +420,12 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
             >
               Cancel
             </button>
+
+            {/* 🟢 FIX 2 & 3: Changed type to "button" and added onClick handler */}
             <button
-              type="submit"
+              type="button"
               className="btn btn-primary"
+              onClick={() => handleSubmit()}
               disabled={submitting}
             >
               {submitting
@@ -425,7 +437,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
                 : "Save changes"}
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -486,7 +498,8 @@ export const SchoolsScreen: React.FC = () => {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ 
           schoolName: school.school_name,
-          trainerId: user?.id 
+          trainerId: user?.id,
+          schoolId: school.id // 🟢 ADDED: Send ID for unique naming
         })
       });
       const result = await resp.json();
@@ -917,6 +930,12 @@ export const SchoolsScreen: React.FC = () => {
     setRows((prev) =>
       prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
+    
+    // 🟢 UPDATED: Trigger Auto-create in Edit Mode
+    if (autoCreateToken) {
+       runBackgroundProvisioning(updated, autoCreateToken);
+    }
+
     openView(updated);
     setShowForm(false);
   };
