@@ -97,11 +97,12 @@ router.post("/api/merge-admin", async (req, res) => {
 });
 
 // =====================================================================
-// 🟢 ROUTE 3: Provision Teacher Workbook
+// 🟢 ROUTE 3: Provision Teacher Workbook (Retry Logic)
 // =====================================================================
 router.post("/api/provision-teacher", async (req, res) => {
   try {
     const token = extractBearerToken(req);
+    // teacherId is no longer strictly needed for naming, but good to keep
     const { teacherName, schoolName, trainerId } = req.body; 
 
     if (!token || !teacherName || !schoolName || !trainerId) {
@@ -125,16 +126,35 @@ router.post("/api/provision-teacher", async (req, res) => {
       token
     );
 
-    const newFileName = `Teacher ${safeTeacherName} - ${safeSchoolName}.xlsx`;
+    // 🟢 NAMING LOGIC: Try "Name", then "Name (1)", "Name (2)"...
+    const baseFileName = `Teacher ${safeTeacherName} - ${safeSchoolName}`;
+    let newItemId = null;
 
-    const newItemId = await copyFile(
-      settings.teacher_template_drive_id,
-      settings.teacher_template_item_id, 
-      settings.teacher_folder_drive_id,
-      schoolFolderId,                    
-      newFileName,
-      token
-    );
+    for (let i = 0; i < 10; i++) {
+      const suffix = i === 0 ? "" : ` (${i})`;
+      const tryFileName = `${baseFileName}${suffix}.xlsx`;
+
+      try {
+        newItemId = await copyFile(
+          settings.teacher_template_drive_id,
+          settings.teacher_template_item_id, 
+          settings.teacher_folder_drive_id,
+          schoolFolderId,                    
+          tryFileName,
+          token
+        );
+        break; // Success! Exit loop.
+      } catch (err) {
+        // If error is 409 (Conflict/Name Exists), continue loop to try next number
+        // Otherwise, it's a real error, so throw it.
+        const isConflict = err.status === 409 || (err.message && err.message.includes("nameAlreadyExists"));
+        if (!isConflict) throw err;
+      }
+    }
+
+    if (!newItemId) {
+      throw new Error("File creation failed: Too many duplicate names.");
+    }
 
     const linkUrl = `https://graph.microsoft.com/v1.0/drives/${settings.teacher_folder_drive_id}/items/${newItemId}/createLink`;
     const linkResp = await fetch(linkUrl, {
@@ -158,7 +178,7 @@ router.post("/api/provision-teacher", async (req, res) => {
 });
 
 // =====================================================================
-// 🟢 ROUTE 4: Provision School/Admin Workbook
+// 🟢 ROUTE 4: Provision School/Admin Workbook (Retry Logic)
 // =====================================================================
 router.post("/api/provision-school", async (req, res) => {
   try {
@@ -172,30 +192,43 @@ router.post("/api/provision-school", async (req, res) => {
     // 1. Get Settings
     const settings = await getTrainerSettings(trainerId);
     
-    // Check for SCHOOL settings using SPECIFIC column names
     if (!settings || !settings.school_template_item_id || !settings.school_folder_item_id) {
-      console.error("❌ FAILURE: Missing 'school_template_item_id' or 'school_folder_item_id'");
       return res.status(400).json({ 
         ok: false, 
         error: "School Template or Root Folder not configured in Settings." 
       });
     }
 
-    // Sanitization
     const safeSchoolName = schoolName.replace(/[\/\\?%*:|"<>]/g, ".").trim();
     console.log(`[Provision School] Sanitized: "${safeSchoolName}"`);
 
-    const newFileName = `School reports - ${safeSchoolName}.xlsx`;
+    // 🟢 NAMING LOGIC: Try "Name", then "Name (1)", "Name (2)"...
+    const baseFileName = `School reports - ${safeSchoolName}`;
+    let newItemId = null;
 
-    // 2. Copy Template -> New File
-    const newItemId = await copyFile(
-      settings.school_template_drive_id,
-      settings.school_template_item_id, 
-      settings.school_folder_drive_id,
-      settings.school_folder_item_id,    
-      newFileName,
-      token
-    );
+    for (let i = 0; i < 10; i++) {
+      const suffix = i === 0 ? "" : ` (${i})`;
+      const tryFileName = `${baseFileName}${suffix}.xlsx`;
+
+      try {
+        newItemId = await copyFile(
+          settings.school_template_drive_id,
+          settings.school_template_item_id, 
+          settings.school_folder_drive_id,
+          settings.school_folder_item_id,    
+          tryFileName,
+          token
+        );
+        break; // Success!
+      } catch (err) {
+        const isConflict = err.status === 409 || (err.message && err.message.includes("nameAlreadyExists"));
+        if (!isConflict) throw err;
+      }
+    }
+
+    if (!newItemId) {
+      throw new Error("File creation failed: Too many duplicate names.");
+    }
 
     // 3. Create Edit Link
     const linkUrl = `https://graph.microsoft.com/v1.0/drives/${settings.school_folder_drive_id}/items/${newItemId}/createLink`;
