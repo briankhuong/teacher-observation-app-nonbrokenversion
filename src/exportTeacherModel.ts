@@ -157,48 +157,48 @@ export function buildTeacherExportModel(
     let comment = src?.commentText ?? "";
 
     // ---------------------------------------------------------
-    // 🟢 SANITIZER (Updated)
+    // 🟢 SANITIZER (Fixed to preserve newlines)
     // ---------------------------------------------------------
     // Remove [OCR], [AD], [Hints], or any content in square brackets.
-    // The teacher should NOT see these "cheat codes".
     comment = comment.replace(/\[.*?\]/g, "").trim();
     
-    // Clean up any double spaces left behind by the removal
-    comment = comment.replace(/\s\s+/g, " ");
+    // ⚠️ CRITICAL FIX: Only replace spaces/tabs, NOT newlines. 
+    // Old code (/\s\s+/g) was deleting line breaks.
+    comment = comment.replace(/[ \t]+/g, " "); 
     // ---------------------------------------------------------
 
-    // 🟢 DEDUPLICATION: Use Sets to ensure unique lines
+    // 🟢 DEDUPLICATION
     const strengthSet = new Set<string>();
     const growthSet = new Set<string>();
 
-    // Split by newlines (created by server glue logic)
+    // Split by newlines (now preserved correctly)
     const lines = comment.split("\n").map(l => l.trim()).filter(Boolean);
 
     lines.forEach(line => {
-      // 🟢 HYBRID LOGIC START
+      // 🟢 HYBRID LOGIC
 
-      // Rule A: Explicit Markers (These override everything)
+      // Rule A: Check for (GA) - Priority 1 (ANYWHERE in the line)
+      // Matches "Some text (GA)" or "(GA) Some text"
+      const gaRegex = /\(\s*GA\s*\)/i;
       
-      // 1. Check for (GA) - Priority 1
-      const gaRegex = /[\s\-\•]*\(\s*GA\s*\)(.*)$/i;
-      const gaMatch = line.match(gaRegex);
-
-      if (gaMatch) {
-        // Found (GA) -> It is definitely GROWTH (Bad)
-        const content = gaMatch[1].trim(); 
+      if (gaRegex.test(line)) {
+        // Found (GA) -> It is definitely GROWTH
+        // Remove the (GA) marker, trim whitespace/hyphens, and save
+        const content = line.replace(gaRegex, "").replace(/^[\s\-\•]+/, "").trim();
         if (content) growthSet.add(content);
         return; // Line handled
       } 
 
-      // 2. Check for Hyphen or Bullet - Priority 2
+      // Rule B: Check for Hyphen or Bullet - Priority 2
+      // Must be at the very start of the line
       if (line.startsWith("-") || line.startsWith("•")) {
-        // Found Hyphen -> It is definitely STRENGTH (Good)
+        // Found Hyphen -> It is definitely STRENGTH
         const content = line.replace(/^[\s\-\•]+/, "").trim();
         if (content) strengthSet.add(content);
         return; // Line handled
       }
 
-      // Rule B: No Markers? Fallback to Checkboxes
+      // Rule C: No Markers? Fallback to Checkboxes
       if (!good && growth) {
         // Only "Growth" is checked -> Unlabeled text goes to GROWTH
         growthSet.add(line);
@@ -208,15 +208,13 @@ export function buildTeacherExportModel(
       }
     });
 
-    // Convert Sets back to Arrays for formatting
     const strengthItems = Array.from(strengthSet);
     const growthItems = Array.from(growthSet);
 
-    // 🟢 FORMATTING: Join with Hyphens ("- ")
+    // 🟢 FORMATTING: Join with Hyphens
     let strengths = strengthItems.map(s => `- ${s}`).join("\n");
     let growths = growthItems.map(g => `- ${g}`).join("\n");
 
-    // 🟢 BLANK CHECK: No default text if empty
     if (!strengthItems.length && !growthItems.length) {
         strengths = "";
         growths = "";
@@ -248,8 +246,8 @@ export function buildTeacherExportModel(
       description: layout.excelDescription,
       checklist,
       status,
-      strengths, // Maps to Column E
-      growths,   // Maps to Column F
+      strengths, 
+      growths,   
       goodFlag: good,
       growthFlag: growth,
     };
