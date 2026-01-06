@@ -90,6 +90,26 @@ function setPersistedTextareaHeight(height: number) {
   }
 }
 
+// 🟢 UPDATED CLEANER: 
+// 1. Removes [OCR]/[Hints]
+// 2. Removes (GA) tags (so they don't show up in the text box)
+// 3. KEEPS empty lines and hyphens
+function cleanTextForPreview(text: string): string {
+    if (!text) return "";
+    return text
+        .split('\n')
+        .map(line => {
+            // Remove [OCR], [Hints]
+            let cleaned = line.replace(/\[(OCR|Hints)\]/gi, "");
+            
+            // Remove (GA) tags so they don't leak into the editor view
+            cleaned = cleaned.replace(/\s*\(\s*GA\s*\)\s*$/i, "");
+
+            return cleaned.trimEnd(); 
+        })
+        .join('\n'); // 🟢 KEEPS EMPTY LINES
+}
+
 const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
 
 import {
@@ -701,8 +721,10 @@ useEffect(() => {
 
 const [indicators, setIndicators] =
   useState<IndicatorState[]>(INITIAL_INDICATORS);
+
+const [previewEdits, setPreviewEdits] = useState<Record<string, { strengths: string, growths: string }>>({});
 const [activeIndex, setActiveIndex] = useState(0);
-  const [observationStatus, setObservationStatus] = useState<"draft" | "saved">(
+const [observationStatus, setObservationStatus] = useState<"draft" | "saved">(
     "draft"
   );
 
@@ -1138,38 +1160,270 @@ const handleExportAdmin = async () => {
 };
 
   
-const handleExportPreview = () => {
-  if (canvasDirty) {
-    handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-    setCanvasDirty(false);
-  }
+// 🟢 UPDATED: HANDLE EXPORT PREVIEW
+  const handleExportPreview = () => {
+    // 1. Save Canvas if dirty
+    if (canvasDirty) {
+      handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+      setCanvasDirty(false);
+    }
 
-  const metaForExport: ObservationMetaForExport = {
-    teacherName,
-    schoolName,
-    campus,
-    unit,
-    lesson,
-    supportType,
-    date: observationMeta.date, 
+    // 2. Prepare Meta
+    const metaForExport: ObservationMetaForExport = {
+      teacherName, schoolName, campus, unit, lesson, supportType, date: observationMeta.date,
+    };
+
+    const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
+      id: ind.id, number: ind.number, title: ind.title, description: ind.description,
+      good: ind.good, growth: ind.growth, commentText: ind.commentText,
+      includeInTrainerSummary: !!ind.includeInTrainerSummary,
+    }));
+
+    const model = buildTeacherExportModel(metaForExport, exportIndicators);
+
+    // 3. Generate Edits (Clean & Parse)
+    const newEdits: Record<string, { strengths: string, growths: string }> = {};
+
+    indicators.forEach(ind => {
+        if (!ind.commentText) {
+            newEdits[ind.id] = { strengths: "", growths: "" };
+            return;
+        }
+
+        const lines = ind.commentText.split('\n');
+        const sLines: string[] = [];
+        const gLines: string[] = [];
+
+        lines.forEach(line => {
+            const safeLine = line || "";
+            const isGrowth = safeLine.includes('(GA)');
+            
+            // CLEANING: Remove [cues], (GA), and leading hyphens
+            let clean = safeLine
+                .replace(/\[.*?\]/g, '') 
+                .replace(/\(GA\)/g, '')  
+                .replace(/^\s*-\s*/, '')    
+                .trim();
+
+            if (!clean) return;
+
+            if (isGrowth) gLines.push(clean);
+            else sLines.push(clean);
+        });
+
+        newEdits[ind.id] = {
+            // Join with double newline for paragraph spacing
+            strengths: sLines.join('\n\n'),
+            growths: gLines.join('\n\n')
+        };
+    });
+
+    setPreviewEdits(newEdits);
+    setExportPreview(model);
+    setShowExportPreview(true);
   };
 
- const exportIndicators: IndicatorStateForExport[] = indicators.map((ind) => ({
-  id: ind.id,
-  number: ind.number,
-  title: ind.title,
-  description: ind.description,
-  good: ind.good,
-  growth: ind.growth,
-  commentText: ind.commentText,
-  includeInTrainerSummary: !!ind.includeInTrainerSummary, 
-}));
 
-  const model = buildTeacherExportModel(metaForExport, exportIndicators);
+// 🟢 FINAL STABLE SOLUTION: STRICT LINE MATCHING
+const handleSavePreview = () => {
+    console.log("🔒 Starting Strict Save...");
 
-  setExportPreview(model);
-  setShowExportPreview(true);
+    const newIndicators = indicators.map(ind => {
+        const edit = previewEdits[ind.id];
+        // If this indicator wasn't edited, leave it alone
+        if (!edit) return ind; 
+
+        // =========================================================
+        // STEP 1: PARSE ORIGINAL TEXT (Extract Cues strictly)
+        // =========================================================
+        const originalLines = ind.commentText ? ind.commentText.split('\n') : [];
+        
+        // We filter down to "Real Content Lines" only.
+        // A line is "Real" if it has text AFTER removing system tags like [OCR] or [Hints].
+        const originalContentMap = originalLines.reduce((acc, line) => {
+            // 1. Remove System Tags (Don't let them count as text)
+            const lineWithoutSystemTags = line.replace(/\[(OCR|Hints)\]/gi, '').trim();
+            
+            // 2. If the line is now empty, it was just a tag or whitespace. Skip it.
+            if (lineWithoutSystemTags.length === 0) return acc;
+
+            // 3. Extract User Cues (Any bracketed text that is NOT OCR/Hints)
+            // e.g., "[need work]", "[admin]"
+            const cuesMatch = line.match(/\[(?!OCR|Hints).*?\]/g);
+            const extractedCues = cuesMatch ? cuesMatch.join(' ') : '';
+
+            acc.push({ cues: extractedCues });
+            return acc;
+        }, [] as { cues: string }[]);
+
+        // =========================================================
+        // STEP 2: PARSE INCOMING EDITS (Normalize to List)
+        // =========================================================
+        
+        // Helper to clean lines: split, trim, remove empty lines
+        const cleanSplit = (text: string) => 
+            text.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+
+        const newStrengthLines = cleanSplit(edit.strengths);
+        const newGrowthLines = cleanSplit(edit.growths);
+
+        // Combine them to get the full list of "New Content Lines"
+        // This must match the order of "Original Content Lines" (Strengths first, then Growth)
+        const allNewLines = [
+            ...newStrengthLines.map(t => ({ text: t, type: 'strength' })),
+            ...newGrowthLines.map(t => ({ text: t, type: 'growth' }))
+        ];
+
+        // =========================================================
+        // STEP 3: STITCH (Zip 1-to-1)
+        // =========================================================
+        
+        const finalLines = allNewLines.map((lineObj, index) => {
+            let finalText = lineObj.text;
+
+            // A. Restore Prefix Formatting
+            if (lineObj.type === 'strength') {
+                // Ensure it starts with "- "
+                if (!finalText.startsWith('-')) finalText = `- ${finalText}`;
+            } else {
+                // Ensure it starts with "(GA) " (No hyphen)
+                // Remove existing (GA) if user typed it, to prevent double tags
+                if (finalText.startsWith('(GA)')) finalText = finalText.replace('(GA)', '').trim();
+                finalText = `(GA) ${finalText}`;
+            }
+
+            // B. Restore Cues (Metadata)
+            // We grab the cues from the same index in the original real-content list.
+            if (index < originalContentMap.length) {
+                const savedCue = originalContentMap[index].cues;
+                // Only append if it exists and isn't already there
+                if (savedCue && !finalText.includes(savedCue)) {
+                    finalText = `${finalText} ${savedCue}`;
+                }
+            }
+
+            return { text: finalText, type: lineObj.type };
+        });
+
+        // =========================================================
+        // STEP 4: FORMATTING (Re-join with correct spacing)
+        // =========================================================
+        
+        const finishedStrengths = finalLines.filter(l => l.type === 'strength').map(l => l.text);
+        const finishedGrowths = finalLines.filter(l => l.type === 'growth').map(l => l.text);
+
+        // Join Strengths tightly (single newline)
+        const sBlock = finishedStrengths.join('\n');
+        
+        // Join Growths loosely (double newline) -> This gives you the empty lines you wanted
+        const gBlock = finishedGrowths.join('\n\n'); 
+
+        let combinedText = "";
+        if (sBlock && gBlock) combinedText = `${sBlock}\n\n${gBlock}`;
+        else combinedText = sBlock || gBlock;
+
+        return {
+            ...ind,
+            commentText: combinedText,
+            ocrPendingReview: false,
+            aiPendingReview: false
+        };
+    });
+
+    // Save
+    setIndicators(newIndicators);
+    isDirtyRef.current = true;
+    
+    const payload: SavedObservationPayload = {
+      id: observationMeta.id,
+      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      indicators: newIndicators,
+      status: observationStatus,
+      updatedAt: Date.now(),
+      scratchpadText,
+      adminSummaryVN,
+      lastSync: lastServerVersionRef.current,
+    };
+    
+    persistObservation(payload);
+    setShowExportPreview(false);
 };
+
+  
+  const handleMarkAllReviewed = () => {
+      const newIndicators = indicators.map(ind => ({
+          ...ind,
+          ocrPendingReview: false,
+          aiPendingReview: false
+      }));
+      setIndicators(newIndicators);
+      isDirtyRef.current = true;
+      
+      const payload: SavedObservationPayload = {
+        id: observationMeta.id,
+        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        indicators: newIndicators,
+        status: observationStatus,
+        updatedAt: Date.now(),
+        scratchpadText,
+        adminSummaryVN,
+        lastSync: lastServerVersionRef.current,
+      };
+      persistObservation(payload);
+  };
+
+  const handlePreviewPolishAll = async () => {
+      setIsAiPolishing(true);
+      try {
+           const candidates = indicators
+            .filter(ind => ind.commentText.trim().length > 3 && !ind.aiPendingReview)
+            .map(ind => ({ id: ind.id, text: ind.commentText }));
+
+           if (candidates.length === 0) {
+               alert("No new items to polish.");
+               return;
+           }
+
+           const results = await polishBatchWithGroq(candidates);
+
+           const polishedIndicators = indicators.map(ind => {
+               const pText = results[ind.id];
+               return pText ? { ...ind, commentText: pText, aiPendingReview: true } : ind;
+           });
+           
+           setIndicators(polishedIndicators);
+
+           // Re-run load logic to update preview
+           const metaForExport = { teacherName, schoolName, campus, unit, lesson, supportType, date: observationMeta.date };
+           const exportInds = polishedIndicators.map(ind => ({
+               id: ind.id, number: ind.number, title: ind.title, description: ind.description,
+               good: ind.good, growth: ind.growth, commentText: ind.commentText,
+               includeInTrainerSummary: !!ind.includeInTrainerSummary
+           }));
+           
+           const model = buildTeacherExportModel(metaForExport, exportInds);
+           
+           const nextEdits: Record<string, { strengths: string, growths: string }> = {};
+           model.rows.forEach(row => {
+               const originalInd = polishedIndicators.find(i => row.indicatorLabel.startsWith(i.number));
+               if (originalInd) {
+                   nextEdits[originalInd.id] = {
+                       strengths: cleanTextForPreview(row.strengths),
+                       growths: cleanTextForPreview(row.growths)
+                   };
+               }
+           });
+           
+           setPreviewEdits(nextEdits);
+           setExportPreview(model);
+           
+      } catch (e) {
+          console.error(e);
+          alert("Polish failed.");
+      } finally {
+          setIsAiPolishing(false);
+      }
+  };
 
 const handleAdminPreview = async () => {
     // 1. Save Canvas if dirty (Standard check)
@@ -1222,7 +1476,7 @@ const handleAdminPreview = async () => {
 
 const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
-  const handleGenerateAiSummary = async () => {
+const handleGenerateAiSummary = async () => {
     if (!adminPreview) return;
     
     // Safety check: Don't overwrite existing text without warning
@@ -1247,7 +1501,7 @@ const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
     } finally {
       setIsGeneratingSummary(false);
     }
-  };
+};
 
 const [canvasDirty, setCanvasDirty] = useState(false);
 useEffect(() => {
@@ -1661,6 +1915,8 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
       ))}
     </>
   );
+
+  
 
   return (
     <div className="workspace-root">
@@ -2223,262 +2479,166 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
             />
           </div>
 
-            {showExportPreview &&
-              exportPreview &&
-              (() => {
-              const unreviewedOcrIndicators = indicators.filter(
-                (ind) => ind.ocrUsed && ind.ocrPendingReview
-              );
+            {/* 🟢 FIXED: Wrapped in backdrop so it appears as a popup */}
+{showExportPreview && exportPreview && (
+  <div className="scratchpad-backdrop">
+    <div 
+      className="scratchpad-modal" 
+      style={{ 
+        width: '95vw', 
+        height: '95vh', 
+        maxWidth: '1200px', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        padding: 0, 
+        overflow: 'hidden' 
+      }}
+    >
+      {(() => {
+        const unreviewedOcrIndicators = indicators.filter((ind) => ind.ocrUsed && ind.ocrPendingReview);
+        const hasUnreviewedOcr = unreviewedOcrIndicators.length > 0;
+        
+        const unreviewedAiIndicators = indicators.filter((ind) => ind.aiPendingReview);
+        const hasUnreviewedAi = unreviewedAiIndicators.length > 0;
+        
+        const growthWithoutComment = indicators.filter((ind) => ind.growth && ind.commentText.trim().length === 0);
+        const goodTemplateOnly = indicators.filter((ind) => ind.good && ind.commentText.trim().length === 0 && !!ind.preComment);
+        const uncheckedIndicators = indicators.filter((ind) => !ind.good && !ind.growth);
+        const inkNotChecked = indicators.filter((ind) => ind.strokes?.some(s => s.points.length > 0) && !ind.good && !ind.growth);
+        const inkNotConverted = indicators.filter((ind) => ind.strokes?.some(s => s.points.length > 0) && !ind.ocrUsed);
 
-            const hasUnreviewedOcr = unreviewedOcrIndicators.length > 0;
+        const anyWarnings = growthWithoutComment.length > 0 || goodTemplateOnly.length > 0 || uncheckedIndicators.length > 0 || inkNotChecked.length > 0 || inkNotConverted.length > 0;
+
+        return (
+          <div className="export-preview-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
             
-                  const unreviewedAiIndicators = indicators.filter(
-                    (ind) => ind.aiPendingReview
-                  );
-                  const hasUnreviewedAi = unreviewedAiIndicators.length > 0;
+            {/* --- BANNERS SECTION --- */}
+            <div style={{ flexShrink: 0, padding: "16px 16px 0 16px" }}>
+                {hasUnreviewedOcr && (
+                <div className="export-ocr-banner">
+                  ⚠ This preview includes OCR text that hasn&apos;t been marked as reviewed yet in:{" "}
+                  {renderIndicatorLinks(unreviewedOcrIndicators.map((ind) => ind.number))}
+                  . Please double-check those comments.
+                </div>
+                )}
                 
-                const growthWithoutComment = indicators.filter((ind) => {
-                  const hasComment = ind.commentText.trim().length > 0;
-                  return ind.growth && !hasComment;
-                });
+                {hasUnreviewedAi && (
+                <div className="export-ocr-banner" style={{ backgroundColor: "rgba(147, 51, 234, 0.2)", border: "1px solid rgba(147, 51, 234, 0.5)", color: "#e9d5ff" }}>
+                  ✨ This preview includes AI-polished text that hasn&apos;t been marked as accepted yet in:{" "}
+                  {renderIndicatorLinks(unreviewedAiIndicators.map((ind) => ind.number))}
+                  . Please review them.
+                </div>
+                )}
 
-                const goodTemplateOnly = indicators.filter((ind) => {
-                  const hasComment = ind.commentText.trim().length > 0;
-                  const hasTemplate = !!ind.preComment;
-                  return ind.good && !hasComment && hasTemplate;
-                });
-
-                const uncheckedIndicators = indicators.filter(
-                  (ind) => !ind.good && !ind.growth
-                );
-
-                const inkNotChecked = indicators.filter((ind) => {
-                const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
-                return hasInk && !ind.good && !ind.growth;
-              });
-
-                const inkNotConverted = indicators.filter((ind) => {
-                const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
-                return hasInk && !ind.ocrUsed; 
-              });
-
-              const growthNoCommentNums = new Set(
-                growthWithoutComment.map((ind) => ind.number)
-              );
-              const goodTemplateOnlyNums = new Set(
-                goodTemplateOnly.map((ind) => ind.number)
-              );
-              const inkNotConvertedNums = new Set(
-                inkNotConverted.map((ind) => ind.number)
-              );
-
-                const anyWarnings =
-                  growthWithoutComment.length > 0 ||
-                  goodTemplateOnly.length > 0 ||
-                  uncheckedIndicators.length > 0 ||
-                  inkNotChecked.length > 0 ||
-                  inkNotConverted.length > 0;
-
-                return (
-                  <div className="export-preview-panel">
-                    {hasUnreviewedOcr && (
-                    <div className="export-ocr-banner">
-                      ⚠ This preview includes OCR text that hasn&apos;t been marked as reviewed yet in:{" "}
-                      {renderIndicatorLinks(unreviewedOcrIndicators.map((ind) => ind.number))}
-                      . Please double-check those comments before sending to the teacher.
-                    </div>
-                      )}
-                      
-                  {hasUnreviewedAi && (
-                    <div className="export-ocr-banner" style={{ 
-                      backgroundColor: "rgba(147, 51, 234, 0.2)", 
-                      border: "1px solid rgba(147, 51, 234, 0.5)",
-                      color: "#e9d5ff" 
-                    }}>
-                      ✨ This preview includes AI-polished text that hasn&apos;t been marked as accepted yet in:{" "}
-                      {renderIndicatorLinks(unreviewedAiIndicators.map((ind) => ind.number))}
-                      . Please review them.
-                    </div>
-                  )}
-
-                    {anyWarnings && (
-                      <div className="export-warning-banner">
-                        {growthWithoutComment.length > 0 && (
-                          <div className="export-warning-line">
-                            ⚠ Growth marked but no written comment:{" "}
-                            {renderIndicatorLinks(
-                              growthWithoutComment.map((ind) => ind.number)
-                            )}
-                          </div>
-                        )}
-
-                        {goodTemplateOnly.length > 0 && (
-                          <div className="export-warning-line">
-                            ℹ Good points using only pre-created comments (template only):
-                            {" "}
-                            <strong>{renderClickableList(goodTemplateOnly)}</strong>
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }}
-                              onClick={insertDefaultCommentsForGood}
-                            >
-                              Insert default comments
-                            </button>
-                          </div>
-                        )}
-
-                        {uncheckedIndicators.length > 0 && (
-                          <div className="export-warning-line">
-                            ⚠ Indicators not marked Good or Growth:{" "}
-                            {renderIndicatorLinks(
-                              uncheckedIndicators.map((ind) => ind.number)
-                            )}
-                          </div>
-                        )}
-
-                        {inkNotChecked.length > 0 && (
-                          <div className="export-warning-line">
-                            ⚠ Indicators have handwriting but no Good/Growth
-                            selected:{" "}
-                            {renderIndicatorLinks(
-                              inkNotChecked.map((ind) => ind.number)
-                            )}
-                          </div>
-                        )}
-
-                        {inkNotConverted.length > 0 && (
-                        <div className="export-warning-line">
-                          ⚠ Indicators have handwriting, but OCR not run yet:{" "}
-                          {renderIndicatorLinks(
-                            inkNotConverted.map((ind) => ind.number)
-                          )}
-
-                          <button
-                            type="button"
-                            className="btn"
-                            style={{
-                              marginLeft: 8,
-                              padding: "2px 6px",
-                              fontSize: 11,
-                              lineHeight: 1.3,
-                            }}
-                            onClick={handleBulkOcrForMissing}
-                          >
-                            Convert all ↓
-                          </button>
-                        </div>
-                      )}
+                {anyWarnings && (
+                  <div className="export-warning-banner">
+                    {growthWithoutComment.length > 0 && (
+                      <div className="export-warning-line">
+                        ⚠ Growth marked but no written comment: {renderIndicatorLinks(growthWithoutComment.map((ind) => ind.number))}
                       </div>
                     )}
-
-                    <div className="export-preview-header">
-                      <div>
-                        <div className="export-preview-title">
-                          Teacher export preview
-                        </div>
-                        <div className="export-preview-sub">
-                          {exportPreview.teacherName} •{" "}
-                          {exportPreview.schoolName}{" "}
-                          {exportPreview.fileDate
-                            ? `• ${exportPreview.fileDate}`
-                            : null}
-                        </div>
+                    {goodTemplateOnly.length > 0 && (
+                      <div className="export-warning-line">
+                        ℹ Good points using template only: <strong>{renderClickableList(goodTemplateOnly)}</strong>
+                        <button type="button" className="btn" style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }} onClick={insertDefaultCommentsForGood}>
+                          Insert default comments
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => setShowExportPreview(false)}
-                      >
-                        Close
-                      </button>
-                    </div>
-
-                    <div className="export-preview-table">
-                    {exportPreview.rows.map((row) => {
-                      const indicatorNum = row.indicatorLabel;
-
-                      const isGrowthNoComment = growthNoCommentNums.has(indicatorNum);
-                      const isTemplateOnly = goodTemplateOnlyNums.has(indicatorNum);
-                      const isInkNotConverted = inkNotConvertedNums.has(indicatorNum);
-
-                      const rowClassName = [
-                        "export-preview-row",
-                        (isGrowthNoComment || isTemplateOnly || isInkNotConverted)
-                          ? "export-preview-row-flagged"
-                          : "",
-                        isGrowthNoComment ? "export-preview-row-flagged-growth" : "",
-                        isTemplateOnly ? "export-preview-row-flagged-template" : "",
-                        isInkNotConverted ? "export-preview-row-flagged-ocr" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ");
-
-                      return (
-                        <div key={row.rowIndex} className={rowClassName}>
-                          <div className="export-preview-left">
-                            <div className="export-preview-indicator">
-                              <strong>{row.indicatorLabel}</strong>
-                            </div>
-                            <div className="export-preview-description">
-                              {row.description}
-                            </div>
-                          </div>
-
-                          <div className="export-preview-right">
-                            {(row.status || row.strengths || row.growths) && (
-                              <div className="export-preview-status-line">
-                                {row.status && (
-                                  <span
-                                    className={
-                                      "export-status-pill " +
-                                      (row.status === "Done"
-                                        ? "export-status-done"
-                                        : row.status === "Pending"
-                                        ? "export-status-pending"
-                                        : "")
-                                    }
-                                  >
-                                    {row.status}
-                                  </span>
-                                )}
-
-                                <div className="export-preview-tags">
-                                  {row.strengths && row.strengths.trim().length > 0 && (
-                                    <span className="export-tag-good">✓ Good</span>
-                                  )}
-                                  {row.growths && row.growths.trim().length > 0 && (
-                                    <span className="export-tag-growth">✕ Growth</span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {row.strengths && row.strengths.trim().length > 0 && (
-                              <div className="export-preview-block">
-                                <div className="export-preview-label export-label-good">
-                                  Teacher&apos;s Strengths
-                                </div>
-                                <div className="export-preview-text">{row.strengths}</div>
-                              </div>
-                            )}
-
-                            {row.growths && row.growths.trim().length > 0 && (
-                              <div className="export-preview-block">
-                                <div className="export-preview-label export-label-growth">
-                                  Teacher&apos;s Growth Areas
-                                </div>
-                                <div className="export-preview-text">{row.growths}</div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                    </div>
+                    )}
+                    {uncheckedIndicators.length > 0 && (
+                      <div className="export-warning-line">
+                        ⚠ Indicators not marked Good or Growth: {renderIndicatorLinks(uncheckedIndicators.map((ind) => ind.number))}
+                      </div>
+                    )}
                   </div>
-                );
-              })()}
+                )}
+            </div>
+
+            {/* --- HEADER --- */}
+            <div className="export-preview-header" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px" }}>
+              <div>
+                <div className="export-preview-title">Teacher export preview</div>
+                <div className="export-preview-sub">{exportPreview.teacherName} • {exportPreview.schoolName}</div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button type="button" className="btn" style={{ border: "1px solid #475569", background: "transparent", color: "#cbd5e1", fontSize: 12 }} onClick={handleMarkAllReviewed}>
+                      ✓ Mark Reviewed
+                  </button>
+                  
+                  <button type="button" className="btn" style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)", border: "none", color: "white", fontSize: 12 }} onClick={handlePreviewPolishAll} disabled={isAiPolishing}>
+                      {isAiPolishing ? "✨ Polishing..." : "✨ AI Polish"}
+                  </button>
+
+                  <button type="button" className="btn btn-primary" style={{ backgroundColor: "#10b981", color: "white", border: "none", fontWeight: 600, padding: "6px 16px" }} onClick={handleSavePreview}>
+                      Save & Update
+                  </button>
+
+                  <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={() => setShowExportPreview(false)}>
+                    Close
+                  </button>
+              </div>
+            </div>
+
+            {/* --- SCROLLABLE TABLE --- */}
+            <div className="export-preview-table-container" style={{ flexGrow: 1, overflowY: "auto", padding: 0 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead style={{ position: "sticky", top: 0, background: "#1e293b", zIndex: 10, boxShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+                      <tr>
+                        <th style={{ padding: "12px 16px", textAlign: "left", width: "25%", color: "#94a3b8", fontWeight: 600 }}>Indicator</th>
+                        <th style={{ padding: "12px 16px", textAlign: "left", width: "37.5%", color: "#4ade80", fontWeight: 600 }}>Good Points</th>
+                        <th style={{ padding: "12px 16px", textAlign: "left", width: "37.5%", color: "#f87171", fontWeight: 600 }}>Growth Areas</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      {exportPreview.rows.map((row) => {
+                        const ind = indicators.find(i => row.indicatorLabel.startsWith(i.number));
+                        if (!ind) return null;
+                        const edit = previewEdits[ind.id] || { strengths: "", growths: "" };
+                        
+                        return (
+                            <tr key={ind.id} style={{ borderBottom: "1px solid #334155" }}>
+                              <td style={{ padding: 16, verticalAlign: "top", color: "#e2e8f0", background: "#0f172a" }}>
+                                  <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                                    <strong style={{ fontSize: 14, color: "#fff" }}>{ind.number}</strong>
+                                    <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{ind.title}</span>
+                                  </div>
+                                  <div style={{ fontSize: 11, marginTop: 6, color: "#94a3b8", lineHeight: 1.4 }}>{ind.description}</div>
+                              </td>
+                              
+                              {/* Good Points Input */}
+                              <td style={{ padding: 12, verticalAlign: "top", background: "#0f172a" }}>
+                                <textarea 
+                                    className="input"
+                                    placeholder={ind.good ? "Add strengths..." : "Add text here (Will check 'Good')"}
+                                    style={{ width: "100%", minHeight: 90, fontSize: 13, background: "#1e293b", border: "1px solid #334155", color: "#e2e8f0", lineHeight: 1.5, padding: "10px", borderRadius: "8px", resize: "vertical" }}
+                                    value={edit.strengths}
+                                    onChange={(e) => setPreviewEdits(prev => ({ ...prev, [ind.id]: { ...prev[ind.id], strengths: e.target.value } }))}
+                                />
+                              </td>
+
+                              {/* Growth Areas Input */}
+                              <td style={{ padding: 12, verticalAlign: "top", background: "#0f172a" }}>
+                                <textarea 
+                                    className="input"
+                                    placeholder={ind.growth ? "Add growth areas..." : "Add text here (Will check 'Growth')"}
+                                    style={{ width: "100%", minHeight: 90, fontSize: 13, background: "#1e293b", border: "1px solid #334155", color: "#e2e8f0", lineHeight: 1.5, padding: "10px", borderRadius: "8px", resize: "vertical" }}
+                                    value={edit.growths}
+                                    onChange={(e) => setPreviewEdits(prev => ({ ...prev, [ind.id]: { ...prev[ind.id], growths: e.target.value } }))}
+                                />
+                              </td>
+                            </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  </div>
+)}
 
             {showAdminPreview && adminPreview && (
               <div className="export-preview-panel admin-preview">
