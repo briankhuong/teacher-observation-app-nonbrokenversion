@@ -14,18 +14,17 @@ function cleanWorksheet(worksheet: ExcelJS.Worksheet) {
   }
 }
 
-// =========================================================
-// 📏 HELPER: Estimate Row Height
-// =========================================================
-function calculateAutoHeight(textA: string, textB: string, minHeight = 45): number {
-  // 🟢 TUNED: "The students invited to interact with the cards" is 47 chars.
-  // We set this to 45 to be safe (so if it hits 47, it counts as 2 lines).
-  const CHARS_PER_LINE = 45; 
+// src/utils/clientExcelMerge.ts
+
+function calculateAutoHeight(textA: string, textB: string, textC: string, minHeight = 45): number {
+  // 🟢 FIX 1: Increase to 65. 
+  // Since the Description column is wide, 35 was forcing it to calculate too many lines.
+  const CHARS_PER_LINE = 65; 
   
-  // Standard Excel line height is ~15pts. We use 16 to add a tiny bit of breathing room.
-  const LINE_HEIGHT_PTS = 16; 
+  // 🟢 FIX 2: Decrease to 15.
+  // 18pts was adding too much padding. 15pts is standard Excel height.
+  const LINE_HEIGHT_PTS = 15; 
   
-  // Base padding for the top/bottom of the cell
   const PADDING_PTS = 14;
 
   const countWrappedLines = (text: string) => {
@@ -35,15 +34,16 @@ function calculateAutoHeight(textA: string, textB: string, minHeight = 45): numb
     return explicitLines.reduce((acc, line) => {
       const length = line.length;
       if (length === 0) return acc + 1; 
-      // Math.ceil ensures that 47 chars / 45 limit = 2 lines
+      // This will now calculate fewer lines for the same text
       return acc + Math.ceil(length / CHARS_PER_LINE);
     }, 0);
   };
 
   const linesA = countWrappedLines(textA);
   const linesB = countWrappedLines(textB);
+  const linesC = countWrappedLines(textC);
   
-  const maxLines = Math.max(linesA, linesB);
+  const maxLines = Math.max(linesA, linesB, linesC);
 
   if (maxLines === 0) return minHeight;
 
@@ -51,7 +51,6 @@ function calculateAutoHeight(textA: string, textB: string, minHeight = 45): numb
   
   return Math.max(calculatedHeight, minHeight);
 }
-
 // =========================================================
 // 🎨 HELPER 2: Copy Conditional Formatting
 // =========================================================
@@ -235,9 +234,14 @@ export async function clientMergeTeacherSheet({ token, workbookUrl, sheetName, m
       // Get the existing height from the template (or default to 60 if missing)
       const currentHeight = row.height || 60;
       
-      // Calculate needed height based on the text we just added
-      const neededHeight = calculateAutoHeight(r.strengths || "", r.growths || "", currentHeight);
-      
+     // 🟢 FIX: Pass r.description as the 3rd argument
+      const neededHeight = calculateAutoHeight(
+        r.strengths || "", 
+        r.growths || "", 
+        r.description || "", // <--- THIS IS THE FIX
+        currentHeight
+      );
+
       // Apply the larger of the two
       row.height = neededHeight;
     });
