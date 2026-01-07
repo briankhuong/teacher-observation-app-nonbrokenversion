@@ -1160,14 +1160,13 @@ const handleExportAdmin = async () => {
 };
 
   
+// 🟢 FIXED: Type definition added for newEdits
 const handleExportPreview = () => {
-    // 1. Save Canvas if dirty
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
       setCanvasDirty(false);
     }
 
-    // 2. Prepare Meta
     const metaForExport: ObservationMetaForExport = {
       teacherName, schoolName, campus, unit, lesson, supportType, date: observationMeta.date,
     };
@@ -1180,8 +1179,8 @@ const handleExportPreview = () => {
 
     const model = buildTeacherExportModel(metaForExport, exportIndicators);
 
-    // 3. Generate Edits (Clean & Parse)
-    const newEdits: Record<string, { strengths: string, growths: string }> = {};
+    // 🟢 FIX: Explicitly type this object to satisfy TypeScript
+    const newEdits: Record<string, { strengths: string; growths: string }> = {};
 
     indicators.forEach(ind => {
         if (!ind.commentText) {
@@ -1197,7 +1196,6 @@ const handleExportPreview = () => {
             const safeLine = line || "";
             const isGrowth = safeLine.includes('(GA)');
             
-            // CLEANING: Remove [cues], (GA), and leading hyphens
             let clean = safeLine
                 .replace(/\[.*?\]/g, '') 
                 .replace(/\(GA\)/g, '')  
@@ -1211,7 +1209,6 @@ const handleExportPreview = () => {
         });
 
         newEdits[ind.id] = {
-            // Join with double newline for paragraph spacing
             strengths: sLines.join('\n\n'),
             growths: gLines.join('\n\n')
         };
@@ -1220,34 +1217,26 @@ const handleExportPreview = () => {
     setPreviewEdits(newEdits);
     setExportPreview(model);
     setShowExportPreview(true);
-  };
+};
 
-
-// 🟢 FINAL STABLE SOLUTION: STRICT LINE MATCHING
-const handleSavePreview = () => {
+// 🟢 UPDATED: Handles Saving AND Jumping
+const handleSavePreview = (targetIndex?: any) => {
     console.log("🔒 Starting Strict Save...");
+
+    // 1. Determine if we are jumping (Check if arg is a number, not an Event object)
+    const jumpTo = (typeof targetIndex === 'number') ? targetIndex : null;
 
     const newIndicators = indicators.map(ind => {
         const edit = previewEdits[ind.id];
-        // If this indicator wasn't edited, leave it alone
         if (!edit) return ind; 
 
-        // =========================================================
-        // STEP 1: PARSE ORIGINAL TEXT (Extract Cues strictly)
-        // =========================================================
+        // --- STEP 1: PARSE ORIGINAL ---
         const originalLines = ind.commentText ? ind.commentText.split('\n') : [];
         
-        // We filter down to "Real Content Lines" only.
-        // A line is "Real" if it has text AFTER removing system tags like [OCR] or [Hints].
         const originalContentMap = originalLines.reduce((acc, line) => {
-            // 1. Remove System Tags (Don't let them count as text)
             const lineWithoutSystemTags = line.replace(/\[(OCR|Hints)\]/gi, '').trim();
-            
-            // 2. If the line is now empty, it was just a tag or whitespace. Skip it.
             if (lineWithoutSystemTags.length === 0) return acc;
 
-            // 3. Extract User Cues (Any bracketed text that is NOT OCR/Hints)
-            // e.g., "[need work]", "[admin]"
             const cuesMatch = line.match(/\[(?!OCR|Hints).*?\]/g);
             const extractedCues = cuesMatch ? cuesMatch.join(' ') : '';
 
@@ -1255,66 +1244,43 @@ const handleSavePreview = () => {
             return acc;
         }, [] as { cues: string }[]);
 
-        // =========================================================
-        // STEP 2: PARSE INCOMING EDITS (Normalize to List)
-        // =========================================================
-        
-        // Helper to clean lines: split, trim, remove empty lines
+        // --- STEP 2: PARSE EDITS ---
         const cleanSplit = (text: string) => 
             text.split('\n').map(t => t.trim()).filter(t => t.length > 0);
 
         const newStrengthLines = cleanSplit(edit.strengths);
         const newGrowthLines = cleanSplit(edit.growths);
 
-        // Combine them to get the full list of "New Content Lines"
-        // This must match the order of "Original Content Lines" (Strengths first, then Growth)
         const allNewLines = [
             ...newStrengthLines.map(t => ({ text: t, type: 'strength' })),
             ...newGrowthLines.map(t => ({ text: t, type: 'growth' }))
         ];
 
-        // =========================================================
-        // STEP 3: STITCH (Zip 1-to-1)
-        // =========================================================
-        
+        // --- STEP 3: STITCH ---
         const finalLines = allNewLines.map((lineObj, index) => {
             let finalText = lineObj.text;
 
-            // A. Restore Prefix Formatting
             if (lineObj.type === 'strength') {
-                // Ensure it starts with "- "
                 if (!finalText.startsWith('-')) finalText = `- ${finalText}`;
             } else {
-                // Ensure it starts with "(GA) " (No hyphen)
-                // Remove existing (GA) if user typed it, to prevent double tags
                 if (finalText.startsWith('(GA)')) finalText = finalText.replace('(GA)', '').trim();
                 finalText = `(GA) ${finalText}`;
             }
 
-            // B. Restore Cues (Metadata)
-            // We grab the cues from the same index in the original real-content list.
             if (index < originalContentMap.length) {
                 const savedCue = originalContentMap[index].cues;
-                // Only append if it exists and isn't already there
                 if (savedCue && !finalText.includes(savedCue)) {
                     finalText = `${finalText} ${savedCue}`;
                 }
             }
-
             return { text: finalText, type: lineObj.type };
         });
 
-        // =========================================================
-        // STEP 4: FORMATTING (Re-join with correct spacing)
-        // =========================================================
-        
+        // --- STEP 4: FORMAT ---
         const finishedStrengths = finalLines.filter(l => l.type === 'strength').map(l => l.text);
         const finishedGrowths = finalLines.filter(l => l.type === 'growth').map(l => l.text);
 
-        // Join Strengths tightly (single newline)
         const sBlock = finishedStrengths.join('\n');
-        
-        // Join Growths loosely (double newline) -> This gives you the empty lines you wanted
         const gBlock = finishedGrowths.join('\n\n'); 
 
         let combinedText = "";
@@ -1329,7 +1295,7 @@ const handleSavePreview = () => {
         };
     });
 
-    // Save
+    // 2. Commit Data
     setIndicators(newIndicators);
     isDirtyRef.current = true;
     
@@ -1345,11 +1311,18 @@ const handleSavePreview = () => {
     };
     
     persistObservation(payload);
+    
+    // 3. Close Modal
     setShowExportPreview(false);
+
+    // 4. 🟢 JUMP (If requested)
+    if (jumpTo !== null) {
+        // Small timeout ensures modal closes cleanly before slide switch
+        setTimeout(() => setActiveIndex(jumpTo), 50);
+    }
 };
 
-  
-  const handleMarkAllReviewed = () => {
+const handleMarkAllReviewed = () => {
       const newIndicators = indicators.map(ind => ({
           ...ind,
           ocrPendingReview: false,
@@ -2477,8 +2450,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               onTouchStart={startTextareaResize}
             />
           </div>
-
-            {/* 🟢 FIXED: Wrapped in backdrop so it appears as a popup */}
+{/* 🔍 PREVIEW MODAL (Uniform Buttons & Resizable Inputs) */}
 {showExportPreview && exportPreview && (
   <div className="scratchpad-backdrop">
     <div 
@@ -2494,87 +2466,172 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
       }}
     >
       {(() => {
-        const unreviewedOcrIndicators = indicators.filter((ind) => ind.ocrUsed && ind.ocrPendingReview);
-        const hasUnreviewedOcr = unreviewedOcrIndicators.length > 0;
-        
-        const unreviewedAiIndicators = indicators.filter((ind) => ind.aiPendingReview);
-        const hasUnreviewedAi = unreviewedAiIndicators.length > 0;
-        
-        const growthWithoutComment = indicators.filter((ind) => ind.growth && ind.commentText.trim().length === 0);
-        const goodTemplateOnly = indicators.filter((ind) => ind.good && ind.commentText.trim().length === 0 && !!ind.preComment);
-        const uncheckedIndicators = indicators.filter((ind) => !ind.good && !ind.growth);
-        const inkNotChecked = indicators.filter((ind) => ind.strokes?.some(s => s.points.length > 0) && !ind.good && !ind.growth);
-        const inkNotConverted = indicators.filter((ind) => ind.strokes?.some(s => s.points.length > 0) && !ind.ocrUsed);
+        // --- HELPERS ---
+        const isEmpty = (text: string | undefined) => !text || text.trim().length === 0;
 
-        const anyWarnings = growthWithoutComment.length > 0 || goodTemplateOnly.length > 0 || uncheckedIndicators.length > 0 || inkNotChecked.length > 0 || inkNotConverted.length > 0;
+        // 1. CALCULATE WARNINGS
+        const warningMap = indicators.reduce<Record<string, string[]>>((acc, ind) => {
+            const edit = previewEdits[ind.id] || { strengths: "", growths: "" };
+            const issues: string[] = [];
+
+            if (ind.growth && isEmpty(edit.growths)) issues.push("growth-empty");
+            if (ind.good && isEmpty(edit.strengths) && ind.preComment) issues.push("good-template");
+            if (ind.ocrPendingReview || ind.aiPendingReview) issues.push("pending-review");
+            if (!ind.good && !ind.growth) issues.push("unchecked");
+
+            const hasInk = ind.strokes?.some(s => s.points.length > 0);
+            if (hasInk && !ind.ocrUsed) issues.push("ink-ignored");
+
+            if (issues.length > 0) acc[ind.number] = issues;
+            return acc;
+        }, {});
+
+        // 2. SCROLL / JUMP HELPERS
+        const handleScrollToRow = (num: string) => {
+            const el = document.getElementById(`preview-row-${num}`);
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+        };
+
+        const renderScrollLinks = (filterFn: (issues: string[]) => boolean) => {
+            const nums = Object.keys(warningMap).filter(num => filterFn(warningMap[num]));
+            if (nums.length === 0) return null;
+            return nums.map((num, i) => (
+                <button
+                    key={num}
+                    type="button"
+                    className="preview-indicator-link"
+                    style={{ background: 'none', border: 'none', padding: 0, textDecoration: 'underline', cursor: 'pointer', color: 'inherit', fontWeight: 'bold', fontSize: 'inherit' }}
+                    onClick={() => handleScrollToRow(num)}
+                >
+                    {num}{i < nums.length - 1 ? ", " : ""}
+                </button>
+            ));
+        };
+
+        // 3. ACTIONS
+        const handleApproveAll = () => {
+             if (!window.confirm("Mark ALL visible text as reviewed?")) return;
+             setIndicators(prev => prev.map(ind => ({
+                 ...ind,
+                 ocrPendingReview: false,
+                 aiPendingReview: false
+             })));
+        };
+
+        const handleJumpToIndicator = (index: number) => {
+            handleSavePreview(index); 
+        };
+
+        const hasPending = Object.values(warningMap).some((list: string[]) => list.includes("pending-review"));
+        const hasEmptyGrowth = Object.values(warningMap).some((list: string[]) => list.includes("growth-empty"));
+        const hasTemplate = Object.values(warningMap).some((list: string[]) => list.includes("good-template"));
+
+        // 4. INTERNAL BANNER COMPONENT
+        const Banner = ({ color, bg, icon, label, filter, action }: any) => (
+            <div style={{ 
+                display: 'flex', 
+                alignItems: "center", 
+                justifyContent: "space-between",
+                border: `1px solid ${color}`, 
+                color: color, 
+                background: bg, 
+                padding: "8px 12px", 
+                borderRadius: "10px",
+                fontSize: "13px",
+                fontWeight: 500
+            }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: "center" }}>
+                    <span>{icon} {label}</span>
+                    {renderScrollLinks(filter)}
+                </div>
+                {action && <div>{action}</div>}
+            </div>
+        );
 
         return (
           <div className="export-preview-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
             
-            {/* --- BANNERS SECTION --- */}
-            <div style={{ flexShrink: 0, padding: "16px 16px 0 16px" }}>
-                {hasUnreviewedOcr && (
-                <div className="export-ocr-banner">
-                  ⚠ This preview includes OCR text that hasn&apos;t been marked as reviewed yet in:{" "}
-                  {renderIndicatorLinks(unreviewedOcrIndicators.map((ind) => ind.number))}
-                  . Please double-check those comments.
-                </div>
-                )}
+            {/* --- TOP BANNERS --- */}
+            <div style={{ flexShrink: 0, padding: "16px 16px 0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
                 
-                {hasUnreviewedAi && (
-                <div className="export-ocr-banner" style={{ backgroundColor: "rgba(147, 51, 234, 0.2)", border: "1px solid rgba(147, 51, 234, 0.5)", color: "#e9d5ff" }}>
-                  ✨ This preview includes AI-polished text that hasn&apos;t been marked as accepted yet in:{" "}
-                  {renderIndicatorLinks(unreviewedAiIndicators.map((ind) => ind.number))}
-                  . Please review them.
-                </div>
+                {hasPending && (
+                    <Banner 
+                        color="#ca8a04" 
+                        bg="rgba(202, 138, 4, 0.1)" 
+                        icon="⚠" 
+                        label="Unreviewed Text in:" 
+                        filter={(issues: string[]) => issues.includes("pending-review")}
+                        action={
+                            <button type="button" onClick={handleApproveAll} style={{ fontSize: 11, background: "#fff", border: "1px solid #ca8a04", color: "#ca8a04", borderRadius: 4, cursor: "pointer", padding: "2px 8px", fontWeight: "bold" }}>
+                                ✓ Approve All
+                            </button>
+                        }
+                    />
                 )}
 
-                {anyWarnings && (
-                  <div className="export-warning-banner">
-                    {growthWithoutComment.length > 0 && (
-                      <div className="export-warning-line">
-                        ⚠ Growth marked but no written comment: {renderIndicatorLinks(growthWithoutComment.map((ind) => ind.number))}
-                      </div>
-                    )}
-                    {goodTemplateOnly.length > 0 && (
-                      <div className="export-warning-line">
-                        ℹ Good points using template only: <strong>{renderClickableList(goodTemplateOnly)}</strong>
-                        <button type="button" className="btn" style={{ marginLeft: 8, padding: "2px 6px", fontSize: 11 }} onClick={insertDefaultCommentsForGood}>
-                          Insert default comments
-                        </button>
-                      </div>
-                    )}
-                    {uncheckedIndicators.length > 0 && (
-                      <div className="export-warning-line">
-                        ⚠ Indicators not marked Good or Growth: {renderIndicatorLinks(uncheckedIndicators.map((ind) => ind.number))}
-                      </div>
-                    )}
-                  </div>
+                {hasEmptyGrowth && (
+                    <Banner 
+                        color="#ef4444" 
+                        bg="rgba(239, 68, 68, 0.1)"
+                        icon="⚠" 
+                        label="Empty Growth Areas in:" 
+                        filter={(issues: string[]) => issues.includes("growth-empty")}
+                    />
+                )}
+
+                {hasTemplate && (
+                    <Banner 
+                        color="#3b82f6" 
+                        bg="rgba(59, 130, 246, 0.1)"
+                        icon="ℹ" 
+                        label="Use 'Insert Default' for:" 
+                        filter={(issues: string[]) => issues.includes("good-template")}
+                    />
                 )}
             </div>
 
-            {/* --- HEADER --- */}
+            {/* --- HEADER (Uniform Buttons) --- */}
             <div className="export-preview-header" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px" }}>
               <div>
                 <div className="export-preview-title">Teacher export preview</div>
                 <div className="export-preview-sub">{exportPreview.teacherName} • {exportPreview.schoolName}</div>
               </div>
 
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button type="button" className="btn" style={{ border: "1px solid #475569", background: "transparent", color: "#cbd5e1", fontSize: 12 }} onClick={handleMarkAllReviewed}>
-                      ✓ Mark Reviewed
-                  </button>
-                  
-                  <button type="button" className="btn" style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)", border: "none", color: "white", fontSize: 12 }} onClick={handlePreviewPolishAll} disabled={isAiPolishing}>
-                      {isAiPolishing ? "✨ Polishing..." : "✨ AI Polish"}
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  {/* AI Polish */}
+                  <button type="button" className="btn" 
+                      style={{ 
+                          height: 40, minWidth: 140, borderRadius: 20, fontSize: 13, fontWeight: 600, border: "none", color: "white", 
+                          background: "linear-gradient(135deg, #6366f1, #8b5cf6)", 
+                          display: "flex", alignItems: "center", justifyContent: "center", cursor: isAiPolishing ? "not-allowed" : "pointer", opacity: isAiPolishing ? 0.7 : 1
+                      }} 
+                      onClick={handlePreviewPolishAll} disabled={isAiPolishing}
+                  >
+                      {isAiPolishing ? "✨ Polishing..." : "✨ AI Polish All"}
                   </button>
 
-                  <button type="button" className="btn btn-primary" style={{ backgroundColor: "#10b981", color: "white", border: "none", fontWeight: 600, padding: "6px 16px" }} onClick={handleSavePreview}>
+                  {/* Save & Update */}
+                  <button type="button" className="btn" 
+                      style={{ 
+                          height: 40, minWidth: 140, borderRadius: 20, fontSize: 13, fontWeight: 600, border: "none", color: "white", 
+                          backgroundColor: "#06b6d4", // Teal/Cyan
+                          display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer"
+                      }} 
+                      onClick={() => handleSavePreview()}
+                  >
                       Save & Update
                   </button>
 
-                  <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={() => setShowExportPreview(false)}>
-                    Close
+                  {/* Close */}
+                  <button type="button" className="btn" 
+                      style={{ 
+                          height: 40, minWidth: 140, borderRadius: 20, fontSize: 13, fontWeight: 600, 
+                          border: "1px solid #334155", color: "#94a3b8", background: "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer"
+                      }} 
+                      onClick={() => setShowExportPreview(false)}
+                  >
+                      Close
                   </button>
               </div>
             </div>
@@ -2591,59 +2648,157 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   </thead>
                   <tbody>
                       {exportPreview.rows.map((row) => {
-                        // 1. Robust Find Logic
-                        const ind = indicators.find(i => 
+                        const indIndex = indicators.findIndex(i => 
                             i.number === row.matchKey || 
                             i.number.replace(/[^\d]/g, '') === row.indicatorLabel.substring(0, 15).replace(/[^\d]/g, '')
                         );
+                        if (indIndex === -1) return null;
+                        const ind = indicators[indIndex];
 
-                        if (!ind) return null;
-                        
-                        // Default edit object for display (if missing)
                         const edit = previewEdits[ind.id] || { strengths: "", growths: "" };
                         
+                        const issues = warningMap[ind.number] || [];
+                        const isPending = issues.includes("pending-review");
+                        const isEmptyGrowth = issues.includes("growth-empty");
+                        const isTemplateOnly = issues.includes("good-template");
+                        const isInkIgnored = issues.includes("ink-ignored");
+
                         return (
-                            <tr key={ind.id} style={{ borderBottom: "1px solid #334155" }}>
+                            <tr id={`preview-row-${ind.number}`} key={ind.id} style={{ borderBottom: "1px solid #334155" }}>
+                              
+                              {/* COL 1: INFO & BADGES */}
                               <td style={{ padding: 16, verticalAlign: "top", color: "#e2e8f0", background: "#0f172a" }}>
                                   <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                                     <strong style={{ fontSize: 14, color: "#fff" }}>{ind.number}</strong>
                                     <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{ind.title}</span>
                                   </div>
                                   <div style={{ fontSize: 11, marginTop: 6, color: "#94a3b8", lineHeight: 1.4 }}>{ind.description}</div>
+                                  
+                                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                      {isInkIgnored && (
+                                          <button 
+                                            type="button"
+                                            onClick={() => handleJumpToIndicator(indIndex)}
+                                            style={{ fontSize: 10, background: "#64748b", color: "white", padding: "2px 6px", borderRadius: 4, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}
+                                          >
+                                            ✎ Ink Ignored (Save & Jump) ➜
+                                          </button>
+                                      )}
+                                      {isPending && (
+                                          <span style={{ fontSize: 10, background: "#ca8a04", color: "white", padding: "2px 6px", borderRadius: 4 }}>⚠ Review Needed</span>
+                                      )}
+                                      {isEmptyGrowth && (
+                                          <span style={{ fontSize: 10, background: "#ef4444", color: "white", padding: "2px 6px", borderRadius: 4 }}>⚠ Empty Growth</span>
+                                      )}
+                                  </div>
                               </td>
                               
-                              {/* Good Points Input */}
-                              <td style={{ padding: 12, verticalAlign: "top", background: "#0f172a" }}>
-                                <textarea 
-                                    className="input"
-                                    placeholder={ind.good ? "Add strengths..." : "Add text here (Will check 'Good')"}
-                                    style={{ width: "100%", minHeight: 90, fontSize: 13, background: "#1e293b", border: "1px solid #334155", color: "#e2e8f0", lineHeight: 1.5, padding: "10px", borderRadius: "8px", resize: "vertical" }}
-                                    value={edit.strengths}
-                                    onChange={(e) => setPreviewEdits(prev => ({ 
-                                        ...prev, 
-                                        [ind.id]: { 
-                                            ...(prev[ind.id] || { strengths: "", growths: "" }), // 🟢 FIX: Fallback ensures complete object
-                                            strengths: e.target.value 
-                                        } 
-                                    }))}
-                                />
+                              {/* COL 2: GOOD POINTS */}
+                              <td style={{ padding: 12, verticalAlign: "top", background: "#0f172a", position: 'relative' }}>
+                                <div style={{ marginBottom: 4, fontSize: 11, fontWeight: 'bold', color: ind.good ? '#4ade80' : '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    {ind.good ? (<span>✅ Checked Good</span>) : (<span>⬜ Not Checked</span>)}
+                                </div>
+
+                                <div style={{ position: 'relative' }}>
+                                    <textarea 
+                                        className="input"
+                                        placeholder={ind.good ? "Add strengths..." : "Add text here (Will check 'Good')"}
+                                        style={{ 
+                                            width: "100%", 
+                                            // 🟢 CHANGED: Increased minHeight to 120px for better iPad touch area
+                                            minHeight: 120, 
+                                            fontSize: 13, 
+                                            background: "#1e293b", border: "1px solid #334155", 
+                                            color: "#e2e8f0", lineHeight: 1.5, padding: "10px", 
+                                            borderRadius: "8px", 
+                                            // 🟢 CRITICAL: Enables dragging to resize vertically
+                                            resize: "vertical" 
+                                        }}
+                                        value={edit.strengths}
+                                        onChange={(e) => setPreviewEdits(prev => {
+                                            const current = prev[ind.id] || { strengths: "", growths: "" };
+                                            return { ...prev, [ind.id]: { ...current, strengths: e.target.value } };
+                                        })}
+                                    />
+                                    {isTemplateOnly && (
+                                        <button 
+                                            type="button"
+                                            className="btn"
+                                            style={{ 
+                                                position: 'absolute', bottom: 8, right: 8, 
+                                                fontSize: 10, padding: "2px 8px", 
+                                                background: "rgba(59, 130, 246, 0.2)", color: "#60a5fa", border: "1px solid #60a5fa"
+                                            }}
+                                            onClick={() => setPreviewEdits(prev => {
+                                                const current = prev[ind.id] || { strengths: "", growths: "" };
+                                                return { ...prev, [ind.id]: { ...current, strengths: ind.preComment || "" } };
+                                            })}
+                                        >
+                                            📋 Insert Default
+                                        </button>
+                                    )}
+                                    {isPending && !isEmpty(edit.strengths) && (
+                                        <button 
+                                            type="button"
+                                            title="Mark Reviewed"
+                                            style={{ 
+                                                position: 'absolute', top: 8, right: 8, 
+                                                background: "#10b981", color: "white", border: "none",
+                                                borderRadius: "50%", width: 20, height: 20, cursor: "pointer",
+                                                display: "flex", alignItems: "center", justifyContent: "center"
+                                            }}
+                                            onClick={() => setIndicators(prev => prev.map(x => x.id === ind.id ? { ...x, ocrPendingReview: false, aiPendingReview: false } : x))}
+                                        >
+                                            ✓
+                                        </button>
+                                    )}
+                                </div>
                               </td>
 
-                              {/* Growth Areas Input */}
+                              {/* COL 3: GROWTH AREAS */}
                               <td style={{ padding: 12, verticalAlign: "top", background: "#0f172a" }}>
-                                <textarea 
-                                    className="input"
-                                    placeholder={ind.growth ? "Add growth areas..." : "Add text here (Will check 'Growth')"}
-                                    style={{ width: "100%", minHeight: 90, fontSize: 13, background: "#1e293b", border: "1px solid #334155", color: "#e2e8f0", lineHeight: 1.5, padding: "10px", borderRadius: "8px", resize: "vertical" }}
-                                    value={edit.growths}
-                                    onChange={(e) => setPreviewEdits(prev => ({ 
-                                        ...prev, 
-                                        [ind.id]: { 
-                                            ...(prev[ind.id] || { strengths: "", growths: "" }), // 🟢 FIX: Fallback ensures complete object
-                                            growths: e.target.value 
-                                        } 
-                                    }))}
-                                />
+                                <div style={{ marginBottom: 4, fontSize: 11, fontWeight: 'bold', color: ind.growth ? '#f87171' : '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    {ind.growth ? (<span>✅ Checked Growth</span>) : (<span>⬜ Not Checked</span>)}
+                                </div>
+
+                                <div style={{ position: 'relative' }}>
+                                    <textarea 
+                                        className="input"
+                                        placeholder={ind.growth ? "Add growth areas..." : "Add text here (Will check 'Growth')"}
+                                        style={{ 
+                                            width: "100%", 
+                                            // 🟢 CHANGED: Increased minHeight to 120px
+                                            minHeight: 120, 
+                                            fontSize: 13, 
+                                            background: "#1e293b", 
+                                            border: isEmptyGrowth ? "1px solid #ef4444" : "1px solid #334155", 
+                                            color: "#e2e8f0", lineHeight: 1.5, padding: "10px", 
+                                            borderRadius: "8px", 
+                                            // 🟢 CRITICAL: Enables dragging to resize vertically
+                                            resize: "vertical" 
+                                        }}
+                                        value={edit.growths}
+                                        onChange={(e) => setPreviewEdits(prev => {
+                                            const current = prev[ind.id] || { strengths: "", growths: "" };
+                                            return { ...prev, [ind.id]: { ...current, growths: e.target.value } };
+                                        })}
+                                    />
+                                    {isPending && !isEmpty(edit.growths) && (
+                                        <button 
+                                            type="button"
+                                            title="Mark Reviewed"
+                                            style={{ 
+                                                position: 'absolute', top: 8, right: 8, 
+                                                background: "#10b981", color: "white", border: "none",
+                                                borderRadius: "50%", width: 20, height: 20, cursor: "pointer",
+                                                display: "flex", alignItems: "center", justifyContent: "center"
+                                            }}
+                                            onClick={() => setIndicators(prev => prev.map(x => x.id === ind.id ? { ...x, ocrPendingReview: false, aiPendingReview: false } : x))}
+                                        >
+                                            ✓
+                                        </button>
+                                    )}
+                                </div>
                               </td>
                             </tr>
                         );
@@ -2657,7 +2812,6 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
     </div>
   </div>
 )}
-
             {showAdminPreview && adminPreview && (
               <div className="export-preview-panel admin-preview">
                 <div className="export-preview-header">
