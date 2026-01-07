@@ -141,6 +141,141 @@ export const TEACHER_ROW_MAP: Record<string, TeacherRowConfig> = {
 // 5. Main Export Function (Revised for Keyword Anchors)
 // -----------------------------------------------------------------
 
+// export function buildTeacherExportModel(
+//   meta: ObservationMetaForExport,
+//   indicators: IndicatorStateForExport[]
+// ): TeacherExportModel {
+//   const byNumber = new Map(indicators.map((i) => [i.number, i]));
+//   const TRAINER_NAME = "Brian"; 
+//   const displayDate = meta.date ?? "(not set in app yet)";
+
+//   const rows: TeacherExportRow[] = TEACHER_LAYOUT.map((layout) => {
+//     const src = byNumber.get(layout.indicatorNumber);
+
+//     const good = src?.good ?? false;
+//     const growth = src?.growth ?? false;
+//     let comment = src?.commentText ?? "";
+
+//     // ---------------------------------------------------------
+//     // 🟢 SANITIZER (Fixed to preserve newlines)
+//     // ---------------------------------------------------------
+//     // Remove [OCR], [AD], [Hints], or any content in square brackets.
+//     comment = comment.replace(/\[.*?\]/g, "").trim();
+    
+//     // ⚠️ CRITICAL FIX: Only replace spaces/tabs, NOT newlines. 
+//     // Old code (/\s\s+/g) was deleting line breaks.
+//     comment = comment.replace(/[ \t]+/g, " "); 
+//     // ---------------------------------------------------------
+
+//     // 🟢 DEDUPLICATION
+//     const strengthSet = new Set<string>();
+//     const growthSet = new Set<string>();
+
+//     // Split by newlines (now preserved correctly)
+//     const lines = comment.split("\n").map(l => l.trim()).filter(Boolean);
+
+//     lines.forEach(line => {
+//       // 🟢 HYBRID LOGIC
+
+//       // Rule A: Check for (GA) - Priority 1 (ANYWHERE in the line)
+//       // Matches "Some text (GA)" or "(GA) Some text"
+//       const gaRegex = /\(\s*GA\s*\)/i;
+      
+//       if (gaRegex.test(line)) {
+//         // Found (GA) -> It is definitely GROWTH
+//         // Remove the (GA) marker, trim whitespace/hyphens, and save
+//         const content = line.replace(gaRegex, "").replace(/^[\s\-\•]+/, "").trim();
+//         if (content) growthSet.add(content);
+//         return; // Line handled
+//       } 
+
+//       // Rule B: Check for Hyphen or Bullet - Priority 2
+//       // Must be at the very start of the line
+//       if (line.startsWith("-") || line.startsWith("•")) {
+//         // Found Hyphen -> It is definitely STRENGTH
+//         const content = line.replace(/^[\s\-\•]+/, "").trim();
+//         if (content) strengthSet.add(content);
+//         return; // Line handled
+//       }
+
+//       // Rule C: No Markers? Fallback to Checkboxes
+//       if (!good && growth) {
+//         // Only "Growth" is checked -> Unlabeled text goes to GROWTH
+//         growthSet.add(line);
+//       } else {
+//         // "Good" is checked OR "Both" checked OR "Neither" -> Unlabeled text goes to STRENGTH
+//         strengthSet.add(line);
+//       }
+//     });
+
+//     const strengthItems = Array.from(strengthSet);
+//     const growthItems = Array.from(growthSet);
+
+//     // 🟢 FORMATTING: Join with Hyphens
+//     let strengths = strengthItems.map(s => `- ${s}`).join("\n");
+//     let growths = growthItems.map(g => `- ${g}`).join("\n");
+
+//     if (!strengthItems.length && !growthItems.length) {
+//         strengths = "";
+//         growths = "";
+//     }
+
+//     // Dropdown Logic (Column D)
+//     let checklist: string;
+//     if (!good && !growth) {
+//       checklist = "Not applicable";
+//     } else if (good) {
+//       checklist = "Good";
+//     } else {
+//       checklist = "Need some work";
+//     }
+
+//     const status: "" | "Done" | "Pending" =
+//       !good && !growth
+//         ? ""
+//         : good && !growth
+//         ? "Done"
+//         : !good && growth
+//         ? "Pending"
+//         : "Done";
+
+//     return {
+//       rowIndex: layout.rowIndex,
+//       area: layout.area,
+//       indicatorLabel: layout.indicatorLabel,
+//       description: layout.excelDescription,
+//       checklist,
+//       status,
+//       strengths, 
+//       growths,   
+//       goodFlag: good,
+//       growthFlag: growth,
+//     };
+//   });
+
+//   const sheetName = buildMonthYearSheetName(meta.date);
+//   const fileDate = buildFileDateLabel(meta.date);
+
+//   const headerBlock = [
+//     `GrapeSEED Trainer: ${TRAINER_NAME}`,
+//     `School: ${meta.schoolName} – ${meta.campus}`,
+//     `Support type: ${meta.supportType}`,
+//     `Unit ${meta.unit} – Lesson ${meta.lesson}`,
+//     `Teacher: ${meta.teacherName}`,
+//     `Date: ${displayDate}`,
+//   ].join("\n");
+
+//   return {
+//     sheetName,
+//     headerBlock,
+//     rows,
+//     teacherName: meta.teacherName,
+//     schoolName: meta.schoolName,
+//     fileDate,
+//   };
+// }
+
+
 export function buildTeacherExportModel(
   meta: ObservationMetaForExport,
   indicators: IndicatorStateForExport[]
@@ -157,68 +292,49 @@ export function buildTeacherExportModel(
     let comment = src?.commentText ?? "";
 
     // ---------------------------------------------------------
-    // 🟢 SANITIZER (Fixed to preserve newlines)
+    // 1. SANITIZER: Remove [OCR], [Hints], [Admin Cues]
     // ---------------------------------------------------------
-    // Remove [OCR], [AD], [Hints], or any content in square brackets.
     comment = comment.replace(/\[.*?\]/g, "").trim();
-    
-    // ⚠️ CRITICAL FIX: Only replace spaces/tabs, NOT newlines. 
-    // Old code (/\s\s+/g) was deleting line breaks.
-    comment = comment.replace(/[ \t]+/g, " "); 
-    // ---------------------------------------------------------
+    comment = comment.replace(/[ \t]+/g, " ");
 
-    // 🟢 DEDUPLICATION
+    // ---------------------------------------------------------
+    // 2. PARSER: Strict Start-of-Line Logic
+    // ---------------------------------------------------------
     const strengthSet = new Set<string>();
     const growthSet = new Set<string>();
 
-    // Split by newlines (now preserved correctly)
     const lines = comment.split("\n").map(l => l.trim()).filter(Boolean);
 
     lines.forEach(line => {
-      // 🟢 HYBRID LOGIC
-
-      // Rule A: Check for (GA) - Priority 1 (ANYWHERE in the line)
-      // Matches "Some text (GA)" or "(GA) Some text"
-      const gaRegex = /\(\s*GA\s*\)/i;
+      const gaRegex = /^\(\s*GA\s*\)/i; 
       
       if (gaRegex.test(line)) {
-        // Found (GA) -> It is definitely GROWTH
-        // Remove the (GA) marker, trim whitespace/hyphens, and save
-        const content = line.replace(gaRegex, "").replace(/^[\s\-\•]+/, "").trim();
-        if (content) growthSet.add(content);
-        return; // Line handled
-      } 
-
-      // Rule B: Check for Hyphen or Bullet - Priority 2
-      // Must be at the very start of the line
-      if (line.startsWith("-") || line.startsWith("•")) {
-        // Found Hyphen -> It is definitely STRENGTH
-        const content = line.replace(/^[\s\-\•]+/, "").trim();
-        if (content) strengthSet.add(content);
-        return; // Line handled
-      }
-
-      // Rule C: No Markers? Fallback to Checkboxes
-      if (!good && growth) {
-        // Only "Growth" is checked -> Unlabeled text goes to GROWTH
-        growthSet.add(line);
+        // GROWTH: Remove marker and any leading formatting
+        const cleanText = line
+            .replace(gaRegex, "") 
+            .replace(/^[\s\-\•]+/, "") 
+            .trim();
+        if (cleanText) growthSet.add(cleanText);
       } else {
-        // "Good" is checked OR "Both" checked OR "Neither" -> Unlabeled text goes to STRENGTH
-        strengthSet.add(line);
+        // STRENGTH: Remove leading formatting
+        const cleanText = line
+            .replace(/^[\s\-\•]+/, "") 
+            .trim();
+        if (cleanText) strengthSet.add(cleanText);
       }
     });
 
     const strengthItems = Array.from(strengthSet);
     const growthItems = Array.from(growthSet);
 
-    // 🟢 FORMATTING: Join with Hyphens
-    let strengths = strengthItems.map(s => `- ${s}`).join("\n");
-    let growths = growthItems.map(g => `- ${g}`).join("\n");
-
-    if (!strengthItems.length && !growthItems.length) {
-        strengths = "";
-        growths = "";
-    }
+    // ---------------------------------------------------------
+    // 🟢 3. FORMATTING: Bare Paragraphs + Double Spacing
+    // ---------------------------------------------------------
+    // CHANGED: Removed the hyphen prefix logic.
+    // We join with "\n\n" to create the empty line between paragraphs.
+    
+    let strengths = strengthItems.join("\n\n");
+    let growths = growthItems.join("\n\n");
 
     // Dropdown Logic (Column D)
     let checklist: string;
