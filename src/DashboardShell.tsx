@@ -534,6 +534,29 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const [searchText, setSearchText] = useState("");
   const [recentMergePanel, setRecentMergePanel] =
    useState<RecentMergePanel>(null);
+  // 🟢 INSERT THIS BLOCK START 🟢
+  // State to hold the settings fetched from DB
+  const [trainerSettings, setTrainerSettings] = useState<{
+    booking_url?: string;
+    phone_number?: string;
+  } | null>(null);
+
+  // Fetch settings when user logs in
+  React.useEffect(() => {
+    if (!user) return;
+    const fetchSettings = async () => {
+      const { data } = await supabase
+        .from("trainer_settings")
+        .select("booking_url, phone_number")
+        .eq("trainer_id", user.id)
+        .single();
+      if (data) setTrainerSettings(data);
+    };
+    fetchSettings();
+  }, [user]);
+  // 🟢 INSERT THIS BLOCK END 🟢
+
+
 // NEW: State for tracking Merge process status (Add these two lines)
 const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
 const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
@@ -1355,7 +1378,7 @@ const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: 
       "If you have any questions or would like to discuss specific next steps, please let me know.",
       "",
       "Best regards,",
-      "Brian",
+     trainerName,
     ];
 
     return [...headerLines, ...rowLines, ...footerLines].join("\n");
@@ -1407,6 +1430,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       schoolName: obs.schoolName,
       campus: obs.campus,
       trainerName: trainerName, // 🟢 UPDATED: Uses real name
+      bookingUrl: trainerSettings?.booking_url,
       teacherWorkbookUrl: obs.teacherWorkbookUrl,
     });
 
@@ -1495,6 +1519,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
         trainerName: trainerName, // 🟢 UPDATED
         teacherName: obs.teacherName,
         adminWorkbookUrl: obs.adminWorkbookUrl,
+        phoneNumber: trainerSettings?.phone_number,
         viewOnlyUrl: obs.adminViewOnlyUrl
       });
     }
@@ -1537,7 +1562,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       // 3. Prepare Data
       const exportMeta = toMetaForExport(full, obs);
       const exportIndicators = toIndicatorsForExport(full);
-      const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators);
+      const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators, trainerName);
 
       // 🚀 4. RUN CLIENT MERGE (No Server!)
       const result = await clientMergeTeacherSheet({
@@ -1608,7 +1633,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       // Prepare Data
       const exportMeta = toMetaForExport(full, obs);
       const exportIndicators = toIndicatorsForExport(full);
-      const adminModel = buildAdminExportModel(exportMeta, exportIndicators);
+      const adminModel = buildAdminExportModel(exportMeta, exportIndicators, trainerName);
 
       // 👇👇 CRITICAL UPDATE: Clean the text before adding to model 👇👇
       if (obs.admin_summary_vn) {

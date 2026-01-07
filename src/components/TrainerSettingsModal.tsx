@@ -25,6 +25,8 @@ interface SettingsState {
   school_folder_name?: string;
   school_folder_drive_id?: string;
   school_folder_item_id?: string;
+  booking_url?: string;
+  phone_number?: string;
 }
 
 export const TrainerSettingsModal: React.FC<{ open: boolean; onClose: () => void }> = ({
@@ -102,6 +104,10 @@ export const TrainerSettingsModal: React.FC<{ open: boolean; onClose: () => void
         school_folder_drive_id: settings.school_folder_drive_id,
         school_folder_item_id: settings.school_folder_item_id,
         
+        // 🟢 NEW: Add these lines
+        booking_url: settings.booking_url,
+        phone_number: settings.phone_number,
+
         updated_at: new Date().toISOString(),
     };
 
@@ -229,6 +235,37 @@ export const TrainerSettingsModal: React.FC<{ open: boolean; onClose: () => void
                          {renderStatus("school_folder")}
                          <button className="btn btn-sm" onClick={() => openPicker("folder", "school_folder")}>Select Folder</button>
                     </div>
+                  </div>
+                </div>
+
+                {/* 🟢 3. NEW: CONTACT INFO SECTION */}
+                <div className="settings-section">
+                   <h4 style={{ marginBottom: "12px", borderBottom: "1px solid #eee", paddingBottom: "6px" }}>📞 Contact Info</h4>
+                   
+                   {/* Booking URL */}
+                   <div className="form-row" style={{ marginBottom: "12px" }}>
+                    <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: 500 }}>Booking Page URL</label>
+                    <input 
+                      className="input" 
+                      type="text" 
+                      placeholder="https://outlook.office.com/bookwithme/..."
+                      style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #d1d5db" }}
+                      value={settings.booking_url || ""}
+                      onChange={(e) => setSettings(prev => ({ ...prev, booking_url: e.target.value }))}
+                    />
+                  </div>
+
+                  {/* Phone Number */}
+                  <div className="form-row">
+                    <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: 500 }}>Phone Number (for Email Signature)</label>
+                    <input 
+                      className="input" 
+                      type="text" 
+                      placeholder="e.g. 0912 345 678"
+                      style={{ width: "100%", padding: "8px", borderRadius: "6px", border: "1px solid #d1d5db" }}
+                      value={settings.phone_number || ""}
+                      onChange={(e) => setSettings(prev => ({ ...prev, phone_number: e.target.value }))}
+                    />
                   </div>
                 </div>
 

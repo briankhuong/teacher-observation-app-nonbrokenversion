@@ -3,7 +3,7 @@ export interface TeacherPreCallTemplateParams {
   schoolName?: string | null;
   campus?: string | null;
   trainerName: string;
-  bookingUrl?: string;
+  bookingUrl?: string; // 🟢 Optional
   teacherWorkbookUrl?: string | null;
 }
 
@@ -12,7 +12,7 @@ export function buildTeacherPreCallHtml({
   schoolName,
   campus,
   trainerName,
-  bookingUrl = "https://outlook.office.com/bookwithme/user/4934be01038a468f96e53d4680caf11d%40grapeseed.com/meetingtype/4J1MzTPOM0m5OcQ16Uo7aQ2?anonymous&ismsaljsauthenabled",
+  bookingUrl,
   teacherWorkbookUrl,
 }: TeacherPreCallTemplateParams): string {
   
@@ -20,10 +20,21 @@ export function buildTeacherPreCallHtml({
 
   // Shared Styles
   const container = "max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', Helvetica, Arial, sans-serif;";
-  const header = "background-color: #1e3a8a; padding: 20px; text-align: center;"; // GrapeSEED Blue-ish
+  const header = "background-color: #1e3a8a; padding: 20px; text-align: center;";
   const body = "padding: 30px 25px; color: #374151; line-height: 1.6;";
   const button = "display: inline-block; background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;";
   const footer = "background-color: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #6b7280;";
+
+  // 🟢 LOGIC: Only show the button if bookingUrl exists.
+  // Otherwise, just show the polite intro text.
+  const bookingSection = bookingUrl
+    ? `
+      <p style="margin-top: 0;">I’m looking forward to our upcoming GrapeSEED support call. To ensure we find a time that fits your schedule perfectly, please use the button below to book your slot.</p>
+      <div style="text-align: center; margin: 25px 0;">
+        <a href="${bookingUrl}" style="${button}">📅 Schedule Support Call</a>
+      </div>
+      `
+    : `<p style="margin-top: 0;">I’m looking forward to our upcoming GrapeSEED support call.</p>`;
 
   return `
 <!DOCTYPE html>
@@ -39,11 +50,7 @@ export function buildTeacherPreCallHtml({
     <div style="${body}">
       <p style="margin-top: 0;">Dear <strong>${teacherName}</strong>,</p>
       
-      <p>I’m looking forward to our upcoming GrapeSEED support call. To ensure we find a time that fits your schedule perfectly, please use the button below to book your slot.</p>
-
-      <div style="text-align: center; margin: 25px 0;">
-        <a href="${bookingUrl}" style="${button}">📅 Schedule Support Call</a>
-      </div>
+      ${bookingSection}
 
       ${teacherWorkbookUrl ? `
       <div style="background: #eff6ff; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #2563eb;">
@@ -63,6 +70,4 @@ export function buildTeacherPreCallHtml({
 </body>
 </html>
 `;
-
 }
-
