@@ -112,6 +112,7 @@ function cleanTextForPreview(text: string): string {
 
 const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE; 
 
+
 import {
   loadObservationFromDb,
   saveObservationToDb,
@@ -128,6 +129,7 @@ import { buildTeacherExportModel } from "./exportTeacherModel";
 import { buildAdminExportModel } from "./exportAdminModel";
 import type { AdminExportModel } from "./exportAdminModel";
 import { polishTextWithGroq, polishBatchWithGroq } from "./utils/gemini";
+import { useAuth } from "./auth/AuthContext";
 
 interface ObservationWorkspaceProps {
   observationMeta: {
@@ -581,9 +583,14 @@ function hasUserProgress(indicators: IndicatorState[]): boolean {
 export const ObservationWorkspaceShell: React.FC<
   ObservationWorkspaceProps
 > = ({ observationMeta, onBack, isOnline, isSyncing, setIsSyncing }) => {
-  const { teacherName, schoolName, campus, unit, lesson, supportType, date } =
+  const { user } = useAuth();
+  const trainerName = 
+    user?.user_metadata?.full_name || 
+    user?.user_metadata?.name || 
+    user?.user_metadata?.display_name || 
+    (user?.email ? user.email.split('@')[0] : "GrapeSEED Trainer");
+ const { teacherName, schoolName, campus, unit, lesson, supportType, date } =
     observationMeta;
-
 const [showBatchModal, setShowBatchModal] = useState(false);
 const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
 const [isAiPolishing, setIsAiPolishing] = useState(false);
@@ -1071,7 +1078,7 @@ const handleEmailTeacher = async () => {
     includeInTrainerSummary: !!ind.includeInTrainerSummary,
   }));
 
-  const model = buildTeacherExportModel(metaForExport, exportIndicators);
+  const model = buildTeacherExportModel(metaForExport, exportIndicators, trainerName);
 
   try {
     await emailTeacherReport({
@@ -1113,7 +1120,7 @@ const handleEmailTeacher = async () => {
       commentText: ind.commentText,
     }));
 
-    const model = buildTeacherExportModel(metaForExport, exportIndicators);
+  const model = buildTeacherExportModel(metaForExport, exportIndicators, trainerName);
 
     await exportTeacherExcel(model);
   };
@@ -1145,7 +1152,7 @@ const handleExportAdmin = async () => {
     includeInTrainerSummary: ind.includeInTrainerSummary ?? false,
   }));
 
-  const baseModel = buildAdminExportModel(metaForExport, exportIndicators);
+const baseModel = buildAdminExportModel(metaForExport, exportIndicators, trainerName);
 
   const modelToExport =
     adminPreview && showAdminPreview
@@ -1177,7 +1184,7 @@ const handleExportPreview = () => {
       includeInTrainerSummary: !!ind.includeInTrainerSummary,
     }));
 
-    const model = buildTeacherExportModel(metaForExport, exportIndicators);
+  const model = buildTeacherExportModel(metaForExport, exportIndicators, trainerName);
 
     // 🟢 FIX: Explicitly type this object to satisfy TypeScript
     const newEdits: Record<string, { strengths: string; growths: string }> = {};
@@ -1373,7 +1380,7 @@ const handleMarkAllReviewed = () => {
                includeInTrainerSummary: !!ind.includeInTrainerSummary
            }));
            
-           const model = buildTeacherExportModel(metaForExport, exportInds);
+           const model = buildTeacherExportModel(metaForExport, exportInds,trainerName);
            
            const nextEdits: Record<string, { strengths: string, growths: string }> = {};
            model.rows.forEach(row => {
@@ -1433,7 +1440,7 @@ const handleAdminPreview = async () => {
       includeInTrainerSummary: !!ind.includeInTrainerSummary,
     }));
 
-    const freshModel = buildAdminExportModel(metaForExport, exportIndicators);
+    const freshModel = buildAdminExportModel(metaForExport, exportIndicators,trainerName);
 
     // 🟢 CRITICAL FIX: Explicitly load the saved 'adminSummaryVN' into the preview.
     // This ensures that when you reopen the modal, your previous text is restored.

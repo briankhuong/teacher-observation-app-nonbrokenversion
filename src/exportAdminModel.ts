@@ -200,11 +200,10 @@ const ADMIN_NOTE_TEXT = `Lưu ý:
 
 export function buildAdminExportModel(
   meta: ObservationMetaForExport,
-  indicators: IndicatorStateForExport[]
+  indicators: IndicatorStateForExport[],
+  trainerName: string
 ): AdminExportModel {
-  const TRAINER_NAME = "Brian";
 
-  // Map: indicator number -> state
   const byNumber = new Map<string, IndicatorStateForExport>(
     indicators.map((i) => [i.number, i])
   );
@@ -265,7 +264,7 @@ export function buildAdminExportModel(
   const fileDate = buildFileDateLabel(meta.date);
 
   const headerLeftLines = [
-    `GrapeSEED Trainer: ${TRAINER_NAME}`,
+    `GrapeSEED Trainer: ${trainerName}`,
     `Đơn vị trường học/ trung tâm: ${meta.schoolName}`,
     `Hình thức hỗ trợ: ${meta.supportType}`,
     meta.date ? `Thời gian: ${meta.date}` : "",
@@ -281,7 +280,7 @@ export function buildAdminExportModel(
     headerRight,
     rows,
     fileDate,
-    trainerName: TRAINER_NAME,
+    trainerName: trainerName,
     schoolName: meta.schoolName,
     supportType: meta.supportType,
     teacherName: meta.teacherName,

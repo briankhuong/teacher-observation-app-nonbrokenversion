@@ -599,14 +599,17 @@ const [conflictServerData, setConflictServerData] = React.useState<any>(null);
     return data?.[0]?.email || "";
   };
 
-  const fetchAdminEmail = async (schoolName: string, campus: string) => {
+  const fetchSchoolEmails = async (schoolName: string, campus: string) => {
     const { data } = await supabase
       .from("schools")
-      .select("admin_email")
+      .select("admin_email, am_email")
       .eq("school_name", schoolName)
       .eq("campus_name", campus)
       .limit(1);
-    return data?.[0]?.admin_email || "";
+   return { 
+    adminEmail: data?.[0]?.admin_email || "",
+    amEmail: data?.[0]?.am_email || "" 
+  };
   };
 
 
@@ -1444,7 +1447,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
 
   const handleAdminUpdateEmail = async (obs: DashboardObservationRow) => {
     // 1. Fetch Admin Email
-    const adminEmail = await fetchAdminEmail(obs.schoolName, obs.campus);
+    const { adminEmail, amEmail } = await fetchSchoolEmails(obs.schoolName, obs.campus);
 
     // 2. Identify the Target Month (YYYY-MM) from the clicked observation
     // obs.date is expected to be "YYYY-MM-DD"
@@ -1504,7 +1507,7 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       obsId: obs.id, // Primary ID
       obsIds: matches.map(m => m.id), // <--- Track ALL IDs for badging
       to: adminEmail ? [adminEmail] : [],
-      cc: [],
+      cc: amEmail ? [amEmail] : [],
       subject: isBulk 
         ? `GrapeSEED Support Update: ${obs.schoolName} (${monthLabel})`
         : `GrapeSEED Support Update: ${obs.schoolName}`,
