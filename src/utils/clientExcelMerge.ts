@@ -15,6 +15,44 @@ function cleanWorksheet(worksheet: ExcelJS.Worksheet) {
 }
 
 // =========================================================
+// 📏 HELPER: Estimate Row Height
+// =========================================================
+function calculateAutoHeight(textA: string, textB: string, minHeight = 45): number {
+  // 🟢 TUNED: "The students invited to interact with the cards" is 47 chars.
+  // We set this to 45 to be safe (so if it hits 47, it counts as 2 lines).
+  const CHARS_PER_LINE = 45; 
+  
+  // Standard Excel line height is ~15pts. We use 16 to add a tiny bit of breathing room.
+  const LINE_HEIGHT_PTS = 16; 
+  
+  // Base padding for the top/bottom of the cell
+  const PADDING_PTS = 14;
+
+  const countWrappedLines = (text: string) => {
+    if (!text) return 0;
+    const explicitLines = text.split('\n');
+    
+    return explicitLines.reduce((acc, line) => {
+      const length = line.length;
+      if (length === 0) return acc + 1; 
+      // Math.ceil ensures that 47 chars / 45 limit = 2 lines
+      return acc + Math.ceil(length / CHARS_PER_LINE);
+    }, 0);
+  };
+
+  const linesA = countWrappedLines(textA);
+  const linesB = countWrappedLines(textB);
+  
+  const maxLines = Math.max(linesA, linesB);
+
+  if (maxLines === 0) return minHeight;
+
+  const calculatedHeight = (maxLines * LINE_HEIGHT_PTS) + PADDING_PTS;
+  
+  return Math.max(calculatedHeight, minHeight);
+}
+
+// =========================================================
 // 🎨 HELPER 2: Copy Conditional Formatting
 // =========================================================
 function copyConditionalFormatting(source: ExcelJS.Worksheet, target: ExcelJS.Worksheet) {
@@ -184,12 +222,24 @@ export async function clientMergeTeacherSheet({ token, workbookUrl, sheetName, m
     model.rows.forEach((r: any) => {
       const rowIndex = Number(r.rowIndex);
       if (!rowIndex || rowIndex < 4) return;
+      
       const row = ws.getRow(rowIndex);
+      
       if (r.indicatorLabel) row.getCell("B").value = r.indicatorLabel;
       if (r.description) row.getCell("C").value = r.description;
       if (r.checklist) row.getCell("D").value = r.checklist;
       if (r.strengths) row.getCell("E").value = r.strengths;
       if (r.growths) row.getCell("F").value = r.growths;
+
+      // 🟢 NEW: Smart Height Adjustment
+      // Get the existing height from the template (or default to 60 if missing)
+      const currentHeight = row.height || 60;
+      
+      // Calculate needed height based on the text we just added
+      const neededHeight = calculateAutoHeight(r.strengths || "", r.growths || "", currentHeight);
+      
+      // Apply the larger of the two
+      row.height = neededHeight;
     });
   }
 
@@ -203,9 +253,7 @@ export async function clientMergeTeacherSheet({ token, workbookUrl, sheetName, m
   };
 }
 
-// =========================================================
-// 🚀 EXPORT 2: Admin Merge Function
-// =========================================================
+
 // =========================================================
 // 🚀 EXPORT 2: Admin Merge Function
 // =========================================================
