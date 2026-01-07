@@ -67,6 +67,7 @@ export interface TeacherExportRow {
   indicatorLabel: string;
   description: string;
   checklist: string;
+  matchKey: string;
   status: "Done" | "Pending" | "";
   strengths: string;
   growths: string;
@@ -361,6 +362,7 @@ export function buildTeacherExportModel(
       indicatorLabel: layout.indicatorLabel,
       description: layout.excelDescription,
       checklist,
+      matchKey: layout.indicatorNumber,
       status,
       strengths, 
       growths,   

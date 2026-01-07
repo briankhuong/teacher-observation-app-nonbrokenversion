@@ -1160,8 +1160,7 @@ const handleExportAdmin = async () => {
 };
 
   
-// 🟢 UPDATED: HANDLE EXPORT PREVIEW
-  const handleExportPreview = () => {
+const handleExportPreview = () => {
     // 1. Save Canvas if dirty
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -2592,8 +2591,15 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   </thead>
                   <tbody>
                       {exportPreview.rows.map((row) => {
-                        const ind = indicators.find(i => row.indicatorLabel.startsWith(i.number));
+                        // 1. Robust Find Logic
+                        const ind = indicators.find(i => 
+                            i.number === row.matchKey || 
+                            i.number.replace(/[^\d]/g, '') === row.indicatorLabel.substring(0, 15).replace(/[^\d]/g, '')
+                        );
+
                         if (!ind) return null;
+                        
+                        // Default edit object for display (if missing)
                         const edit = previewEdits[ind.id] || { strengths: "", growths: "" };
                         
                         return (
@@ -2613,7 +2619,13 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                                     placeholder={ind.good ? "Add strengths..." : "Add text here (Will check 'Good')"}
                                     style={{ width: "100%", minHeight: 90, fontSize: 13, background: "#1e293b", border: "1px solid #334155", color: "#e2e8f0", lineHeight: 1.5, padding: "10px", borderRadius: "8px", resize: "vertical" }}
                                     value={edit.strengths}
-                                    onChange={(e) => setPreviewEdits(prev => ({ ...prev, [ind.id]: { ...prev[ind.id], strengths: e.target.value } }))}
+                                    onChange={(e) => setPreviewEdits(prev => ({ 
+                                        ...prev, 
+                                        [ind.id]: { 
+                                            ...(prev[ind.id] || { strengths: "", growths: "" }), // 🟢 FIX: Fallback ensures complete object
+                                            strengths: e.target.value 
+                                        } 
+                                    }))}
                                 />
                               </td>
 
@@ -2624,7 +2636,13 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                                     placeholder={ind.growth ? "Add growth areas..." : "Add text here (Will check 'Growth')"}
                                     style={{ width: "100%", minHeight: 90, fontSize: 13, background: "#1e293b", border: "1px solid #334155", color: "#e2e8f0", lineHeight: 1.5, padding: "10px", borderRadius: "8px", resize: "vertical" }}
                                     value={edit.growths}
-                                    onChange={(e) => setPreviewEdits(prev => ({ ...prev, [ind.id]: { ...prev[ind.id], growths: e.target.value } }))}
+                                    onChange={(e) => setPreviewEdits(prev => ({ 
+                                        ...prev, 
+                                        [ind.id]: { 
+                                            ...(prev[ind.id] || { strengths: "", growths: "" }), // 🟢 FIX: Fallback ensures complete object
+                                            growths: e.target.value 
+                                        } 
+                                    }))}
                                 />
                               </td>
                             </tr>
