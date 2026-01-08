@@ -1,4 +1,4 @@
-// 🟢 PART 1: DETERMINISTIC LOGIC (Keep exactly as is)
+// 🟢 PART 1: DETERMINISTIC LOGIC
 export interface IndicatorSimple {
   number: string;
   title: string;
@@ -8,67 +8,61 @@ export interface IndicatorSimple {
   includeInTrainerSummary?: boolean;
 }
 
-const VN_PHRASE_MAP: Record<string, string> = {
-  "2.1": "biết đưa ra các mệnh lệnh ngắn gọn, dễ hiểu",
-  "3.1": "bám sát giáo án mẫu",
-  "3.4": "dạy học liệu theo đúng thiết kế chương trình", 
-  "5.1": "dạy học liệu theo đúng thiết kế chương trình",
-  "3.3": "quan sát và giúp đỡ học sinh gặp khó khăn khi trả lời câu hỏi/ phát âm từ",
-  "6.1": "quan sát và giúp đỡ học sinh gặp khó khăn khi trả lời câu hỏi/ phát âm từ",
-  "7.2": "quan sát và giúp đỡ học sinh gặp khó khăn khi trả lời câu hỏi/ phát âm từ",
-  "7.1": "hỏi câu hỏi trong giáo án mẫu",
-  "7.4": "có năng lượng tốt và biết cách tổ chức các hoạt động một cách vui nhộn, hiệu quả",
-  "8.1": "có năng lượng tốt và biết cách tổ chức các hoạt động một cách vui nhộn, hiệu quả",
-  "7.6": "tổ chức hoạt động nói để học sinh có nhiều cơ hội nói hơn"
-};
+// 🔴 CRITICAL GROUPS: Fail one, you fail the group.
+const CRITICAL_GROUPS = [
+  ["2.1"], // Instructions
+  ["3.1"], // Fidelity Base
+  ["3.4", "5.1"], // Design Fidelity
+  ["3.3", "6.1", "7.2"], // Student Support
+  ["7.1"], // Questions
+  ["7.4", "8.1"] // Energy/Flow
+];
 
-function calculateClassLevelAndSentence(indicators: IndicatorSimple[]): string {
+interface ClassAssessment {
+  levelText: string;
+  openingText: string;
+  sentiment: "positive" | "neutral" | "negative";
+}
+
+function assessClassPerformance(indicators: IndicatorSimple[]): ClassAssessment {
   const goodCount = indicators.filter(i => i.good).length;
   const growthCount = indicators.filter(i => i.growth).length;
-  const isKeyFailure = (numFragment: string) => indicators.some(i => i.number.includes(numFragment) && i.growth);
+  const totalChecked = goodCount + growthCount;
 
-  let keyFailures = 0;
-  if (isKeyFailure("2.1")) keyFailures++; 
-  if (isKeyFailure("3.1")) keyFailures++; 
-  if (isKeyFailure("3.4") || isKeyFailure("5.1")) keyFailures++; 
-  if (isKeyFailure("3.3") || isKeyFailure("6.1") || isKeyFailure("7.2")) keyFailures++; 
-  if (isKeyFailure("7.1")) keyFailures++; 
-  if (isKeyFailure("7.4") || isKeyFailure("8.1")) keyFailures++; 
+  // 1. Calculate Critical Failures (The "Veto" Count)
+  let criticalFailures = 0;
+  CRITICAL_GROUPS.forEach(group => {
+    // Check if ANY indicator in this group has a 'growth' flag
+    const hasFailure = indicators.some(i => 
+      group.some(id => i.number.includes(id)) && i.growth
+    );
+    if (hasFailure) criticalFailures++;
+  });
 
-  let level = "cần cải thiện"; 
-  let sentiment = "negative"; 
+  // 2. Calculate Score Percentage (Avoid divide by zero)
+  const scorePct = totalChecked === 0 ? 0 : (goodCount / totalChecked) * 100;
 
-  if (goodCount >= 12 && goodCount > growthCount && keyFailures === 0) {
-    level = "rất hiệu quả";
+  // 3. Determine Level (The "Ceiling Rule")
+  let level = "Cần cải thiện";
+  let sentiment: "positive" | "neutral" | "negative" = "negative";
+
+  if (scorePct >= 85 && criticalFailures === 0) {
+    level = "Xuất sắc";
     sentiment = "positive";
-  } else if (goodCount > growthCount && keyFailures <= 1) {
-    level = "hiệu quả";
+  } else if (scorePct >= 70 && criticalFailures <= 1) {
+    level = "Tốt";
     sentiment = "positive";
-  } else if (goodCount > growthCount) {
-    level = "khá hiệu quả";
-    sentiment = "positive";
+  } else if (scorePct >= 50 && criticalFailures <= 2) {
+    level = "Khá";
+    sentiment = "neutral";
   } else {
-    level = "còn cần khá nhiều điểm cần cải thiện để giúp học sinh học hiệu quả";
+    // Falls through to "Cần cải thiện"
+    level = "Cần cải thiện (Dưới chuẩn)";
     sentiment = "negative";
   }
 
-  const summaryItems = indicators.filter(i => i.includeInTrainerSummary);
-  
-  if (summaryItems.length === 0) return `Lớp học ${level}.`; 
-
-  const examples = summaryItems.map(i => {
-    for (const key in VN_PHRASE_MAP) {
-      if (i.number.includes(key)) return VN_PHRASE_MAP[key];
-    }
-    return i.title; 
-  });
-  const uniqueExamples = Array.from(new Set(examples)).join(", ");
-
-  if (sentiment === "positive") {
-    return `Lớp học ${level}, ví dụ: thầy/cô làm tốt các điểm như ${uniqueExamples}.`;
-  } else {
-    return `Lớp học ${level}, ví dụ: thầy/cô cần cố gắng nhiều hơn ở các điểm như ${uniqueExamples}.`;
-  }
+  const opening = `Đánh giá tổng quan: Lớp học đạt mức độ ${level}.`;
+  return { levelText: level, openingText: opening, sentiment };
 }
 
 // 🟢 PART 2: API CLIENT FUNCTIONS (Secure)
@@ -97,7 +91,7 @@ export async function polishBatchWithGroq(items: { id: string; text: string }[])
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items }),
     });
-    return await res.json(); // Returns { "id": "polished text" }
+    return await res.json(); 
   } catch (error) {
     console.error("Batch Error:", error);
     return {};
@@ -108,42 +102,46 @@ export async function generateAdminSummary(
   indicators: IndicatorSimple[]
 ): Promise<string> {
   
-  // 1. Calculate General Comment (Local Logic)
-  const part1_GeneralComment = calculateClassLevelAndSentence(indicators);
+  // 1. Math & Verdict
+  const assessment = assessClassPerformance(indicators);
 
-  // 2. Prepare Notes
-  const summaryCandidates = indicators.filter(
-    (i) => i.includeInTrainerSummary && i.commentText?.trim().length > 0
-  );
+  // 2. Filter Notes: Only Summary Checked + Has Brackets
+  const actionableNotes = indicators
+    .filter(i => 
+      i.includeInTrainerSummary && 
+      i.commentText && 
+      /\[.*?\]/.test(i.commentText) // Must have brackets [ ]
+    )
+    .map(i => ({
+      text: i.commentText.replace(/\[OCR\]/gi, "").trim(),
+      isGood: i.good, 
+      title: i.title 
+    }));
 
-  const cleanNotes = summaryCandidates
-    .map(i => i.commentText.replace(/\[OCR\]/gi, "").trim())
-    // Keep only lines with anchors [...]
-    .filter(t => t.length > 0 && /\[.*?\]/.test(t)); 
-
-  const notesList = cleanNotes.map(n => `- ${n}`);
-
-  if (notesList.length === 0) {
-    return part1_GeneralComment;
+  // Fallback if no specific actionable notes are found
+  if (actionableNotes.length === 0) {
+    return assessment.openingText;
   }
 
-  // 3. Call Backend for AI Generation (Part 2)
+  // 3. Call Server
   try {
     const res = await fetch(`${API_BASE}/api/generate-summary`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes: notesList }),
+      body: JSON.stringify({ 
+        notes: actionableNotes, 
+        context: assessment.levelText 
+      }),
     });
     
     const data = await res.json();
-    const aiBulletPoints = data.summary || "";
+    const reportBody = data.summary || "";
 
-    if (!aiBulletPoints) return part1_GeneralComment;
-
-    return `${part1_GeneralComment}\n\nDưới đây là một số điểm giáo viên cần cân nhắc cải thiện:\n${aiBulletPoints}`;
+    // 4. Combine: Opening (Verdict) + AI Body (Details)
+    return `${assessment.openingText}\n\n${reportBody}`;
 
   } catch (error) {
     console.error("Admin Summary Error:", error);
-    return part1_GeneralComment;
+    return assessment.openingText;
   }
 }

@@ -110,45 +110,60 @@ router.post("/api/polish-batch", async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 3. ADMIN SUMMARY
+// 3. ADMIN SUMMARY (🟢 UPDATED LOGIC)
 // ---------------------------------------------------------
 router.post("/api/generate-summary", async (req, res) => {
   try {
-    const { notes } = req.body; // Expects string[] of clean notes
+    // Expects structured objects now: { text, isGood, title }
+    const { notes, context } = req.body; 
     
     const systemPrompt = `
-    You are a Senior Teacher Trainer for GrapeSEED.
+    You are an Educational Quality Manager writing a formal report for a School Administrator.
     
-    TASK:
-    Convert the provided Anchored Notes into a Vietnamese Action List.
+    AUDIENCE:
+    - The School Admin cares about: Program Quality, Student Retention, and Professional Standards.
+    - They do NOT want "teaching tips." They want "Management Actions."
 
-    STRICT RULES:
-    1. Output 100% Vietnamese. No Chinese characters.
-    2. Tone: Imperative, Constructive.
-    3. PRONOUN RULE: Start every bullet point with a **Verb** or **"Cần"**. 
-       - NEVER use "Thầy/Cô/Giáo viên" at the start.
-    4. **ONE ANCHOR = ONE BULLET**: Do not split one note into multiple bullets.
+    INPUT DATA:
+    - Notes format: "Context/Evidence [Action Command]"
+    - Status: Good (True) or Growth (False).
 
-    🟢 SYNTHESIS LOGIC (CRITICAL):
-    - The content inside [...] is the **COMMAND**.
-    - The text outside [...] is the **CONTEXT**.
-    - **combine them**: Use the Command to tell the teacher *what* to do, and the Context to explain *why* or *how* specific it should be.
-    - **Avoid Vagueness**: Do not just say "Review PCs". Say "Review PCs to help students practice speaking" (if the note mentions speaking).
+    YOUR TASK:
+    Synthesize the notes into 3 strictly defined sections in Vietnamese.
 
-    🟢 VOCABULARY & TRANSLATION GUIDE:
-    - "Spoon-feeding" -> "làm thay học sinh", "gợi ý quá mức", "không để học sinh tự tư duy". (Do NOT use the English word).
-    - "Pacing" -> "nhịp độ lớp học".
-    - "Monitor" -> "quan sát và hỗ trợ".
+    --------------------------------------------------
+    **SECTION 1: GHI NHẬN ĐIỂM SÁNG (Strengths Narrative)**
+    - Look at the "Context" (text outside brackets) of ALL notes (especially Good ones).
+    - Write ONE smooth paragraph explaining the positive aspects found in the class.
+    - Focus on: Student engagement, teacher attitude, and flow.
+    - *Goal:* Validate that the teacher has potential.
 
-    EXAMPLES:
-    - Input: "Students struggle with counting. Teacher counted for them. [avoid spoon-feeding]"
-      -> Output: "- Cần để học sinh tự thực hiện việc đếm, tránh làm thay hoặc gợi ý quá mức cho học sinh."
-    
-    - Input: "No speaking activities seen. [prepare speaking activities]"
-      -> Output: "- Cần chuẩn bị và tổ chức thêm các hoạt động nói để học sinh có cơ hội thực hành giao tiếp nhiều hơn."
+    **SECTION 2: CÁC VẤN ĐỀ CẦN KHẮC PHỤC (Critical Issues)**
+    - **Source:** Notes where **isGood = FALSE** (Growth).
+    - **Tone:** Strict, Warning, Risk-Focused.
+    - **Format:** Bullet points.
+    - **Formula:** "• **[Category]:** [Evidence from Context]. Yêu cầu giáo viên [Action from Bracket] để đảm bảo chất lượng."
+    - *Example:* "• **Về Quy trình:** Việc tự ý bỏ bước (Context) làm hổng kiến thức. Cần tuân thủ tuyệt đối giáo án (Bracket)."
+
+    **SECTION 3: CÁC LƯU Ý ĐỂ TỐI ƯU HÓA (Operational Adjustments)**
+    - **Source:** Notes where **isGood = TRUE** (Good) but contain brackets [...].
+    - **Tone:** Constructive, Professional.
+    - **Meaning:** "The area is generally safe, but there is a specific flaw to remove."
+    - **Formula:** "• **[Category]:** Mặc dù [Context], giáo viên cần [Action from Bracket] để chuyên nghiệp hơn."
+    - *Example:* "• **Về Quản lý:** Lớp học rất vui (Context), tuy nhiên cần kiểm soát tiếng ồn (Bracket) để giữ nề nếp."
+
+    --------------------------------------------------
+    RULES:
+    - If a section has no data, DO NOT write that header.
+    - Language: Vietnamese (Management Style).
+    - Do not use exclamation marks (!).
     `;
 
-    const userPrompt = `OBSERVATION NOTES:\n${notes.join("\n")}`;
+    // We stringify the objects so LLM sees the isGood status clearly
+    const userPrompt = `
+    CLASS RATING CONTEXT: ${context}
+    OBSERVATION NOTES: ${JSON.stringify(notes)}
+    `;
 
     const response = await groq.chat.completions.create({
       messages: [
