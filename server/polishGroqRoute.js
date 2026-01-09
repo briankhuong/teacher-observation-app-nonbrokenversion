@@ -110,45 +110,114 @@ router.post("/api/polish-batch", async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 3. ADMIN SUMMARY
+// STEP 1: STRICT LOGIC COMPILER (Foundation)
 // ---------------------------------------------------------
-router.post("/api/generate-summary", async (req, res) => {
+router.post("/api/generate-next-steps", async (req, res) => {
   try {
-    const { notes } = req.body; // Expects string[] of clean notes
-    
+    const { notes } = req.body; 
+    if (!notes || notes.length === 0) return res.json({ result: "" });
+
     const systemPrompt = `
-    You are a Senior Teacher Trainer for GrapeSEED.
-    
-    TASK:
-    Convert the provided Anchored Notes into a Vietnamese Action List.
+    ROLE: Strict Logic Translator.
+    OBJECTIVE: Map "Context" -> "Solution" using direct, factual sentences.
 
-    STRICT RULES:
-    1. Output 100% Vietnamese. No Chinese characters.
-    2. Tone: Imperative, Constructive.
-    3. PRONOUN RULE: Start every bullet point with a **Verb** or **"Cần"**. 
-       - NEVER use "Thầy/Cô/Giáo viên" at the start.
-    4. **ONE ANCHOR = ONE BULLET**: Do not split one note into multiple bullets.
+    1. **SUBJECT RULES (STRICT):**
+       - **Student Context:** Start with "Học sinh...". (NEVER use "Giáo viên nhận thấy...").
+       - **Teacher Context:** Start with "Giáo viên...".
 
-    🟢 SYNTHESIS LOGIC (CRITICAL):
-    - The content inside [...] is the **COMMAND**.
-    - The text outside [...] is the **CONTEXT**.
-    - **combine them**: Use the Command to tell the teacher *what* to do, and the Context to explain *why* or *how* specific it should be.
-    - **Avoid Vagueness**: Do not just say "Review PCs". Say "Review PCs to help students practice speaking" (if the note mentions speaking).
+    2. **MAPPING STRATEGY:**
+       - **Format:** [Context/Problem]. [Connector] [Solution/Bracket].
+       - **Connector:** Use "Do đó," or "Vì vậy," or "Tuy nhiên," (if contrasting).
+       - **NO "VÌ" START:** Do NOT start bullet points with "Vì..." (Because).
 
-    🟢 VOCABULARY & TRANSLATION GUIDE:
-    - "Spoon-feeding" -> "làm thay học sinh", "gợi ý quá mức", "không để học sinh tự tư duy". (Do NOT use the English word).
-    - "Pacing" -> "nhịp độ lớp học".
-    - "Monitor" -> "quan sát và hỗ trợ".
+    3. **GLOSSARY:**
+       - "Teacher/You" -> "Giáo viên"
+       - "Students/Ss" -> "học sinh"
+       - "Sound" -> "âm"
+       - "Phonogram" -> "ngữ âm"
+       - "Component" -> "học liệu"
+       - "TSTS" -> "thứ tự Giáo viên - Học sinh - Giáo viên - Học sinh (TSTS)"
+       - "Input" -> "nạp kiến thức đầu vào (input)"
+       - "Exposure" -> "tiếp xúc (exposure)"
+       - "Read" OR "Sing" -> "trình bày học liệu (đọc/hát)"
+       
+       *Materials:*
+       - "VPCs" -> "Thẻ từ vựng (VPCs)"
+       - "PCs" -> "Thẻ ngữ âm (PCs)"
+       - "Poem" -> "Bài thơ (Poem)"
+       - "Chants" -> "Bài vè (Chants)"
+       - "Big book" -> "Cuốn sách lớn (Big book)"
+       - "Reader" -> "Sách đọc (Reader)"
+       - "Song" -> "Bài hát (Song)"
+       - "Let's start reading" -> "Bài đọc câu (Let's start reading)"
 
-    EXAMPLES:
-    - Input: "Students struggle with counting. Teacher counted for them. [avoid spoon-feeding]"
-      -> Output: "- Cần để học sinh tự thực hiện việc đếm, tránh làm thay hoặc gợi ý quá mức cho học sinh."
-    
-    - Input: "No speaking activities seen. [prepare speaking activities]"
-      -> Output: "- Cần chuẩn bị và tổ chức thêm các hoạt động nói để học sinh có cơ hội thực hành giao tiếp nhiều hơn."
+    4. **LOGIC EXECUTION:**
+       - "[A > B]" -> "...cần [A] để [B]."
+       - "Problem A AND Problem B" -> "Problem A. Đồng thời, Problem B..."
+
+    Example:
+    Input: "Students struggled to read. [cover text > read with understanding]"
+    Output: "- Học sinh gặp khó khăn khi đọc. Do đó, giáo viên cần che phần chữ để các em đọc hiểu thay vì đọc thuộc lòng."
     `;
 
-    const userPrompt = `OBSERVATION NOTES:\n${notes.join("\n")}`;
+    const userPrompt = `NOTES TO PROCESS:\n${JSON.stringify(notes)}`;
+
+    const response = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      model: "openai/gpt-oss-120b",
+      temperature: 0.1, // 🔒 LOCKED FOR CONSISTENCY
+    });
+
+    const result = response.choices[0]?.message?.content?.trim() || "";
+    res.json({ result });
+
+  } catch (error) {
+    console.error("Groq Step 1 Error:", error);
+    res.status(500).json({ error: "Failed to generate report" });
+  }
+});
+
+// ---------------------------------------------------------
+// STEP 2: NATURALIZE FLOW (The Stabilizer)
+// ---------------------------------------------------------
+router.post("/api/naturalize-text", async (req, res) => {
+  try {
+    const { text } = req.body; 
+
+    const systemPrompt = `
+    ROLE: Senior Vietnamese Educational Consultant.
+    TASK: Polish raw teacher observation notes into natural, professional, and constructive feedback.
+
+    STRICT GUIDELINES:
+    1. **NO ASTERISKS / MARKDOWN:** - Do NOT use the "*" character anywhere. 
+       - Do NOT bold text (e.g., no **text**). 
+       - Use simple hyphens (-) for bullet points.
+
+    2. **Structure & Headers:**
+       - **Overview:** Polish the "Đánh giá tổng quan" sentence naturally.
+       - **Bullet Points:** For the improvement points, infer a short Topic Header (2-4 words) followed by a colon (:). 
+       - **Format:** "- Header: Content..."
+
+    3. **Tone & Flow:**
+       - **No Repetition:** DO NOT start every sentence with "Do đó", "Vì vậy", or "Giáo viên".
+       - **Cohesion:** Combine the "Problem" (Observation) and "Solution" (Next Step) into one smooth paragraph.
+       - **No Redundancy:** Do NOT add a summary/overview bullet point inside the list of improvements.
+
+    4. **Vocabulary & Rules:**
+       - **Subject:** Use "Giáo viên" exclusively. NEVER use "Thầy/Cô".
+       - **Educational Terms:** Use "đọc đồng thanh" (whole-class reading), "đọc thuộc lòng" (read from memory), "che phần chữ" (cover text).
+
+    INPUT EXAMPLE:
+    "- Giáo viên dành quá nhiều thời gian cho ví dụ. Do đó nên bỏ qua phần này."
+
+    OUTPUT EXAMPLE:
+    "- Quản lý thời gian: Việc dành quá nhiều thời gian cho ví dụ đã làm chậm tiến độ. Giáo viên nên lược bỏ phần này để duy trì nhịp độ ổn định."
+    `;
+
+    const userPrompt = `TEXT TO NATURALIZE:\n${text}`;
 
     const response = await groq.chat.completions.create({
       messages: [
@@ -159,12 +228,12 @@ router.post("/api/generate-summary", async (req, res) => {
       temperature: 0.1, 
     });
 
-    const summary = response.choices[0]?.message?.content?.trim() || "";
-    res.json({ summary });
+    const result = response.choices[0]?.message?.content?.trim() || text;
+    res.json({ result });
 
   } catch (error) {
-    console.error("Groq Summary Error:", error);
-    res.status(500).json({ error: "Failed to generate summary" });
+    console.error("Groq Step 2 Error:", error);
+    res.status(500).json({ error: "Failed to naturalize text" });
   }
 });
 
