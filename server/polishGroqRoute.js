@@ -116,139 +116,181 @@ router.post("/api/polish-batch", async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// STEP 1: STRICT LOGIC COMPILER (Foundation & Analysis)
+// STEP 1: AGENTIC LOGIC COMPILER (Detective -> Writer Pipeline)
 // ---------------------------------------------------------
 router.post("/api/generate-next-steps", async (req, res) => {
   try {
     const { notes } = req.body; 
     if (!notes || notes.length === 0) return res.json({ result: "" });
 
-    const systemPrompt = `
-    ROLE: Senior Educational Analyst & Translator (Vietnamese).
-    OBJECTIVE: Analyze observation notes and map "Context" -> "Solution" using correct GrapeSEED terminology.
+    // =========================================================
+    // 🕵️ SUB-STEP A: THE PEDAGOGICAL DETECTIVE (Logic Only)
+    // Goal: Identify the "Real" Error and Output Safe JSON
+    // =========================================================
+    
+    const detectiveSystemPrompt = `
+    ROLE: Expert GrapeSEED Educational Analyst.
+    TASK: Analyze teacher observation notes to identify the ROOT CAUSE and LOGICAL CATEGORY.
+    
+    OUTPUT FORMAT: Return a SINGLE JSON OBJECT strictly adhering to this schema:
+    {
+      "analysis": [
+        {
+          "original_note": "string",
+          "category": "ROBOTIC_TEACHING" | "PREPARATION_ISSUE" | "MISUNDERSTANDING_GOAL" | "CLASSROOM_MANAGEMENT" | "INSTRUCTIONAL_DELIVERY",
+          "root_cause_explanation": "One sentence explaining the deep logic error",
+          "key_evidence_quoted": "STRING. (CRITICAL: If multiple quotes exist, join them with commas into ONE string. Do NOT create a list.)",
+          "solution_strategy": "The strategic fix"
+        }
+      ]
+    }
 
-    0. **ANALYSIS PHASE (INTERNAL LOGIC - DO NOT SKIP):**
-       - **Interpret "Missing the gist":** This does NOT mean the teacher forgot to say something. It means they **misunderstood the goal** of the component. 
-         - *Translation:* "chưa nắm vững mục tiêu cốt lõi/trọng tâm".
-       - **Analyze "Robotic Teaching":** If a teacher asks a question (e.g., "Where is it?") about a missing item, the consequence is NOT just "confusion". It is "teaching without meaning" or "illogical teaching".
-         - *Output:* "...việc này là giảng dạy máy móc, thiếu tính thực tế..."
-       - **Proper Noun Handling:** Treat "The Beehive", "Old MacDonald" as Proper Nouns. 
-         - **RULE:** Always prefix with "học liệu" (component). 
-         - *Correct:* "trong học liệu 'The Beehive'".
-         - *Wrong:* "trong buổi The beehive".
+    LOGIC RULES (CRITICAL):
+    1. **The 'Green Book' Paradox:** - If teacher misses an item but *skips* the question -> Category: PREPARATION_ISSUE.
+       - If teacher misses an item but *still asks* "Where is it?" -> Category: ROBOTIC_TEACHING.
+    
+    2. **'Missing the gist':**
+       - Category: MISUNDERSTANDING_GOAL.
+       - Meaning: Teacher didn't grasp the core objective.
 
-    1. **STRICT GLOSSARY (REPLACE EXACTLY):**
-       - "Unit" -> "học phần" (NEVER "đơn vị")
-       - "Demonstrate/Demonstrated" -> "làm mẫu" or "hướng dẫn" (NEVER "trình diễn")
-       - "Text" -> "chữ"
-       - "Decode" -> "đánh vần"
-       - "Assembly" -> "hoạt động ghép âm"
-       - "Air-writing" -> "hoạt động viết trên không"
-       - "Lesson Video Analysis (LVA)" -> "phân tích video lớp học"
-       - "Multi-letter phonogram" -> "thẻ đa ngữ âm"
-       
-       *Materials:*
-       - "VPCs" -> "Thẻ từ vựng (VPCs)"
-       - "PCs" -> "Thẻ ngữ âm (PCs)"
-       - "Poem/Chants/Song" -> "Bài thơ/Bài vè/Bài hát"
-       - "Big book" -> "Cuốn sách lớn"
-       - "Reader" -> "Sách đọc"
-
-    2. **VOCABULARY RULES:**
-       - If a word is **content** (e.g., horse card, said "duck"), keep it English in quotes: "thẻ 'horse'", "nói 'duck'".
-       - **Subject:** Teacher = "Giáo viên", Students = "Học sinh".
-
-    3. **NEGATIVE CONSTRAINTS (BANNED WORDS):**
-       - NO "trình diễn" (use "làm mẫu").
-       - NO "đơn vị" (use "học phần").
-       - NO "buổi [Tên bài hát]" (use "học liệu [Tên bài hát]").
-       - NO "gây nhầm lẫn" IF the action was totally illogical (use "thiếu tính logic/thực tế").
-
-    4. **MAPPING STRATEGY:**
-       - **Format:** [Context/Problem containing Specific Evidence]. [Connector] [Solution/Bracket].
-       - **Examples:**
-         - Input: "Your assembly session was missing the gist."
-         - Output: "- Giáo viên chưa nắm vững mục tiêu cốt lõi của hoạt động ghép âm (Assembly)."
-         
-         - Input: "You didn't have the green book but still asked 'Where is it?'."
-         - Output: "- Giáo viên thiếu 'green book' nhưng vẫn hỏi 'Where is it?'. Đây là cách dạy máy móc, thiếu thực tế. Do đó..."
-
+    3. **Proper Nouns & Quotes:**
+       - Identify Capitalized phrases (e.g., "The Beehive") and Student Speech (e.g. said "duck").
     `;
 
-    const userPrompt = `NOTES TO PROCESS:\n${JSON.stringify(notes)}`;
-
-    const response = await groq.chat.completions.create({
+    // Call Agent A (Detective)
+    const detectiveResponse = await groq.chat.completions.create({
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      // 💡 TEMPERATURE DROP: Lower temperature forces stricter adherence to the glossary
-      model: "openai/gpt-oss-120b",
-      temperature: 0.1, 
-    });
-
-    const result = response.choices[0]?.message?.content?.trim() || "";
-    res.json({ result });
-
-  } catch (error) {
-    console.error("Groq Step 1 Error:", error);
-    res.status(500).json({ error: "Failed to generate report" });
-  }
-});
-
-// ---------------------------------------------------------
-// STEP 2: NATURALIZE FLOW (The Stabilizer)
-// ---------------------------------------------------------
-router.post("/api/naturalize-text", async (req, res) => {
-  try {
-    const { text } = req.body; 
-
-    const systemPrompt = `
-    ROLE: Senior Vietnamese Educational Consultant.
-    TASK: Polish raw teacher observation notes into natural, professional, and constructive feedback.
-
-    STRICT GUIDELINES:
-    1. **NO ASTERISKS / MARKDOWN:** - Do NOT use bold (**), italics (*), or markdown headers (#).
-
-    2. **HEADER RULES (CRITICAL):**
-       - **NO INVENTED HEADERS:** Do NOT create new titles like "Kế hoạch dự phòng:" or "Quản lý thời gian:".
-       - **PRESERVE EXPLICIT HEADERS:** Only if the input text SPECIFICALLY starts with a category (e.g. "Assembly:", "VPCs:"), then keep it.
-       - **DEFAULT:** Start the bullet point immediately with the content sentence.
-       - **Format:** "- [Existing Header if any]: [Content...]" OR "- [Content...]"
-
-    3. **Tone & Flow:**
-       - **No Repetition:** DO NOT start every sentence with "Do đó", "Vì vậy", or "Giáo viên".
-       - **Cohesion:** Combine the "Problem" (Observation) and "Solution" (Next Step) into one smooth paragraph.
-
-    4. **Vocabulary & Rules:**
-       - **Subject:** Use "Giáo viên" exclusively. NEVER use "Thầy/Cô".
-       - **Educational Terms:** Use "đọc đồng thanh" (whole-class reading), "đọc thuộc lòng" (read from memory), "che phần chữ" (cover text).
-
-    INPUT EXAMPLE:
-    "- Giáo viên dành quá nhiều thời gian cho ví dụ. Do đó nên bỏ qua phần này."
-
-    OUTPUT EXAMPLE (Note: No header invented):
-    "- Việc dành quá nhiều thời gian cho ví dụ đã làm chậm tiến độ lớp học. Giáo viên nên cân nhắc lược bỏ phần này để duy trì nhịp độ giảng dạy ổn định."
-    `;
-
-    const userPrompt = `TEXT TO NATURALIZE:\n${text}`;
-
-    const response = await groq.chat.completions.create({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
+        { role: "system", content: detectiveSystemPrompt },
+        { role: "user", content: JSON.stringify(notes) }
       ],
       model: "openai/gpt-oss-120b", 
+      response_format: { type: "json_object" }, 
       temperature: 0.1, 
     });
 
-    const result = response.choices[0]?.message?.content?.trim() || text;
+    // 🛡️ Robust Parsing: Handle potential markdown wrappers
+    let rawContent = detectiveResponse.choices[0]?.message?.content || "{}";
+    rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
+
+    let analysisData;
+    try {
+        analysisData = JSON.parse(rawContent);
+        if (Array.isArray(analysisData)) {
+            analysisData = { analysis: analysisData };
+        }
+    } catch (e) {
+        console.error("JSON Parse Error on Detective Output:", rawContent);
+        analysisData = { analysis: [] };
+    }
+
+    // =========================================================
+    // ✍️ SUB-STEP B: THE VIETNAMESE WRITER (Translation + Glossary)
+    // Goal: Write professional feedback using the Analysis + Glossary
+    // =========================================================
+
+    const writerSystemPrompt = `
+    ROLE: Senior Vietnamese Educational Administrator.
+    TASK: Write constructive feedback based on the provided PEDAGOGICAL ANALYSIS JSON.
+
+    INPUT DATA: You will receive a JSON object containing "root_cause_explanation", "category", and "solution_strategy".
+    
+    WRITING RULES (TONE & STRUCTURE):
+    1. **Trust the Analysis:** - If Category is "ROBOTIC_TEACHING", use words like "máy móc", "thiếu tính thực tế".
+       - If Category is "MISUNDERSTANDING_GOAL", use "chưa nắm vững mục tiêu cốt lõi".
+    
+    2. **Structure (CRITICAL - LIST FORMAT):**
+       - **OUTPUT MUST BE A LIST:** You must output a bulleted list using hyphens (-).
+       - **SPACING:** Put a blank line between each bullet point for readability.
+       - **Item Format:** Inside each bullet point, write ONE smooth paragraph merging Problem + Solution.
+       - **Example Output:**
+         - Quan sát cho thấy [Vấn đề A]... Do đó, giáo viên cần [Giải pháp A].
+         
+         - Trong hoạt động [Tên], giáo viên đã [Vấn đề B]... Vì vậy, cần [Giải pháp B].
+
+    3. **Sentence Variety:**
+       - Do NOT start every point with "Việc giáo viên...".
+       - Use: "Quan sát cho thấy...", "Trong hoạt động...", "Hiện tại...".
+
+    4. **Direct Observation:** - No "as noted in..." (như ghi chú).
+       - No "as observed" (như quan sát). Just state the fact.
+
+    5. **Subject Rules:** - Teacher = "Giáo viên" (Active Voice).
+       - Students = "Học sinh".
+
+    --------------------------------------------------------
+    📚 FULL GLOSSARY (MANDATORY REPLACEMENTS):
+    
+    *Core Terminology:*
+    - "Unit" -> "học phần" (NEVER "đơn vị")
+    - "Demonstrate" -> "làm mẫu" or "hướng dẫn"
+    - "Text" -> "chữ"
+    - "Decode" (verb) -> "đánh vần"
+    - "Decode" (noun) -> "hoạt động đánh vần"
+    - "Assemble" -> "ghép âm"
+    - "Assembly" -> "hoạt động ghép âm"
+    - "Sound" -> "âm" (NEVER "âm vị")
+    - "Letter sound" -> "âm của chữ cái"
+    - "Phonogram" -> "ngữ âm"
+    - "Multi-letter phonogram" -> "thẻ đa ngữ âm"
+    - "Air-writing" -> "hoạt động viết trên không"
+    - "LVA" / "Lesson Video Analysis" -> "phân tích video lớp học"
+    - "Classroom management" -> "kỹ năng quản lý lớp học"
+    - "Input" -> "nạp kiến thức đầu vào (input)"
+    - "Exposure" -> "tiếp xúc (exposure)"
+    - "TSTS" -> "mô hình TSTS"
+    - "Read" OR "Sing" -> "trình bày học liệu (đọc/hát)"
+    - "Whole-class reading" -> "đọc đồng thanh"
+    - "Read from memory" -> "đọc vẹt/đọc thuộc lòng"
+    - "Cover text" -> "che phần chữ"
+
+    *Materials & Components:*
+    - "VPCs" -> "Thẻ từ vựng (VPCs)"
+    - "PCs" -> "Thẻ ngữ âm (PCs)"
+    - "Poem" -> "Bài thơ"
+    - "Chants" -> "Bài vè"
+    - "Song" -> "Bài hát"
+    - "Big book" -> "Cuốn sách lớn"
+    - "Reader" -> "Sách đọc"
+    - "Let's start reading" -> "Bài đọc câu (Let's start reading)"
+    - "Component" -> "học liệu"
+    - "Teaching materials" -> "học liệu"
+
+    --------------------------------------------------------
+    ⛔ NEGATIVE CONSTRAINTS (BANNED):
+    - NO "âm vị".
+    - NO "trình diễn".
+    - NO "như được ghi nhận".
+    - NO invented headers (like "Giải pháp:").
+    - NO symbols (**, [], ->).
+    - **NO QUOTES around Vietnamese terms:**
+       - *Bad:* “hoạt động viết trên không”, “âm của chữ cái”
+       - *Good:* hoạt động viết trên không, âm của chữ cái
+
+    --------------------------------------------------------
+    🔠 PROPER NOUN & QUOTE HANDLING:
+    - **Proper Nouns:** Prefix Capitalized Names with "học liệu" (e.g. học liệu 'The Beehive').
+    - **Strict Quote Rule:** ONLY use quotes for:
+      1. **English Student Speech** (e.g. học sinh nói "duck").
+      2. **English Card Content** (e.g. từ "Cat").
+      3. **Specific Component Names** (e.g. học liệu "Writers").
+    `;
+
+    // Call Agent B (Writer)
+    const writerResponse = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: writerSystemPrompt },
+        { role: "user", content: JSON.stringify(analysisData) }
+      ],
+      model: "openai/gpt-oss-120b",
+      temperature: 0.2, 
+    });
+
+    const result = writerResponse.choices[0]?.message?.content?.trim() || "";
     res.json({ result });
 
   } catch (error) {
-    console.error("Groq Step 2 Error:", error);
-    res.status(500).json({ error: "Failed to naturalize text" });
+    console.error("Agentic Chain Error:", error);
+    res.json({ result: "- Không thể tạo báo cáo do lỗi hệ thống. Vui lòng thử lại." });
   }
 });
-
 export default router;
