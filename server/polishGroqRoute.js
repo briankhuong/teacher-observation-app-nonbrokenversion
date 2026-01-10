@@ -22,33 +22,39 @@ router.post("/api/polish-text", async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `You are a strict grammar correction engine for an English Phonics Teacher.
-          
+          content: `You are a specialized grammar correction engine for English Phonics Teacher notes.
+
           DOMAIN CONTEXT (CRITICAL):
-          - These are observation notes for an ESL/Phonics class.
-          - The teacher often refers to specific SOUNDS using slashes (e.g., /t/, /s/, /d/) or short letters.
-          - Example: "emphasizing the /t/ in the song" is correct.
-          - Example: "teaching the (H) sound" is correct.
+          - Notes often contain specific phonetic sounds like /t/, /d/, (H), or 'schwa'.
+          - **ABSOLUTE RULE:** NEVER autocorrect phonetic markers or short codes into real words.
+            - Correct: "emphasizing the /t/ sound"
+            - Wrong: "emphasizing the at sound"
+            - Keep short codes like "ltl" (little) or "sts" (students) if uncertain, do not guess.
 
           OPERATIONAL GUIDE:
-          1. FIX BROKEN ENGLISH (Conservative Mode):
+          1. FIX GRAMMAR & SHORTHAND:
              - Fix Tense, Grammar, and Punctuation.
-             - Expand standard shorthand ("tchr" -> "teacher").
-             - DO NOT guess at "typos" if they look like phonetic sounds. (e.g., keep "ltl", "/t/", or "sts" if unsure).
-             - NEVER change a short string like "ltl" or "/t/" to a completely different word like "lyrics".
-
-          2. DO NOT CHANGE THE STYLE:
-             - Keep it simple and direct. Do not upgrade vocabulary.
-
-          3. PRESERVE STRUCTURE & TAGS:
-             - You MUST preserve hyphens "-", bullet points, and "(GA)" tags.
+             - Expand standard shorthand (e.g., "tchr" -> "teacher", "w/" -> "with").
              
-          4. PROTECT ANCHORS [...]:
-             - Content inside square brackets (e.g., [follow LP], [AD]) is SYSTEM CODE.
-             - Copy them EXACTLY. Do not fix grammar inside them.
+          2. UPGRADE SPECIFIC PHRASING (CLARITY):
+             - Interpret "broken" descriptions into standard classroom terms:
+             - "taking turn ask and answer" -> "during the Q&A session"
+             - "do not seem to focus" -> "appeared distracted" or "struggled to focus"
+             - "read from memory" -> "recited from memory"
+
+          3. BRACKET LOGIC [Action > Result]:
+             - The user uses brackets to show: [Action to take > Intended result].
+             - **You MUST fix grammar INSIDE the brackets**, but strictly preserve the ">" separator.
+             - **Rule:** Ensure the 'Result' side (right of >) starts with "to" if it implies a purpose.
+             - Input: "[ask them to repeat > stay engaged]"
+             - Output: "[ask them to repeat > to maintain engagement]"
+
+          4. PRESERVE STRUCTURE:
+             - Keep "(GA)" tags, hyphens "-", and bullet points exactly as they are.
+             - Do NOT use markdown bolding (**).
 
           OUTPUT RULES:
-          - Return ONLY the corrected text.`
+          - Return ONLY the refined text.`
         },
         { role: "user", content: text }
       ],
@@ -110,7 +116,7 @@ router.post("/api/polish-batch", async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// STEP 1: STRICT LOGIC COMPILER (Foundation)
+// STEP 1: STRICT LOGIC COMPILER (Foundation & Analysis)
 // ---------------------------------------------------------
 router.post("/api/generate-next-steps", async (req, res) => {
   try {
@@ -118,46 +124,55 @@ router.post("/api/generate-next-steps", async (req, res) => {
     if (!notes || notes.length === 0) return res.json({ result: "" });
 
     const systemPrompt = `
-    ROLE: Strict Logic Translator.
-    OBJECTIVE: Map "Context" -> "Solution" using direct, factual sentences.
+    ROLE: Senior Educational Analyst & Translator (Vietnamese).
+    OBJECTIVE: Analyze observation notes and map "Context" -> "Solution" using correct GrapeSEED terminology.
 
-    1. **SUBJECT RULES (STRICT):**
-       - **Student Context:** Start with "Học sinh...". (NEVER use "Giáo viên nhận thấy...").
-       - **Teacher Context:** Start with "Giáo viên...".
+    0. **ANALYSIS PHASE (INTERNAL LOGIC - DO NOT SKIP):**
+       - **Interpret "Missing the gist":** This does NOT mean the teacher forgot to say something. It means they **misunderstood the goal** of the component. 
+         - *Translation:* "chưa nắm vững mục tiêu cốt lõi/trọng tâm".
+       - **Analyze "Robotic Teaching":** If a teacher asks a question (e.g., "Where is it?") about a missing item, the consequence is NOT just "confusion". It is "teaching without meaning" or "illogical teaching".
+         - *Output:* "...việc này là giảng dạy máy móc, thiếu tính thực tế..."
+       - **Proper Noun Handling:** Treat "The Beehive", "Old MacDonald" as Proper Nouns. 
+         - **RULE:** Always prefix with "học liệu" (component). 
+         - *Correct:* "trong học liệu 'The Beehive'".
+         - *Wrong:* "trong buổi The beehive".
 
-    2. **MAPPING STRATEGY:**
-       - **Format:** [Context/Problem]. [Connector] [Solution/Bracket].
-       - **Connector:** Use "Do đó," or "Vì vậy," or "Tuy nhiên," (if contrasting).
-       - **NO "VÌ" START:** Do NOT start bullet points with "Vì..." (Because).
-
-    3. **GLOSSARY:**
-       - "Teacher/You" -> "Giáo viên"
-       - "Students/Ss" -> "học sinh"
-       - "Sound" -> "âm"
-       - "Phonogram" -> "ngữ âm"
-       - "Component" -> "học liệu"
-       - "TSTS" -> "thứ tự Giáo viên - Học sinh - Giáo viên - Học sinh (TSTS)"
-       - "Input" -> "nạp kiến thức đầu vào (input)"
-       - "Exposure" -> "tiếp xúc (exposure)"
-       - "Read" OR "Sing" -> "trình bày học liệu (đọc/hát)"
+    1. **STRICT GLOSSARY (REPLACE EXACTLY):**
+       - "Unit" -> "học phần" (NEVER "đơn vị")
+       - "Demonstrate/Demonstrated" -> "làm mẫu" or "hướng dẫn" (NEVER "trình diễn")
+       - "Text" -> "chữ"
+       - "Decode" -> "đánh vần"
+       - "Assembly" -> "hoạt động ghép âm"
+       - "Air-writing" -> "hoạt động viết trên không"
+       - "Lesson Video Analysis (LVA)" -> "phân tích video lớp học"
+       - "Multi-letter phonogram" -> "thẻ đa ngữ âm"
        
        *Materials:*
        - "VPCs" -> "Thẻ từ vựng (VPCs)"
        - "PCs" -> "Thẻ ngữ âm (PCs)"
-       - "Poem" -> "Bài thơ (Poem)"
-       - "Chants" -> "Bài vè (Chants)"
-       - "Big book" -> "Cuốn sách lớn (Big book)"
-       - "Reader" -> "Sách đọc (Reader)"
-       - "Song" -> "Bài hát (Song)"
-       - "Let's start reading" -> "Bài đọc câu (Let's start reading)"
+       - "Poem/Chants/Song" -> "Bài thơ/Bài vè/Bài hát"
+       - "Big book" -> "Cuốn sách lớn"
+       - "Reader" -> "Sách đọc"
 
-    4. **LOGIC EXECUTION:**
-       - "[A > B]" -> "...cần [A] để [B]."
-       - "Problem A AND Problem B" -> "Problem A. Đồng thời, Problem B..."
+    2. **VOCABULARY RULES:**
+       - If a word is **content** (e.g., horse card, said "duck"), keep it English in quotes: "thẻ 'horse'", "nói 'duck'".
+       - **Subject:** Teacher = "Giáo viên", Students = "Học sinh".
 
-    Example:
-    Input: "Students struggled to read. [cover text > read with understanding]"
-    Output: "- Học sinh gặp khó khăn khi đọc. Do đó, giáo viên cần che phần chữ để các em đọc hiểu thay vì đọc thuộc lòng."
+    3. **NEGATIVE CONSTRAINTS (BANNED WORDS):**
+       - NO "trình diễn" (use "làm mẫu").
+       - NO "đơn vị" (use "học phần").
+       - NO "buổi [Tên bài hát]" (use "học liệu [Tên bài hát]").
+       - NO "gây nhầm lẫn" IF the action was totally illogical (use "thiếu tính logic/thực tế").
+
+    4. **MAPPING STRATEGY:**
+       - **Format:** [Context/Problem containing Specific Evidence]. [Connector] [Solution/Bracket].
+       - **Examples:**
+         - Input: "Your assembly session was missing the gist."
+         - Output: "- Giáo viên chưa nắm vững mục tiêu cốt lõi của hoạt động ghép âm (Assembly)."
+         
+         - Input: "You didn't have the green book but still asked 'Where is it?'."
+         - Output: "- Giáo viên thiếu 'green book' nhưng vẫn hỏi 'Where is it?'. Đây là cách dạy máy móc, thiếu thực tế. Do đó..."
+
     `;
 
     const userPrompt = `NOTES TO PROCESS:\n${JSON.stringify(notes)}`;
@@ -167,8 +182,9 @@ router.post("/api/generate-next-steps", async (req, res) => {
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
+      // 💡 TEMPERATURE DROP: Lower temperature forces stricter adherence to the glossary
       model: "openai/gpt-oss-120b",
-      temperature: 0.1, // 🔒 LOCKED FOR CONSISTENCY
+      temperature: 0.1, 
     });
 
     const result = response.choices[0]?.message?.content?.trim() || "";
@@ -192,19 +208,17 @@ router.post("/api/naturalize-text", async (req, res) => {
     TASK: Polish raw teacher observation notes into natural, professional, and constructive feedback.
 
     STRICT GUIDELINES:
-    1. **NO ASTERISKS / MARKDOWN:** - Do NOT use the "*" character anywhere. 
-       - Do NOT bold text (e.g., no **text**). 
-       - Use simple hyphens (-) for bullet points.
+    1. **NO ASTERISKS / MARKDOWN:** - Do NOT use bold (**), italics (*), or markdown headers (#).
 
-    2. **Structure & Headers:**
-       - **Overview:** Polish the "Đánh giá tổng quan" sentence naturally.
-       - **Bullet Points:** For the improvement points, infer a short Topic Header (2-4 words) followed by a colon (:). 
-       - **Format:** "- Header: Content..."
+    2. **HEADER RULES (CRITICAL):**
+       - **NO INVENTED HEADERS:** Do NOT create new titles like "Kế hoạch dự phòng:" or "Quản lý thời gian:".
+       - **PRESERVE EXPLICIT HEADERS:** Only if the input text SPECIFICALLY starts with a category (e.g. "Assembly:", "VPCs:"), then keep it.
+       - **DEFAULT:** Start the bullet point immediately with the content sentence.
+       - **Format:** "- [Existing Header if any]: [Content...]" OR "- [Content...]"
 
     3. **Tone & Flow:**
        - **No Repetition:** DO NOT start every sentence with "Do đó", "Vì vậy", or "Giáo viên".
        - **Cohesion:** Combine the "Problem" (Observation) and "Solution" (Next Step) into one smooth paragraph.
-       - **No Redundancy:** Do NOT add a summary/overview bullet point inside the list of improvements.
 
     4. **Vocabulary & Rules:**
        - **Subject:** Use "Giáo viên" exclusively. NEVER use "Thầy/Cô".
@@ -213,8 +227,8 @@ router.post("/api/naturalize-text", async (req, res) => {
     INPUT EXAMPLE:
     "- Giáo viên dành quá nhiều thời gian cho ví dụ. Do đó nên bỏ qua phần này."
 
-    OUTPUT EXAMPLE:
-    "- Quản lý thời gian: Việc dành quá nhiều thời gian cho ví dụ đã làm chậm tiến độ. Giáo viên nên lược bỏ phần này để duy trì nhịp độ ổn định."
+    OUTPUT EXAMPLE (Note: No header invented):
+    "- Việc dành quá nhiều thời gian cho ví dụ đã làm chậm tiến độ lớp học. Giáo viên nên cân nhắc lược bỏ phần này để duy trì nhịp độ giảng dạy ổn định."
     `;
 
     const userPrompt = `TEXT TO NATURALIZE:\n${text}`;
