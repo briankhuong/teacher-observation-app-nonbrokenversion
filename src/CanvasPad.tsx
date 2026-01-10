@@ -82,6 +82,8 @@ interface CanvasPadProps {
   strokes: Stroke[];
   onChange: (strokes: Stroke[]) => void;
   readOnly?: boolean;
+  isResizeLocked?: boolean;
+  onToggleResizeLock?: () => void;
 }
 // ------------------------------------------------------------------
 // 2. Component
@@ -90,6 +92,8 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
   strokes,
   onChange,
   readOnly = false,
+  isResizeLocked,
+  onToggleResizeLock,
 }) => {
   // Element Refs
   const canvasStaticRef = useRef<HTMLCanvasElement | null>(null);
@@ -421,6 +425,39 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
           <button type="button" className="btn" onClick={handleUndo} disabled={!canUndo}>⤺ Undo</button>
           <button type="button" className="btn" onClick={handleRedo} disabled={redoStack.length === 0}>⤻ Redo</button>
           <button type="button" className="btn" onClick={handleClear} disabled={!canUndo}>Clear</button>
+          {/* 🟢 NEW: Resize Lock Button */}
+              {onToggleResizeLock && (
+               <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={onToggleResizeLock}
+                title={isResizeLocked ? "Unlock Height" : "Lock Height"}
+                style={{
+                  width: 24,
+                  height: 24,
+                  padding: 0,
+                  marginLeft: 8, // Keep the spacing
+                  flexShrink: 0,
+                  display: "flex", 
+                  alignItems: "center", 
+                  justifyContent: "center",
+                  alignSelf: "center",
+                  // Visual feedback: Red if locked, muted if unlocked
+                  color: isResizeLocked ? "#f43f5e" : "var(--text-muted)",
+                  background: isResizeLocked ? "rgba(244, 63, 94, 0.1)" : "transparent",
+                  border: isResizeLocked ? "1px solid rgba(244, 63, 94, 0.3)" : "1px solid transparent",
+                  borderRadius: 4
+                }}
+              >
+                  {isResizeLocked ? (
+                    /* Lock Icon */
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                  ) : (
+                    /* Unlock Icon */
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
+                  )}
+                </button>
+              )}
         </div>
         <div className="canvas-pad-tools-right">
            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />

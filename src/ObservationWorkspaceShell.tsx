@@ -11,11 +11,36 @@ import { get, set, del } from 'idb-keyval';
 
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
 const DEFAULT_CANVAS_HEIGHT = 300; 
-const MIN_CANVAS_HEIGHT = 100; 
-
+const MIN_CANVAS_HEIGHT = 100;
 const TEXTAREA_HEIGHT_STORAGE_KEY = "textarea-height";
 const DEFAULT_TEXTAREA_HEIGHT = 120;
 const MIN_TEXTAREA_HEIGHT = 60;
+const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar-width";
+// 🟢 FIXED: Stricter constraints to prevent broken layout
+const DEFAULT_SIDEBAR_WIDTH = 340;
+const MIN_SIDEBAR_WIDTH = 300; // Increased from 220 to prevent button overlap
+const MAX_SIDEBAR_WIDTH = 550; // Cap width so it doesn't take over screen
+
+function getPersistedSidebarWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    const parsed = raw ? parseInt(raw, 10) : DEFAULT_SIDEBAR_WIDTH;
+    return isNaN(parsed) ? DEFAULT_SIDEBAR_WIDTH : Math.max(MIN_SIDEBAR_WIDTH, Math.min(parsed, MAX_SIDEBAR_WIDTH));
+  } catch (error) {
+    console.error("Failed to read persisted sidebar width", error);
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
+function setPersistedSidebarWidth(width: number) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, width.toString());
+  } catch (error) {
+    console.error("Failed to write persisted sidebar width", error);
+  }
+}
 
 function getPersistedCanvasHeight(): number {
   if (typeof window === "undefined") return DEFAULT_CANVAS_HEIGHT;
@@ -217,7 +242,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-1",
     number: "1.1",
     title: "Organized Teaching Area",
-    description: "Teaching area is highly organized; materials, props, and technology are easily accessible. Students can see the teaching materials well.",
+    description: "- Teaching area is highly organized; materials, props, and technology are easily accessible. Students can see the teaching materials well.",
     hasPreComment: true,
     preComment: "The classroom was spacious, which is ideal for students to learn English with GrapeSEED.",
     good: false,
@@ -256,7 +281,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-4",
     number: "2.1.– 2.2",
     title: "Classroom Routines & Management Strategies",
-    description: "- Routines are well-planned, effectively taught/modeled, and consistently reinforced. - Effective strategies create a predictable, positive learning environment.",
+    description: "- Routines are well-planned, effectively taught/modeled, and consistently reinforced.\n- Effective strategies create a productive and positive environment.",
     hasPreComment: false,
     preComment: undefined,
     good: false,
@@ -282,7 +307,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-6",
     number: "3.1",
     title: "Utilizing Lesson Plans",
-    description: "Follows lesson plans with precision and adapts only when needed to support learning.",
+    description: "Follows lesson plans with precision and adapts effectively.",
     hasPreComment: true,
     preComment: "You managed to follow all instructions in the lesson plan.",
     good: false,
@@ -295,7 +320,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-7",
     number: "3.5",
     title: "Using Memory Mode",
-    description: "Effectively delivers lessons using Memory Mode to maximize student recall.",
+    description: "Effectively delivers lessons using Memory Mode, allowing smooth and engaging instruction.",
     hasPreComment: true,
     preComment: "You have memorized all the materials.",
     good: false,
@@ -308,7 +333,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-8",
     number: "3.4 – 5.1",
     title: "Using Materials Effectively",
-    description: "Fully utilizes GrapeSEED materials as outlined in the lesson plans.",
+    description: "Fully utilizes GrapeSEED materials as outlined in the Lesson Plans and manuals.",
     hasPreComment: true,
     preComment: "You delivered all materials accurately.",
     good: false,
@@ -321,7 +346,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-9",
     number: "3.3 – 6.1 – 7.2",
     title: "Actively Monitoring Student Progress",
-    description: "- Prepares for diverse student responses and uses them to gauge understanding. - Regularly checks student progress and adjusts instruction as needed.",
+    description: "- Prepares for diverse student responses and uses them to enrich lessons. Use the Lesson Plan, Learning Objectives, and components to create follow-up prompts and questions.\n- Consistently monitors and adjusts teaching based on students’ responses and behavior to enhance learning.\n- Listens for correct pronunciation, enunciation, and use of words related to the Learning Objectives.\n- Provides timely, specific, and constructive feedback to help students improve accuracy and pronunciation.",
     hasPreComment: false,
     preComment: undefined,
     good: false,
@@ -334,7 +359,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-10",
     number: "7.1",
     title: "Asking targeted Questions",
-    description: "Consistently asks purposeful questions that allow students to demonstrate understanding.",
+    description: "Consistently asks purposeful questions that align with lesson objectives and engage all students.",
     hasPreComment: true,
     preComment: "You asked all questions in the lesson plan.",
     good: false,
@@ -347,7 +372,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-11",
     number: "7.3",
     title: "Using Effective Transitions",
-    description: "Uses transitions in the lesson plans or smoothly connects activities to maintain lesson flow.",
+    description: "Uses transitions in the Lesson Plans or smoothly connects lesson components with purposeful transitions that reinforce objectives.",
     hasPreComment: true,
     preComment: "You conducted engaging transitions.",
     good: false,
@@ -360,7 +385,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-12",
     number: "7.4 – 8.1",
     title: "Positive Presence and Participation",
-    description: "- Utilizes gestures, expressions, and prompts to encourage active student participation. - Builds a positive atmosphere that supports confident language use.",
+    description: "- Utilizes gestures, expressions, and prompts to actively engage all students in lessons.\n- Builds on student responses.\n- Uses props students are interested in that relate to the target words and expressions.\n- Maintains a positive demeanor with engaging facial expressions, body language, and voice that foster a joyful classroom.",
     hasPreComment: false,
     preComment: undefined,
     good: false,
@@ -373,7 +398,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-13",
     number: "7.5",
     title: "Allowing Time for Student Responses",
-    description: "Consistently provides appropriate wait time for student responses.",
+    description: "Consistently provides appropriate wait time for students to think and respond using English.",
     hasPreComment: true,
     preComment: "You gave students enough time to think before inviting them to answer questions.",
     good: false,
@@ -399,7 +424,7 @@ const INITIAL_INDICATORS: IndicatorState[] = [
     id: "ind-15",
     number: "8.2",
     title: "Using Gestures and Props",
-    description: "- Purposefully integrates gestures and props to enhance comprehension and retention. - Points at the pictures while saying the corresponding words.",
+    description: "- Purposefully integrates gestures and props to enhance comprehension and retention.\n- Points at the pictures while saying the target word, purposefully connecting the word with the image.",
     hasPreComment: true,
     preComment: "You used gestures and props effectively, pointing precisely at the pictures and helping students understand the content better.",
     good: false,
@@ -610,6 +635,80 @@ const [lastServerVersion, setLastServerVersion] = useState<number>(0);
 // Add this near your other useState hooks
 const lastServerVersionRef = useRef(lastServerVersion);
 
+// Add this state
+const [isResizerLocked, setIsResizerLocked] = useState(false);
+const [isCanvasLocked, setIsCanvasLocked] = useState(false);
+// Update the startSidebarResize function
+const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+  // 🔒 STOP if locked
+  if (isResizerLocked) return; 
+  
+  e.preventDefault(); 
+  setIsSidebarResizing(true);
+}, [isResizerLocked]);
+
+// --- SIDEBAR RESIZE STATE ---
+  const [sidebarWidth, setSidebarWidth] = useState(getPersistedSidebarWidth);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+  //   // Prevent text selection during drag
+  //   e.preventDefault(); 
+  //   setIsSidebarResizing(true);
+  // }, []);
+
+  const doSidebarResize = useCallback(
+    (e: MouseEvent | TouchEvent) => {
+      if (!isSidebarResizing) return;
+      
+      const clientX = (e as MouseEvent).clientX ?? (e as TouchEvent).touches[0].clientX;
+      
+      // Calculate new width based on pointer position
+      // Assuming sidebar is on the left, width is just clientX
+      // If there is padding/margins on the left, you might need to adjust (e.g. clientX - 16)
+      let newWidth = clientX; 
+      
+      // Constrain
+      newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
+      
+      setSidebarWidth(newWidth);
+    },
+    [isSidebarResizing]
+  );
+
+  const stopSidebarResize = useCallback(() => {
+    if (isSidebarResizing) {
+      setIsSidebarResizing(false);
+      setPersistedSidebarWidth(sidebarWidth);
+      window.dispatchEvent(new Event("resize")); // Trigger resize for canvas/charts if needed
+    }
+  }, [isSidebarResizing, sidebarWidth]);
+
+  // Attach Resize Listeners
+  useEffect(() => {
+    if (isSidebarResizing) {
+      window.addEventListener("mousemove", doSidebarResize);
+      window.addEventListener("mouseup", stopSidebarResize);
+      window.addEventListener("touchmove", doSidebarResize);
+      window.addEventListener("touchend", stopSidebarResize);
+      document.body.style.cursor = "col-resize"; // Visual feedback
+      document.body.style.userSelect = "none";   // Prevent selection
+    } else {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+
+    return () => {
+      window.removeEventListener("mousemove", doSidebarResize);
+      window.removeEventListener("mouseup", stopSidebarResize);
+      window.removeEventListener("touchmove", doSidebarResize);
+      window.removeEventListener("touchend", stopSidebarResize);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isSidebarResizing, doSidebarResize, stopSidebarResize]);
+
 // Keep the Ref in sync with the State automatically
 useEffect(() => {
   lastServerVersionRef.current = lastServerVersion;
@@ -641,6 +740,7 @@ const stopCanvasResize = useCallback(() => {
 
 const startCanvasResize = useCallback(
   (e: React.MouseEvent | React.TouchEvent) => {
+    if (isCanvasLocked) return;
     const isMouseEvent = (e as React.MouseEvent).button !== undefined;
     if (isMouseEvent && (e as React.MouseEvent).button !== 0) return;
     
@@ -655,7 +755,7 @@ const startCanvasResize = useCallback(
     startHeightRef.current = canvasHeight; 
     setIsResizing(true);
   },
-  [canvasHeight]
+  [canvasHeight, isCanvasLocked]
 );
 
 const doTextareaResize = useCallback(
@@ -2006,207 +2106,324 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
       </div>
 
       <section className="main-layout">
-        {/* LEFT: indicators list OR collapsed toggle */}
-        {sidebarCollapsed ? (
-          <div className="indicator-collapse-toggle">
-            <button
-              type="button"
-              onClick={() => {
-                setSidebarCollapsed(false);
-                window.dispatchEvent(new Event("resize"));
-              }}
-              title="Expand indicators"
-            >
-              Indicators ▸
-            </button>
+
+{sidebarCollapsed ? (
+  <div className="indicator-collapse-toggle">
+    <button
+      type="button"
+      onClick={() => {
+        setSidebarCollapsed(false);
+        window.dispatchEvent(new Event("resize"));
+      }}
+      title="Expand indicators"
+    >
+      Indicators ▸
+    </button>
+  </div>
+) : (
+  <>
+    {/* 1. THE RESIZABLE PANEL */}
+    <div 
+      className="indicator-panel" 
+      style={{ 
+        width: sidebarWidth, 
+        flexShrink: 0, 
+        display: "flex", 
+        flexDirection: "column",
+        // 🟢 FIX: Ensure transition doesn't fight with drag
+        transition: isSidebarResizing ? "none" : "width 0.2s ease-out"
+      }}
+    >
+      <div className="indicator-panel-header">
+        <div style={{ overflow: "hidden" }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Indicators</div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis"
+            }}
+          >
+            {sidebarWidth < 260 ? "Select item" : "Tap to switch or mark"}
           </div>
-        ) : (
-          <div className="indicator-panel">
-            <div className="indicator-panel-header">
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>Indicators</div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  Tap to switch, mark Good / Growth, or insert a comment.
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <select
-                  className="select"
-                  value={filterMode}
-                  onChange={(e) =>
-                    setFilterMode(e.target.value as "all" | "good" | "growth")
-                  }
-                >
-                  <option value="all">All</option>
-                  <option value="good">Good points</option>
-                  <option value="growth">Growth areas</option>
-                  <option value="favorites">Favorites ⭐</option>
-                </select>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setSidebarCollapsed(true);
-                    window.dispatchEvent(new Event("resize"));
-                  }}
-                  title="Collapse indicators"
-                >
-                  ⮜
-                </button>
-              </div>
-            </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {/* Hide dropdown if super narrow */}
+          {sidebarWidth >= 300 && (
+            <select
+              className="select"
+              value={filterMode}
+              onChange={(e) =>
+                setFilterMode(e.target.value as "all" | "good" | "growth")
+              }
+              style={{ width: 90 }}
+            >
+              <option value="all">All</option>
+              <option value="good">Good</option>
+              <option value="growth">Growth</option>
+            </select>
+          )}
+          {/* 🔒 NEW LOCK BUTTON */}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setIsResizerLocked(!isResizerLocked)}
+            title={isResizerLocked ? "Unlock width resizing" : "Lock width resizing (Palm rejection)"}
+            style={{ 
+              padding: "4px 8px", 
+              color: isResizerLocked ? "#f43f5e" : "var(--text-muted)", // Red if locked
+              background: isResizerLocked ? "rgba(244, 63, 94, 0.1)" : "transparent",
+              border: isResizerLocked ? "1px solid rgba(244, 63, 94, 0.3)" : "1px solid transparent"
+            }}
+          >
+            {isResizerLocked ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
+            )}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setSidebarCollapsed(true);
+              window.dispatchEvent(new Event("resize"));
+            }}
+            title="Collapse indicators"
+          >
+            ⮜
+          </button>
+        </div>
+      </div>
 
-            <div className="indicator-list">
-              {indicators.map((ind, idx) => {
-                if (filterMode === "good" && !ind.good) return null;
-                if (filterMode === "growth" && !ind.growth) return null;
-                if (filterMode === "favorites" && !ind.favorite) return null;
+      <div className="indicator-list">
+        {indicators.map((ind, idx) => {
+          if (filterMode === "good" && !ind.good) return null;
+          if (filterMode === "growth" && !ind.growth) return null;
+          if (filterMode === "favorites" && !ind.favorite) return null;
+          
+          const showDescription = sidebarWidth > 380; 
+          const showAdminLabel = sidebarWidth > 300; 
+          const isDescExpanded = expandedDesc[ind.id];
 
-                return (
+          return (
+            <div
+              key={ind.id}
+              data-indicator-id={ind.id}
+              className={`indicator-row ${idx === activeIndex ? "active" : ""}`}
+              onClick={() => {
+                if (canvasDirty) {
+                  handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
+                  setCanvasDirty(false);
+                }
+                setActiveIndex(idx);
+              }}
+              style={{
+                display: "flex",
+                flexDirection: "column", 
+                alignItems: "flex-start", 
+                gap: 8, 
+                padding: "12px 14px"
+              }}
+            >
+              {/* --- TITLE (Wrapping Enabled) --- */}
+              <div 
+                className="indicator-title" 
+                style={{ 
+                  width: "100%",
+                  whiteSpace: "normal", // 🟢 ALLOW WRAPPING
+                  textAlign: "left",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  lineHeight: 1.3,
+                  color: "#f8fafc"
+                }}
+              >
+                <span style={{ marginRight: 6, opacity: 0.8 }}>{ind.number}</span>
+                {ind.title}
+              </div>
+
+              {/* --- DESCRIPTION --- */}
+              {showDescription && (
+                <div style={{ width: "100%", paddingLeft: 0, marginTop: 2 }}>
                   <div
-                    key={ind.id}
-                    data-indicator-id={ind.id}
-                    className={`indicator-row ${idx === activeIndex ? "active" : ""}`}
-                    onClick={() => {
-                      if (canvasDirty) {
-                        handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-                        setCanvasDirty(false);
-                      }
-                      setActiveIndex(idx);
+                    style={isDescExpanded ? {
+                      // EXPANDED
+                      display: "block",
+                      whiteSpace: "pre-wrap",
+                      color: "#cbd5e1", 
+                      fontSize: 12, 
+                      lineHeight: 1.5,
+                      marginBottom: 4,
+                      overflow: "visible"
+                    } : {
+                      // COLLAPSED
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "pre-wrap",
+                      color: "#cbd5e1", 
+                      fontSize: 12, 
+                      lineHeight: 1.5,
+                      marginBottom: 4
+                    }} 
+                  >
+                    {/* ⚠️ NOTE: If this text looks short, your browser is loading old saved draft data. */}
+                    {ind.description}
+                  </div>
+                  
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleDescription(ind.id);
+                    }}
+                    style={{ 
+                      background: "none", 
+                      border: "none", 
+                      padding: "4px 0",
+                      color: "var(--accent)", 
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4
                     }}
                   >
-                    <div>
-                      <div className="indicator-title">
-                        <strong>{ind.number}</strong> — {ind.title}
-                      </div>
-                      <div
-                        className={
-                          expandedDesc[ind.id]
-                            ? "indicator-desc expanded"
-                            : "indicator-desc collapsed"
-                        }
-                      >
-                        {ind.description}
-                      </div>
-
-                      <button
-                        type="button"
-                        className="desc-toggle-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleDescription(ind.id);
-                        }}
-                      >
-                        {expandedDesc[ind.id] ? "Show less" : "Show more"}
-                      </button>
-                    </div>
-
-                   <div className="indicator-actions">
-                    <div className="indicator-status-dots"
-                        onClick={(e) => e.stopPropagation()}
-                        title={[
-                          (ind.strokes && ind.strokes.length > 0) ? "Has handwriting" : "",
-                          ind.commentText?.trim().length > 0 ? "Has comment" : "",
-                          ind.ocrUsed ? "OCR has been run" : "",
-                        ].filter(Boolean).join(" • ")}
-                    >
-                      {ind.strokes && ind.strokes.length > 0 && (
-                        <span className="indicator-dot indicator-dot-ink" />
-                      )}
-                      {ind.commentText && ind.commentText.trim().length > 0 && (
-                        <span className="indicator-dot indicator-dot-comment" />
-                      )}
-                      {ind.ocrUsed && (
-                        <span className="indicator-dot indicator-dot-ocr" />
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFavorite(idx);
-                      }}
-                      title={ind.favorite ? "Unfavorite" : "Mark as favorite"}
-                    >
-                      {ind.favorite ? "⭐" : "☆"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`btn rating-btn rating-good ${
-                        ind.good ? "rating-selected" : ""
-                      }`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleGood(idx);
-                      }}
-                      title="Mark as Good point"
-                    >
-                      ✓
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`btn rating-btn rating-growth ${
-                        ind.growth ? "rating-selected" : ""
-                      }`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleGrowth(idx);
-                      }}
-                      title="Mark as Growth area"
-                    >
-                      ✕
-                    </button>
-
-                    {ind.hasPreComment && (
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          insertPreComment(idx);
-                        }}
-                        title="Insert pre-created comment"
-                      >
-                        💬
-                      </button>
+                    {isDescExpanded ? (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+                        See less
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                        See more
+                      </>
                     )}
+                  </button>
+                </div>
+              )}
 
-                    <label
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        marginLeft: 4,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 10,
-                        color: "var(--text-muted)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!!ind.includeInTrainerSummary}
-                        onChange={() => toggleIncludeInTrainerSummary(idx)}
-                        style={{ width: 12, height: 12 }}
-                      />
-                      <span>Trainer summary</span>
-                    </label>
-                  </div>
-                  </div>
-                );
-              })}
+              {/* --- ICONS --- */}
+              <div 
+                className="indicator-actions" 
+                style={{ 
+                  marginTop: 4, 
+                  display: "flex", 
+                  alignItems: "center", 
+                  justifyContent: "flex-start", 
+                  gap: 10,
+                  width: "100%"
+                }}
+              >
+                <div className="indicator-status-dots" onClick={(e) => e.stopPropagation()}>
+                   {ind.strokes && ind.strokes.length > 0 && <span className="indicator-dot indicator-dot-ink" />}
+                   {ind.commentText && ind.commentText.trim().length > 0 && <span className="indicator-dot indicator-dot-comment" />}
+                   {ind.ocrUsed && <span className="indicator-dot indicator-dot-ocr" />}
+                </div>
+
+                {showDescription && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={(e) => { e.stopPropagation(); toggleFavorite(idx); }}
+                  >
+                    {ind.favorite ? "⭐" : "☆"}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className={`btn rating-btn rating-good ${ind.good ? "rating-selected" : ""}`}
+                  onClick={(e) => { e.stopPropagation(); toggleGood(idx); }}
+                >
+                  ✓
+                </button>
+
+                <button
+                  type="button"
+                  className={`btn rating-btn rating-growth ${ind.growth ? "rating-selected" : ""}`}
+                  onClick={(e) => { e.stopPropagation(); toggleGrowth(idx); }}
+                >
+                  ✕
+                </button>
+
+                {showDescription && ind.hasPreComment && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={(e) => { e.stopPropagation(); insertPreComment(idx); }}
+                  >
+                    💬
+                  </button>
+                )}
+
+                <label
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    marginLeft: "auto", 
+                    display: "flex", alignItems: "center", gap: 6,
+                    fontSize: 10, color: "var(--text-muted)", cursor: "pointer",
+                    whiteSpace: "nowrap"
+                  }}
+                  title="Include in Admin Report"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!ind.includeInTrainerSummary}
+                    onChange={() => toggleIncludeInTrainerSummary(idx)}
+                    style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
+                  />
+                  {showAdminLabel && <span>Admin report</span>}
+                </label>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })}
+      </div> 
+    </div>
+{/* 2. THE VISIBLE RESIZE HANDLE (Updated visual state) */}
+    <div
+      className="sidebar-resize-handle"
+      onMouseDown={startSidebarResize}
+      onTouchStart={startSidebarResize}
+      style={{
+        width: 12,
+        // 🔒 CHANGE CURSOR: Indicates disabled state when locked
+        cursor: isResizerLocked ? "not-allowed" : "col-resize", 
+        background: "transparent",
+        flexShrink: 0,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // 🔒 CHANGE BORDER STYLE: Solid if Active/Unlocked, Dashed/Faint if Locked
+        borderLeft: isSidebarResizing 
+          ? "2px solid var(--accent)" 
+          : (isResizerLocked ? "1px dashed rgba(71, 85, 105, 0.5)" : "1px solid #334155"),
+        transition: "border-color 0.2s"
+      }}
+      // Disable hover highlight if locked
+      onMouseEnter={(e) => !isResizerLocked && (e.currentTarget.style.borderLeft = "2px solid var(--accent)")}
+      onMouseLeave={(e) => !isSidebarResizing && !isResizerLocked && (e.currentTarget.style.borderLeft = "1px solid #334155")}
+    >
+      {/* Optional Grip Icon - Hide if locked to visually indicate "disabled" */}
+      {!isResizerLocked && (
+        <div style={{ 
+          width: 4, height: 20, 
+          borderRadius: 2, 
+          background: isSidebarResizing ? "var(--accent)" : "#475569" 
+        }} />
+      )}
+    </div>
+  </>
+)}
 
         {/* RIGHT: active indicator + comments (canvas placeholder for now) */}
         <div className="workspace-container">
@@ -2234,6 +2451,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 >
                   {isCanvasVisible ? "▼" : "▲"}
                 </button>
+
                 <div>
                   <div className="canvas-indicator-title">
                     {active.number} — {active.title}
@@ -2289,6 +2507,8 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 strokes={active.strokes}
                 onChange={(s) => handleStrokesChange(activeIndex, s)}
                 readOnly={isLocked || !isCanvasVisible} 
+                isResizeLocked={isCanvasLocked}
+                onToggleResizeLock={() => setIsCanvasLocked(!isCanvasLocked)}
               />
             </div>
  
@@ -2297,6 +2517,12 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 className="canvas-resize-handle"
                 onMouseDown={startCanvasResize}
                 onTouchStart={startCanvasResize}
+                style={{
+                  // 🔒 Visual feedback for locked state
+                  cursor: isCanvasLocked ? "default" : "row-resize",
+                  opacity: isCanvasLocked ? 0.2 : 1,
+                  pointerEvents: isCanvasLocked ? "none" : "auto" 
+                }}
               />
             )}
 
