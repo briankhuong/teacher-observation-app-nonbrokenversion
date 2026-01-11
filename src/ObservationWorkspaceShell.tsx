@@ -2353,6 +2353,47 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 >
                   ✕
                 </button>
+                {/* 🟢 NEW: Insert Pre-Comment Button (Styled & Always Visible) */}
+                {ind.hasPreComment && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={(e) => { e.stopPropagation(); insertPreComment(idx); }}
+                    title="Insert default comment"
+                    style={{
+                      // Match the size/shape of the Good/Growth buttons
+                      width: 28, 
+                      height: 28,
+                      padding: 0,
+                      borderRadius: "50%", // Circular
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "transparent",
+                      border: "1px solid #475569", // Muted border color
+                      color: "#94a3b8",            // Muted icon color
+                      transition: "all 0.2s"
+                    }}
+                    // Add hover effect via inline styles or class if you prefer
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "#60a5fa"; // Blue on hover
+                      e.currentTarget.style.color = "#60a5fa";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "#475569";
+                      e.currentTarget.style.color = "#94a3b8";
+                    }}
+                  >
+                    {/* Chat Bubble with Dots Icon */}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+                      {/* Small dots inside */}
+                      <circle cx="8" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
+                      <circle cx="12" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
+                      <circle cx="16" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
+                    </svg>
+                  </button>
+                )}
 
                 {showDescription && ind.hasPreComment && (
                   <button
