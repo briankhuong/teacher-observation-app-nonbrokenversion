@@ -2517,22 +2517,207 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 </div>
               </div>
             </div>
+              
+           {/* 🟢 MODIFIED: Strict Alignment using Flexbox and Box-Sizing */}
+{sidebarCollapsed && (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",      // 👈 Vertical Center axis
+      justifyContent: "flex-start",
+      gap: 12,
+      marginBottom: 10,
+      marginTop: 4,
+      height: "32px",            // 👈 Hard constraint on container
+    }}
+  >
+    {/* 1. The Dropdown Group */}
+    <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+      <label 
+        className="quick-jump-label" 
+        style={{ 
+          margin: "0 8px 0 0", 
+          whiteSpace: 'nowrap',
+          fontSize: 13,
+          color: "var(--text-muted)",
+          lineHeight: 1
+        }}
+      >
+        Jump to:
+      </label>
+      <select
+        value={activeIndex}
+        onChange={(e) => setActiveIndex(Number(e.target.value))}
+        style={{ 
+           // Sizing
+           height: "32px", 
+           minWidth: "220px",
+           maxWidth: "300px",
+           boxSizing: "border-box", // Includes padding/border in height
+           
+           // Reset defaults
+           margin: 0,
+           padding: "0 24px 0 8px", // Right padding for arrow space
+           
+           // Visuals
+           background: "#0f172a", // Dark background to match theme
+           color: "#e2e8f0",
+           border: "1px solid #334155",
+           borderRadius: "6px",
+           fontSize: "13px",
+           outline: "none",
+           cursor: "pointer"
+        }}
+      >
+        {indicators.map((i, idx) => (
+          <option key={i.id} value={idx}>
+            {i.number} — {i.title}
+          </option>
+        ))}
+      </select>
+    </div>
 
-            {/* QUICK JUMP DROPDOWN */}
-            <div className="quick-jump">
-              <label className="quick-jump-label">Jump to:</label>
-              <select
-                className="quick-jump-select"
-                value={activeIndex}
-                onChange={(e) => setActiveIndex(Number(e.target.value))}
-              >
-                {indicators.map((i, idx) => (
-                  <option key={i.id} value={idx}>
-                    {i.number} — {i.title}
-                  </option>
-                ))}
-              </select>
-            </div>
+    {/* 2. The Action Buttons Group */}
+    <div style={{ display: "flex", alignItems: "center", gap: 8, height: "100%" }}>
+      
+      {/* Good Button */}
+      <button
+        type="button"
+        onClick={() => toggleGood(activeIndex)}
+        title="Mark as Good"
+        style={{ 
+          // 🛑 STRICT RESET
+          appearance: "none",
+          margin: 0,
+          padding: 0,
+          
+          // Sizing
+          height: "32px", 
+          width: "32px",
+          minWidth: "32px", 
+          boxSizing: "border-box",
+          
+          // Visuals
+          borderRadius: "50%",
+          display: "flex", 
+          alignItems: "center", 
+          justifyContent: "center",
+          border: active.good ? "1px solid transparent" : "1px solid #334155",
+          background: active.good ? "var(--color-good, #22c55e)" : "transparent",
+          color: active.good ? "#fff" : "#94a3b8",
+          cursor: "pointer",
+          fontSize: "14px",
+          transition: "all 0.1s"
+        }} 
+      >
+        ✓
+      </button>
+
+      {/* Growth Button */}
+      <button
+        type="button"
+        onClick={() => toggleGrowth(activeIndex)}
+        title="Mark as Growth"
+        style={{ 
+          appearance: "none",
+          margin: 0,
+          padding: 0,
+          height: "32px", 
+          width: "32px", 
+          minWidth: "32px", 
+          boxSizing: "border-box",
+          borderRadius: "50%",
+          display: "flex", 
+          alignItems: "center", 
+          justifyContent: "center",
+          border: active.growth ? "1px solid transparent" : "1px solid #334155",
+          background: active.growth ? "var(--color-growth, #ef4444)" : "transparent",
+          color: active.growth ? "#fff" : "#94a3b8",
+          cursor: "pointer",
+          fontSize: "14px",
+          transition: "all 0.1s"
+        }} 
+      >
+        ✕
+      </button>
+
+      {/* Pre-comment Button */}
+      {active.hasPreComment && (
+         <button
+            type="button"
+            onClick={() => insertPreComment(activeIndex)}
+            title="Insert default comment"
+            style={{
+              appearance: "none",
+              margin: 0,
+              padding: 0,
+              height: "32px", 
+              width: "32px", 
+              minWidth: "32px", 
+              boxSizing: "border-box",
+              borderRadius: "50%", 
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "transparent",
+              border: "1px solid #475569", 
+              color: "#94a3b8",
+              cursor: "pointer",
+              transition: "all 0.2s"            
+            }}
+             onMouseEnter={(e) => {
+               e.currentTarget.style.borderColor = "#60a5fa"; 
+               e.currentTarget.style.color = "#60a5fa";
+            }}
+            onMouseLeave={(e) => {
+               e.currentTarget.style.borderColor = "#475569";
+               e.currentTarget.style.color = "#94a3b8";
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+              <circle cx="8" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
+              <circle cx="12" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
+              <circle cx="16" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
+            </svg>
+          </button>
+      )}
+
+      {/* Admin Checkbox */}
+      <label
+        style={{
+          display: "flex", 
+          alignItems: "center", 
+          gap: 6,
+          fontSize: 11, 
+          color: "var(--text-muted)", 
+          cursor: "pointer",
+          whiteSpace: "nowrap", 
+          marginLeft: 6,
+          height: "32px", 
+          margin: 0,
+          userSelect: "none"
+        }}
+        title="Include in Admin Report"
+      >
+        <input
+          type="checkbox"
+          checked={!!active.includeInTrainerSummary}
+          onChange={() => toggleIncludeInTrainerSummary(activeIndex)}
+          style={{ 
+            width: 14, 
+            height: 14, 
+            margin: 0, 
+            accentColor: "var(--accent)",
+            cursor: "pointer" 
+          }}
+        />
+        <span>Admin</span>
+      </label>
+
+    </div>
+  </div>
+)}         
 
             <div
               className={`canvas-resizable-wrapper ${isCanvasVisible ? '' : 'collapsed'}`}
