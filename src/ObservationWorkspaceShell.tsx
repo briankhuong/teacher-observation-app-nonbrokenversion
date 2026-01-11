@@ -2395,16 +2395,6 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   </button>
                 )}
 
-                {showDescription && ind.hasPreComment && (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={(e) => { e.stopPropagation(); insertPreComment(idx); }}
-                  >
-                    💬
-                  </button>
-                )}
-
                 <label
                   onClick={(e) => e.stopPropagation()}
                   style={{
