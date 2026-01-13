@@ -1999,7 +1999,9 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
 
   return (
     <div className="workspace-root">
-      <div className="workspace-top-bar">
+      <div className="workspace-top-bar"
+      style={{ zIndex: 100, position: 'relative' }}
+      >
         <div className="workspace-top-meta">
           <div className="workspace-top-line">
             <button className="btn" onClick={handleBackToDashboard} type="button">
@@ -2430,7 +2432,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
         cursor: isResizerLocked ? "not-allowed" : "col-resize", 
         background: "transparent",
         flexShrink: 0,
-        zIndex: 50,
+        zIndex: 10,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -2901,7 +2903,10 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
           </div>
 {/* 🔍 PREVIEW MODAL (Uniform Buttons & Resizable Inputs) */}
 {showExportPreview && exportPreview && (
-  <div className="scratchpad-backdrop">
+  <div className="scratchpad-backdrop"
+   style={{ zIndex: 1000 }}
+  >
+   
     <div 
       className="scratchpad-modal" 
       style={{ 
