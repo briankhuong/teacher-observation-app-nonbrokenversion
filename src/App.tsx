@@ -8,6 +8,10 @@ import { SchoolsScreen } from "./SchoolsScreen";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
 import { TrainerSettingsModal } from "./components/TrainerSettingsModal";
+// src/App.tsx
+import { get, set, keys, clear } from 'idb-keyval';
+import { INITIAL_INDICATORS } from "./constants"; // 🟢 NEW (Correct)
+// ... existing imports
 
 
 // --- Types ---
@@ -32,7 +36,48 @@ interface SelectedObservationMeta extends NewObservationMeta {
 // --- Main App Component ---
 const App: React.FC = () => {
   const { signOut } = useAuth();
+
+// Inside src/App.tsx
+
+const handleLogout = async () => {
+  // 1. Check for unsynced data first
+  const allKeys = await keys();
+  const observationKeys = allKeys.filter(
+    (k) => typeof k === 'string' && k.startsWith('obs-v1-')
+  );
   
+  let unsyncedCount = 0;
+  
+  // Check each observation to see if it needs syncing
+  for (const key of observationKeys) {
+    const obs = await get(key);
+    // If local update time is newer than last sync time, it's unsynced
+    if (obs && obs.updatedAt > (obs.lastSync || 0)) {
+      unsyncedCount++;
+    }
+  }
+
+  // 2. If unsynced items exist, WARN the user aggressively
+  if (unsyncedCount > 0) {
+    const forceLogout = window.confirm(
+      `⚠️ DANGER: You have ${unsyncedCount} unsynced observations!\n\n` +
+      `If you sign out now, these will be PERMANENTLY LOST.\n\n` +
+      `Are you sure you want to delete them and sign out?`
+    );
+    if (!forceLogout) return; // Stop! Don't logout.
+  } else {
+    // Normal confirmation if everything is safe
+    if (!window.confirm("Are you sure you want to sign out?")) return;
+  }
+
+  try {
+    await clear(); // Now it is safe(r) to wipe
+    await signOut(); 
+    window.location.reload(); 
+  } catch (e) {
+    console.error("Logout error:", e);
+  }
+};
   // Local state for session handling (The Login Fix)
 
   const [showNewObservationForm, setShowNewObservationForm] = useState(false);
@@ -175,7 +220,8 @@ const App: React.FC = () => {
             Schools
           </button>
 
-          <button className="btn-ghost" type="button" onClick={signOut}>
+          {/* 🟢 WITH THIS: */}
+          <button className="btn-ghost" type="button" onClick={handleLogout}>
             Sign out
           </button>
 
@@ -290,33 +336,48 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const [schoolsLoading, setSchoolsLoading] = useState(true);
   const [schoolsError, setSchoolsError] = useState<string | null>(null);
 
-  // 1. Load teachers (Filtered by User ID)
+// 1. Load teachers (Network First -> Cache Fallback)
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
 
     async function loadTeachers() {
-      try {
-        setTeachersLoading(true);
-        setTeachersError(null);
+      setTeachersLoading(true);
+      let loadedData: TeacherOption[] = [];
 
-        const { data, error } = await supabase
-          .from("teachers")
-          .select("id, name, email, school_name, campus, worksheet_url")
-          .eq("trainer_id", user!.id)
-          .order("name", { ascending: true });
+      // A. Try Network First
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase
+            .from("teachers")
+            .select("id, name, email, school_name, campus, worksheet_url")
+            .eq("trainer_id", user!.id)
+            .order("name", { ascending: true });
 
-        if (error) {
-          console.error("[DB] load teachers error", error);
-          if (!cancelled) setTeachersError(error.message);
-          return;
+          if (data && !error) {
+            loadedData = data as TeacherOption[];
+            // Update the cache so it's fresh for next time
+            await set('offline_teachers', loadedData); 
+          }
+        } catch (err) {
+          console.warn("Network fetch failed, checking cache...");
         }
+      }
 
-        if (!cancelled && data) {
-          setTeachers(data as TeacherOption[]);
+      // B. If Network failed or yielded nothing (Offline), load from Cache
+      if (loadedData.length === 0) {
+        console.log("⚠️ Loading teachers from offline cache...");
+        // 'offline_teachers' matches the key we saved in DashboardShell
+        const cached = await get<TeacherOption[]>('offline_teachers');
+        if (cached) {
+          loadedData = cached;
         }
-      } finally {
-        if (!cancelled) setTeachersLoading(false);
+      }
+
+      // C. Set State
+      if (!cancelled) {
+        setTeachers(loadedData);
+        setTeachersLoading(false);
       }
     }
 
@@ -324,8 +385,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     return () => { cancelled = true; };
   }, [user]);
 
-  // 2. Load schools
-  useEffect(() => {
+useEffect(() => {
     if (!user) return;
     let cancelled = false;
 
@@ -419,7 +479,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     setCampus("");
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+ const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!teacherName || !schoolName || !campus || !unit || !lesson || !date) {
@@ -434,51 +494,86 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
 
     const currentUser = user as any;
     let teacherId = selectedTeacherId;
-    setAutoCreatedTeacherMsg(null);
+    
+    // Generate a real UUID that works for both Offline (IndexedDB) and Online (Supabase)
+    const newObsId = crypto.randomUUID();
 
-    // 1) If no teacher selected, create one
+    // ---------------------------------------------------------
+    // 1. HANDLE TEACHER CREATION (Offline & Online logic)
+    // ---------------------------------------------------------
     if (!teacherId) {
-      try {
-        const cleanUrl = worksheetUrl.trim() || null;
-        const { data, error } = await supabase
-          .from("teachers")
-          .insert({
-            trainer_id: currentUser.id,
-            name: teacherName.trim(),
-            email: null,
-            school_name: schoolName,
-            campus,
-            worksheet_url: cleanUrl,
-          })
-          .select("id, worksheet_url")
-          .single();
+      // 🔵 BRANCH A: ONLINE - Create real teacher in DB
+      if (navigator.onLine) {
+        try {
+          const cleanUrl = worksheetUrl.trim() || null;
+          const { data, error } = await supabase
+            .from("teachers")
+            .insert({
+              trainer_id: currentUser.id,
+              name: teacherName.trim(),
+              email: null,
+              school_name: schoolName,
+              campus,
+              worksheet_url: cleanUrl,
+            })
+            .select("id, worksheet_url")
+            .single();
 
-        if (error) {
-          console.error("[DB] create teacher error", error);
-          alert("Could not create teacher in the database.");
-          return;
-        }
+          if (error) {
+            console.error("[DB] create teacher error", error);
+            alert("Could not create teacher in the database.");
+            return;
+          }
 
-        teacherId = data.id;
-        // Optimistically update list
-        setTeachers((prev) => [
-          ...prev,
-          {
+          teacherId = data.id;
+          
+          // Optimistically update list & cache
+          const newTeacherObj = {
             id: data.id,
             name: teacherName.trim(),
             email: null,
             school_name: schoolName,
             campus,
             worksheet_url: data.worksheet_url ?? null,
-          },
-        ]);
-        setSelectedTeacherId(data.id);
-        setWorksheetUrl(data.worksheet_url ?? "");
-        setAutoCreatedTeacherMsg(`New teacher saved: ${teacherName.trim()} — ${schoolName} (${campus})`);
-      } catch (err) {
-        console.error("[DB] unexpected error creating teacher", err);
-        alert("Unexpected error creating teacher.");
-        return;
+          };
+          
+          setTeachers((prev) => [...prev, newTeacherObj]);
+          // 🟢 Save to cache so this new teacher is available offline next time
+          get('cache-teachers-list').then((list: any) => {
+             set('cache-teachers-list', [...(list || []), newTeacherObj]);
+          });
+
+          setSelectedTeacherId(data.id);
+          setWorksheetUrl(data.worksheet_url ?? "");
+          setAutoCreatedTeacherMsg(`New teacher saved: ${teacherName.trim()} — ${schoolName} (${campus})`);
+        
+        } catch (err) {
+          console.error("[DB] unexpected error creating teacher", err);
+          alert("Unexpected error creating teacher.");
+          return;
+        }
+      } 
+      // 🟠 BRANCH B: OFFLINE - Create temporary teacher locally
+      else {
+        console.log("🟠 Offline: Creating temporary teacher...");
+        teacherId = `temp-teacher-${Date.now()}`;
+        
+        const newTeacherObj = {
+            id: teacherId,
+            name: teacherName.trim(),
+            email: null,
+            school_name: schoolName,
+            campus,
+            worksheet_url: worksheetUrl || null,
+        };
+
+        // Update state and cache so the UI reflects it
+        setTeachers((prev) => [...prev, newTeacherObj]);
+        get('cache-teachers-list').then((list: any) => {
+            set('cache-teachers-list', [...(list || []), newTeacherObj]);
+        });
+
+        setSelectedTeacherId(teacherId);
       }
     }
 
@@ -498,10 +593,50 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       date,
     };
 
-    // 3) Insert observation
+
+    // ---------------------------------------------------------
+    // 3. CREATE OBSERVATION (Offline Branch)
+    // ---------------------------------------------------------
+    if (!navigator.onLine) {
+        console.log("🟠 Offline: Initializing workspace in IndexedDB...");
+        
+        // This payload matches "SavedObservationPayload" in WorkspaceShell
+        const offlinePayload = {
+            id: newObsId,
+            meta: { 
+              ...meta, 
+              teacherWorkbookUrl: worksheetUrl || null 
+            },
+            indicators: INITIAL_INDICATORS, // 🟢 Ensure this is imported!
+            status: "draft",
+            updatedAt: Date.now(),
+            scratchpadText: "",
+            lastSync: 0 // 0 means "unsynced"
+        };
+
+        try {
+            // Save to IDB so WorkspaceShell can find it immediately
+            await set(`obs-v1-${newObsId}`, offlinePayload);
+            
+            // Notify parent to switch screens
+            onCreate({
+                observationId: newObsId,
+                ...meta,
+            });
+        } catch (err) {
+            console.error("Offline create failed", err);
+            alert("Storage full or error. Cannot create offline observation.");
+        }
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // 4. CREATE OBSERVATION (Online Branch)
+    // ---------------------------------------------------------
     const { data: obs, error: obsError } = await supabase
       .from("observations")
       .insert({
+        id: newObsId, // Use our generated ID
         trainer_id: currentUser.id,
         teacher_id: teacherId,
         status: "draft",
@@ -524,7 +659,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
       return;
     }
 
-    // 4) Notify parent
+    // 5) Notify parent
     onCreate({
       observationId: obs.id,
       ...meta,
