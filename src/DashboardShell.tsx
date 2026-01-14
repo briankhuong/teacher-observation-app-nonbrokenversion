@@ -15,11 +15,10 @@ import { buildTeacherPreCallHtml } from "./emailTemplates/teacherPreCall";
 import { buildTeacherPostCallHtml } from "./emailTemplates/teacherPostCall";
 import { buildAdminUpdateHtml } from "./emailTemplates/adminUpdate";
 import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
-// Update the import to include the Admin function
+
 import { clientMergeTeacherSheet, clientMergeAdminSheet } from './utils/clientExcelMerge';
 import { EditObservationModal } from './components/EditObservationModal';
-// Import the IndexedDB tools
-import { get, set } from 'idb-keyval';
+import { get, set, keys, del } from 'idb-keyval';
 import { SyncStatusBadge } from './components/SyncStatusBadge';
 import { ConflictResolutionModal } from "./components/ConflictResolutionModal";
 import { loadObservationFromDb, saveObservationToDb } from "./db/observations";
@@ -534,16 +533,16 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const [searchText, setSearchText] = useState("");
   const [recentMergePanel, setRecentMergePanel] =
    useState<RecentMergePanel>(null);
-  // 🟢 INSERT THIS BLOCK START 🟢
+
   // State to hold the settings fetched from DB
-  const [trainerSettings, setTrainerSettings] = useState<{
+  const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
     phone_number?: string;
   } | null>(null);
 
   // Fetch settings when user logs in
   React.useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return; // ✅ Safety check on ID
     const fetchSettings = async () => {
       const { data } = await supabase
         .from("trainer_settings")
@@ -553,8 +552,46 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       if (data) setTrainerSettings(data);
     };
     fetchSettings();
-  }, [user]);
-  // 🟢 INSERT THIS BLOCK END 🟢
+  }, [user?.id]); // ✅ FIXED: Changed [user] to [user?.id]
+
+// 🟢 START: Cache Teachers & Schools for Offline Mode 🟢
+  // This runs automatically in the background when the user is online.
+  React.useEffect(() => {
+    if (!user?.id || !navigator.onLine) return;
+
+    const cacheOfflineResources = async () => {
+      try {
+        console.log("💾 Starting background cache for offline mode...");
+
+        // A. Fetch Teachers
+        const { data: teachers, error: tError } = await supabase
+          .from("teachers")
+          .select("id, name, school_name, campus, email") // 🟢 Added 'campus'
+          .order("name");
+        
+        if (teachers && !tError) {
+          await set("offline_teachers", teachers); // Saves to IndexedDB
+        }
+
+        // B. Fetch Schools
+        const { data: schools, error: sError } = await supabase
+          .from("schools")
+          .select("id, school_name, campus_name")
+          .order("school_name");
+
+        if (schools && !sError) {
+          await set("offline_schools", schools); // Saves to IndexedDB
+        }
+
+        console.log("✅ Teachers and Schools cached for offline use.");
+      } catch (err) {
+        console.warn("⚠️ Failed to cache offline resources:", err);
+      }
+    };
+
+    cacheOfflineResources();
+  }, [user?.id]); 
+  // 🟢 END BLOCK 🟢
 
 
 // NEW: State for tracking Merge process status (Add these two lines)
@@ -588,7 +625,52 @@ const [conflictServerData, setConflictServerData] = React.useState<any>(null);
   const [amSummarySentMap, setAmSummarySentMap] =
     useState<AmSummarySentMap>({});
 
+  
     
+ // Helper to merge Server Cache + Local Offline Files
+async function getMergedDashboardData(userId: string) {
+  // 1. Get the last known list from the server (The "Catalog")
+  const serverCache = (await get('dashboard-cache')) || [];
+
+  // 2. Scan for ALL local files we created/edited (The "Books on the shelf")
+  const allKeys = await keys();
+  const observationKeys = allKeys.filter(
+    (k) => typeof k === 'string' && k.startsWith('obs-v1-')
+  );
+
+  // 3. Load the actual data for these local files
+  const localFiles = await Promise.all(observationKeys.map((k) => get(k)));
+
+  // 4. Format local files to look like database rows
+  const formattedLocalRows = localFiles.map((obs: any) => ({
+    id: obs.id,
+    teacher_name: obs.meta.teacherName,
+    school_name: obs.meta.schoolName,
+    campus: obs.meta.campus,
+    unit: obs.meta.unit,
+    lesson: obs.meta.lesson,
+    support_type: obs.meta.supportType,
+    observation_date: obs.meta.date,
+    status: obs.status,
+    updated_at: new Date(obs.updatedAt).toISOString(),
+    created_at: new Date(obs.updatedAt).toISOString(), // Fallback
+    is_offline_copy: true, // 🟢 Flag so we can show an icon
+  }));
+
+  // 5. Merge! (Local files overwrite Server files if IDs match)
+  const combinedMap = new Map();
+  
+  // Add server items first
+  serverCache.forEach((item: any) => combinedMap.set(item.id, item));
+  
+  // Overwrite/Add local items
+  formattedLocalRows.forEach((item: any) => combinedMap.set(item.id, item));
+
+  // Convert back to array and sort by date
+  return Array.from(combinedMap.values()).sort(
+    (a: any, b: any) => new Date(b.observation_date).getTime() - new Date(a.observation_date).getTime()
+  );
+}   
 
   // --- EMAIL MODAL STATE ---
   const [emailModalState, setEmailModalState] = useState<{
@@ -836,14 +918,39 @@ const handleConflictResolved = async (mergedData: any) => {
   };
 
 React.useEffect(() => {
-    if (!user) {
+    // 🛑 FIX: Check user.id specifically to prevent infinite loops
+    if (!user?.id) {
       setObservations([]);
       return;
     }
 
     const load = async () => {
       let dbData: any[] = [];
+      const processedIds = new Set<string>(); // 🟢 Track what we've seen
       
+      // 🟢 PHASE 0: HANDLE PENDING DELETES (The "Zombie" Fix)
+      // Check if we have items waiting to be deleted
+      let pendingDeletes: string[] = [];
+      try {
+         pendingDeletes = (await get<string[]>("pending_deletes")) || [];
+         
+         // If we are online and have deletions queued, execute them now
+         if (navigator.onLine && pendingDeletes.length > 0) {
+            console.log("🧹 Flushing pending deletes to server:", pendingDeletes);
+            const { error } = await supabase.from("observations").delete().in("id", pendingDeletes);
+            
+            if (!error) {
+               // Success! Clear the queue so we don't try again
+               await del("pending_deletes");
+               pendingDeletes = []; 
+            } else {
+               console.warn("Failed to flush deletes, will retry later", error);
+            }
+         }
+      } catch (err) {
+         console.error("Error handling pending deletes", err);
+      }
+
       // 🟢 PHASE 1: FETCH DATA (Network First -> IndexedDB Fallback)
       try {
         const { data, error } = await supabase
@@ -858,7 +965,8 @@ React.useEffect(() => {
         if (error) throw error;
 
         // ✅ SUCCESS: Save fresh data to "IndexedDB Vault"
-        dbData = data ?? [];
+        // 🟢 CRITICAL: Filter out any items that are currently marked for deletion locally
+        dbData = (data ?? []).filter(row => !pendingDeletes.includes(row.id));
         
         // Save list to Vault (Non-blocking)
         set("dashboard_backup_list", dbData).catch(err => 
@@ -873,146 +981,99 @@ React.useEffect(() => {
           const backup = await get<any[]>("dashboard_backup_list");
           if (backup) {
             console.log("📂 Loaded dashboard from IndexedDB");
-            dbData = backup;
+            // 🟢 CRITICAL: Filter backup list too
+            dbData = backup.filter(row => !pendingDeletes.includes(row.id));
           } else {
             console.error("[Dashboard] No offline backup found.");
             // Fallback to localStorage (Migration support)
             const oldBackup = localStorage.getItem("dashboard_backup_list");
-            if (oldBackup) dbData = JSON.parse(oldBackup);
+            if (oldBackup) {
+               const parsed = JSON.parse(oldBackup);
+               // 🟢 CRITICAL: Filter localStorage list too
+               dbData = Array.isArray(parsed) ? parsed.filter((row: any) => !pendingDeletes.includes(row.id)) : [];
+            }
           }
         } catch (readErr) {
           console.error("Failed to read from IndexedDB", readErr);
         }
       }
 
-      // 🟢 PHASE 2: PROCESS ROWS (Merge with Local Edits)
+// 🟢 PHASE 2: PROCESS SERVER ROWS (Merge with Local Edits)
       const rows: DashboardObservationRow[] = [];
 
       try {
-        // Loop through every observation to check for local changes
         for (const dbRow of dbData) {
+          processedIds.add(dbRow.id); // 🟢 Mark as processed so Phase 3 skips it
           const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
           let parsed: any = null;
           
           try {
-            // Check IndexedDB for the specific observation data
             const localDraft = await get<any>(storageKey);
-            
-            if (localDraft) {
-               parsed = localDraft;
-            } else {
-               // Fallback: Check localStorage
+            if (localDraft) parsed = localDraft;
+            else {
                const rawLocal = localStorage.getItem(storageKey);
                if (rawLocal) parsed = JSON.parse(rawLocal);
             }
-          } catch (err) {
-            console.error("Error parsing local data", err);
-          }
+          } catch (err) { console.error("Error parsing local data", err); }
 
-          // If no local data exists, create a default object from DB data
-          // If no local data exists, create a default object from DB data
           if (!parsed) {
-            // 1. Calculate the Server Time first
-            const dbTime = dbRow.updated_at
-                ? new Date(dbRow.updated_at).getTime()
-                : dbRow.created_at
-                ? new Date(dbRow.created_at).getTime()
-                : Date.now();
-
+            const dbTime = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : Date.now();
             parsed = {
               id: dbRow.id,
               meta: dbRow.meta ?? {},
               indicators: dbRow.indicators ?? [],
               status: dbRow.status ?? "draft",
-              
-              // 2. Set BOTH timestamps to the Server Time.
-              // This tells the UI: "We are perfectly in sync with the server."
               updatedAt: dbTime,
               lastSync: dbTime, 
             };
           }
 
-          // --- 🟢 SYNC STATUS LOGIC (Traffic Light) ---
+          // Sync Status Logic
           const localUpdatedAt = parsed.updatedAt || 0;
           const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
-          
-          let syncStatus: 'synced' | 'local-changes' | 'server-newer' | 'conflict' = 'synced';
-          const BUFFER = 2000; // 2-second buffer for clock differences
+          const BUFFER = 2000;
+          let syncStatus: 'synced' | 'local-changes' | 'server-newer' = 'synced';
 
-          if (localUpdatedAt > dbUpdatedAt + BUFFER) {
-             // ⬆️ Local is newer -> ORANGE PUSH
-             syncStatus = 'local-changes';
-          } else if (dbUpdatedAt > localUpdatedAt + BUFFER) {
-             // ⬇️ Server is newer -> BLUE PULL
-             syncStatus = 'server-newer';
-          } else {
-             // ✅ Timestamps match -> GREEN SYNCED
-             syncStatus = 'synced';
-          }
-          // ---------------------------------------------
+          if (localUpdatedAt > dbUpdatedAt + BUFFER) syncStatus = 'local-changes';
+          else if (dbUpdatedAt > localUpdatedAt + BUFFER) syncStatus = 'server-newer';
 
-          // Normalize indicators
-          const indicatorsArray = Array.isArray(parsed.indicators)
-            ? parsed.indicators
-            : Array.isArray(parsed.indicators?.indicators)
-            ? parsed.indicators.indicators
-            : [];
-
+          // Stats
+          const indicatorsArray = Array.isArray(parsed.indicators) ? parsed.indicators : [];
           const total = indicatorsArray.length;
-          let good = 0;
-          let growth = 0;
-          let progress = 0;
-
+          let good = 0, growth = 0, progress = 0;
           indicatorsArray.forEach((ind: any) => {
-            const hasMark = ind.good || ind.growth;
-            const hasComment = ind.commentText?.trim().length > 0;
-            const hasInk = Array.isArray(ind.strokes) && ind.strokes.length > 0;
-
-            if (hasMark || hasComment || hasInk) progress++;
+            if (ind.good || ind.growth || ind.commentText?.trim()) progress++;
             if (ind.good) good++;
             if (ind.growth) growth++;
           });
+          let statusColor: StatusColor = (growth > 0 && good === 0) ? "growth" : (good > 0 && growth === 0) ? "good" : "mixed";
 
-          let statusColor: StatusColor = "mixed";
-          if (growth > 0 && good === 0) statusColor = "growth";
-          else if (good > 0 && growth === 0) statusColor = "good";
-
-          const obsDateStr: string | undefined =
-            parsed.meta?.date ?? dbRow.observation_date ?? undefined;
-
-          let rawDate: number | null = null;
-          let displayDate = "";
-          let isoDate: string | null = null;
-
-          if (obsDateStr) {
-            isoDate = obsDateStr;
-            rawDate = safeParseTimestamp(obsDateStr);
-            if (rawDate) {
-              displayDate = new Date(rawDate).toLocaleDateString();
-            }
-          } else if (parsed.updatedAt) {
-            rawDate = parsed.updatedAt;
-            displayDate = new Date(parsed.updatedAt).toLocaleDateString();
+          // Date
+          let rawDate = parsed.updatedAt || Date.now();
+          let displayDate = new Date(rawDate).toLocaleDateString();
+          if (parsed.meta?.date) {
+             const ts = safeParseTimestamp(parsed.meta.date);
+             if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
           }
 
           rows.push({
             id: parsed.id,
-            teacherName: parsed.meta.teacherName,
-            schoolName: parsed.meta.schoolName,
-            campus: parsed.meta.campus,
-            unit: parsed.meta.unit,
-            lesson: parsed.meta.lesson,
-            supportType: parsed.meta.supportType,
+            teacherName: parsed.meta.teacherName || "Unknown",
+            schoolName: parsed.meta.schoolName || "Unknown",
+            campus: parsed.meta.campus || "",
+            unit: parsed.meta.unit || "",
+            lesson: parsed.meta.lesson || "",
+            supportType: parsed.meta.supportType || "Visit",
             dateLabel: displayDate,
-            isoDate,
+            isoDate: parsed.meta?.date,
             rawDate,
             status: parsed.status ?? "draft",
             progress,
             totalIndicators: total,
             statusColor,
-            teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? parsed.meta.teacherSheetUrl ?? null,
-            adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? parsed.meta.adminSheetUrl ?? null,
-            adminViewOnlyUrl: parsed.meta.adminViewOnlyUrl ?? parsed.meta.adminWorkbookViewUrl ?? null,
+            teacherWorkbookUrl: parsed.meta.teacherWorkbookUrl ?? null,
+            adminWorkbookUrl: parsed.meta.adminWorkbookUrl ?? null,
+            adminViewOnlyUrl: parsed.meta.adminViewOnlyUrl ?? null,
             admin_summary_vn: dbRow.admin_summary_vn,
             syncStatus,
             meta: parsed.meta ?? {},
@@ -1023,6 +1084,108 @@ React.useEffect(() => {
       } catch (err) {
         console.error("[Dashboard] Unexpected error processing observations", err);
       }
+
+      // 🟢 PHASE 3: SCAN LOCAL FILES & DETECT GHOSTS
+      try {
+        const allKeys = await keys();
+        const serverIdSet = new Set(dbData.map((d) => d.id));
+        const ghostsFound: string[] = []; 
+
+        const keysToFetch = allKeys.filter((k) => {
+          if (typeof k !== "string" || !k.startsWith(STORAGE_PREFIX)) return false;
+          const id = k.replace(STORAGE_PREFIX, "");
+          
+          if (processedIds.has(id)) return false; // 🛑 Prevents Duplicates (Checked against Phase 2)
+          if (pendingDeletes.includes(id)) return false; 
+          return true;
+        });
+
+        const offlineFiles = await Promise.all(keysToFetch.map((key) => get<any>(key)));
+
+        for (const localData of offlineFiles) {
+          if (!localData) continue;
+
+          // Ghost Check
+          const isMissingFromServer = !serverIdSet.has(localData.id);
+          const lastSyncTime = localData.lastSync || 0;
+          const updateTime = localData.updatedAt || 0;
+          const isUnchanged = lastSyncTime >= updateTime;
+
+          if (isMissingFromServer && isUnchanged && navigator.onLine) {
+             ghostsFound.push(localData.id);
+          }
+
+          // Stats
+          const indicatorsArray = Array.isArray(localData.indicators) ? localData.indicators : [];
+          const stats = indicatorsArray.reduce((acc: any, ind: any) => {
+              if (ind.good || ind.growth || ind.commentText?.trim()) acc.progress++;
+              if (ind.good) acc.good++;
+              if (ind.growth) acc.growth++;
+              return acc;
+            }, { good: 0, growth: 0, progress: 0 });
+
+          let statusColor: StatusColor = (stats.growth > 0 && stats.good === 0) ? "growth" : (stats.good > 0 && stats.growth === 0) ? "good" : "mixed";
+
+          let rawDate = localData.updatedAt || Date.now();
+          let displayDate = new Date(rawDate).toLocaleDateString();
+          if (localData.meta?.date) {
+            const ts = safeParseTimestamp(localData.meta.date);
+            if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
+          }
+
+          rows.push({
+            id: localData.id,
+            teacherName: localData.meta?.teacherName || "Unknown",
+            schoolName: localData.meta?.schoolName || "Unknown",
+            campus: localData.meta?.campus || "",
+            unit: localData.meta?.unit || "",
+            lesson: localData.meta?.lesson || "",
+            supportType: localData.meta?.supportType || "Visit",
+            dateLabel: displayDate,
+            isoDate: localData.meta?.date,
+            rawDate,
+            status: localData.status || "draft",
+            progress: stats.progress,
+            totalIndicators: indicatorsArray.length,
+            statusColor,
+            teacherWorkbookUrl: localData.meta?.teacherWorkbookUrl || null,
+            adminWorkbookUrl: localData.meta?.adminWorkbookUrl || null,
+            adminViewOnlyUrl: localData.meta?.adminViewOnlyUrl || null,
+            admin_summary_vn: localData.adminSummaryVN || null,
+            syncStatus: 'local-changes', 
+            meta: localData.meta || {},
+            lastSync: localData.lastSync || 0,
+            updatedAt: localData.updatedAt || 0,
+          });
+        }
+
+        // Warning UI
+        if (ghostsFound.length > 0) {
+           setTimeout(async () => {
+              const confirmDelete = window.confirm(
+                 `We found ${ghostsFound.length} observation(s) that were deleted from the server.\n\n` + 
+                 `Since you haven't edited them, do you want to remove them from this device?`
+              );
+
+              if (confirmDelete) {
+                 const currentPending = (await get<string[]>("pending_deletes")) || [];
+                 await set("pending_deletes", [...new Set([...currentPending, ...ghostsFound])]);
+                 await Promise.all(ghostsFound.map(id => del(`${STORAGE_PREFIX}${id}`)));
+                 setObservations(prev => prev.filter(o => !ghostsFound.includes(o.id)));
+              } else {
+                 await Promise.all(ghostsFound.map(async (id) => {
+                    const key = `${STORAGE_PREFIX}${id}`;
+                    const data = await get<any>(key);
+                    if(data) { data.updatedAt = Date.now(); await set(key, data); }
+                 }));
+                 window.location.reload();
+              }
+           }, 500);
+        }
+      } catch (err) {
+        console.error("Error scanning for new offline files", err);
+      }
+    
 
       // ✅ ENRICH: Bulk fetch defaults (Only if Online)
       let finalRows = rows;
@@ -1036,6 +1199,9 @@ React.useEffect(() => {
         console.warn("Enrichment failed (likely offline)", enrichErr);
       }
       
+      // Sort finally by rawDate (newest first)
+      finalRows.sort((a, b) => (b.rawDate || 0) - (a.rawDate || 0));
+console.log(`📊 Final Rows count: ${finalRows.length}`);
       setObservations(finalRows);
 
       // Load AM summary "sent" markers
@@ -1053,7 +1219,8 @@ React.useEffect(() => {
     };
 
     load();
-  }, [user]);
+  }, [user?.id]); // 🟢 CRITICAL FIX: Only re-run if ID changes, not the whole object
+
 
   /* ------------------------------
       FILTER + SORT + GROUP
@@ -1692,9 +1859,8 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
   };
 
 
-  // ✅ DELETE HANDLER
+// ✅ DELETE HANDLER (Offline Robust + Queue)
   const handleDeleteObservation = async (obs: DashboardObservationRow) => {
-    // 1. Simple Confirmation Step
     const confirmed = window.confirm(
       `Are you sure you want to DELETE the observation for:\n${obs.teacherName}?\n\n⚠️ This action cannot be undone.`
     );
@@ -1702,31 +1868,53 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     if (!confirmed) return;
 
     try {
-      // 2. Delete from Supabase
+      // 🟠 BRANCH 1: OFFLINE MODE
+      if (!navigator.onLine) {
+         console.log("🟠 Offline: Deleting locally & queuing for server...");
+         
+         // 1. Remove from local file storage
+         await del(`${STORAGE_PREFIX}${obs.id}`);
+
+         // 2. Remove from local Backup List
+         try {
+            const currentBackup = (await get<any[]>("dashboard_backup_list")) || [];
+            const updatedBackup = currentBackup.filter(item => item.id !== obs.id);
+            await set("dashboard_backup_list", updatedBackup);
+         } catch (e) { console.warn("Backup list update failed", e); }
+
+         // 3. 🟢 ADD TO PENDING DELETES QUEUE (The Fix)
+         // This remembers "I need to delete ID X" next time I'm online
+         const pending = (await get<string[]>("pending_deletes")) || [];
+         if (!pending.includes(obs.id)) {
+             await set("pending_deletes", [...pending, obs.id]);
+         }
+
+         // 4. Update UI
+         setObservations((prev) => prev.filter((o) => o.id !== obs.id));
+         return;
+      }
+
+      // 🔵 BRANCH 2: ONLINE MODE
       const { error } = await supabase
-        .from("observations") // Make sure this matches your table name
+        .from("observations") 
         .delete()
         .eq("id", obs.id);
 
       if (error) throw error;
 
-      // 3. Update Local State (Remove the card instantly)
       setObservations((prev) => prev.filter((o) => o.id !== obs.id));
-
-      // 4. Cleanup LocalStorage (Optional but recommended)
-      // We try to remove the cached version to free up space
-      try {
-        localStorage.removeItem(`${STORAGE_PREFIX}${obs.id}`);
-      } catch (e) {
-        // Ignore local storage errors
-      }
+      await del(`${STORAGE_PREFIX}${obs.id}`).catch(() => {});
+      
+      // Keep local backup clean
+      const currentBackup = (await get<any[]>("dashboard_backup_list")) || [];
+      const updatedBackup = currentBackup.filter(item => item.id !== obs.id);
+      await set("dashboard_backup_list", updatedBackup);
 
     } catch (err: any) {
       console.error("[Dashboard] delete error", err);
       alert(`Failed to delete observation: ${err.message}`);
     }
   };
-
 
   // NEW: toggle group expanded/collapsed
   const toggleGroupExpanded = (key: string) => {
