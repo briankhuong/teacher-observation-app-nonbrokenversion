@@ -437,48 +437,64 @@ function cleanTextForAdmin(text: string) {
 async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[]) {
   if (rawObs.length === 0) return rawObs;
 
-  // 1. Collect unique keys to query
   const schoolNames = [...new Set(rawObs.map(o => o.schoolName).filter(Boolean))];
   const teacherNames = [...new Set(rawObs.map(o => o.teacherName).filter(Boolean))];
 
-  // 2. Bulk Fetch Schools (for Admin Workbooks)
+  let schoolData: any[] = [];
+  let teacherData: any[] = [];
+
+  // 1. FETCH DATA (Online vs Offline Strategy)
+  if (navigator.onLine) {
+    // Online: Query Supabase
+    if (schoolNames.length > 0) {
+      const { data } = await supabase
+        .from("schools")
+        .select("school_name, admin_workbook_url, admin_workbook_view_url")
+        .in("school_name", schoolNames);
+      schoolData = data || [];
+    }
+    if (teacherNames.length > 0) {
+      const { data } = await supabase
+        .from("teachers")
+        .select("name, school_name, worksheet_url")
+        .in("name", teacherNames);
+      teacherData = data || [];
+    }
+  } else {
+    // Offline: Query IndexedDB
+    try {
+      const allSchools = (await get<any[]>("offline_schools")) || [];
+      const allTeachers = (await get<any[]>("offline_teachers")) || [];
+      
+      // Filter in memory (mimic the DB query)
+      schoolData = allSchools.filter(s => schoolNames.includes(s.school_name));
+      teacherData = allTeachers.filter(t => teacherNames.includes(t.name));
+    } catch (e) {
+      console.warn("Failed to load offline defaults", e);
+    }
+  }
+
+  // 2. Build Maps
   let schoolMap = new Map<string, { adminUrl: string; viewUrl: string }>();
-  if (schoolNames.length > 0) {
-    const { data: schools } = await supabase
-      .from("schools")
-      .select("school_name, admin_workbook_url, admin_workbook_view_url")
-      .in("school_name", schoolNames);
-    
-    schools?.forEach((s: any) => {
-      schoolMap.set(s.school_name, {
-        adminUrl: s.admin_workbook_url,
-        viewUrl: s.admin_workbook_view_url
-      });
+  schoolData.forEach((s: any) => {
+    schoolMap.set(s.school_name, {
+      adminUrl: s.admin_workbook_url,
+      viewUrl: s.admin_workbook_view_url
     });
-  }
+  });
 
-  // 3. Bulk Fetch Teachers (for Teacher Workbooks)
   let teacherMap = new Map<string, string>(); 
-  if (teacherNames.length > 0) {
-    const { data: teachers } = await supabase
-      .from("teachers")
-      .select("name, school_name, worksheet_url")
-      .in("name", teacherNames);
+  teacherData.forEach((t: any) => {
+    const key = `${t.name}|${t.school_name}`; 
+    teacherMap.set(key, t.worksheet_url);
+  });
 
-    teachers?.forEach((t: any) => {
-      // Create a unique key: "TeacherName|SchoolName" to avoid collisions
-      const key = `${t.name}|${t.school_name}`; 
-      teacherMap.set(key, t.worksheet_url);
-    });
-  }
-
-  // 4. Merge Defaults into Observation Objects
+  // 3. Merge Defaults
   return rawObs.map(obs => {
     const sDefaults = schoolMap.get(obs.schoolName);
     const tKey = `${obs.teacherName}|${obs.schoolName}`;
     const tDefaultUrl = teacherMap.get(tKey);
 
-    // Logic: Use existing Meta/Row value -> OR fallback to Default Table value -> OR null
     const finalTeacherUrl = 
       (obs as any).teacherWorkbookUrl ||
       obs.meta?.teacherWorkbookUrl || 
@@ -497,7 +513,6 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
       sDefaults?.viewUrl || 
       null;
 
-    // Return new object with enriched fields attached to top-level and meta
     return {
       ...obs,
       teacherWorkbookUrl: finalTeacherUrl,
@@ -566,7 +581,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         // A. Fetch Teachers
         const { data: teachers, error: tError } = await supabase
           .from("teachers")
-          .select("id, name, school_name, campus, email") // 🟢 Added 'campus'
+          .select("id, name, school_name, campus, email,worksheet_url") // 🟢 Added 'campus'
           .order("name");
         
         if (teachers && !tError) {
@@ -576,7 +591,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         // B. Fetch Schools
         const { data: schools, error: sError } = await supabase
           .from("schools")
-          .select("id, school_name, campus_name")
+          .select("id, school_name, campus_name, admin_workbook_url, admin_workbook_view_url")
           .order("school_name");
 
         if (schools && !sError) {
@@ -1190,11 +1205,11 @@ React.useEffect(() => {
       // ✅ ENRICH: Bulk fetch defaults (Only if Online)
       let finalRows = rows;
       try {
-        if (navigator.onLine) {
+        //if (navigator.onLine) {
            finalRows = await enrichObservationsWithDefaults(rows);
-        } else {
+       // } else {
            console.log("⚠️ Offline: Skipping school/workbook enrichment.");
-        }
+        //}
       } catch (enrichErr) {
         console.warn("Enrichment failed (likely offline)", enrichErr);
       }
@@ -1283,48 +1298,103 @@ const handleSummarySaved = React.useCallback(
     [setObservations]
 );
 
-// Handler for saving edited metadata
+// Handler for saving edited metadata (No Auto-Sync, just marks as 'Push Needed')
 const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: Partial<DashboardObservationRow['meta']>) => {
-  // 1. Update the local state (optimistic UI update)
+  const storageKey = `${STORAGE_PREFIX}${id}`;
+  
+  // 1. Try to get the Current Full Data from IDB (The "Local File")
+  let currentData = await get<any>(storageKey);
+
+  // 2. FALLBACK: If not in IDB, try to find it in the "Backup List" (Server Cache)
+  // This fixes the "Error: Could not find observation" when editing a fresh server item
+  if (!currentData) {
+    try {
+      const backupList = (await get<any[]>("dashboard_backup_list")) || [];
+      const backupItem = backupList.find((item) => item.id === id);
+      
+      if (backupItem) {
+        currentData = {
+          id: backupItem.id,
+          meta: backupItem.meta || {},
+          indicators: backupItem.indicators || [], // Critical: Don't lose indicators!
+          status: backupItem.status || "draft",
+          updatedAt: backupItem.updated_at ? new Date(backupItem.updated_at).getTime() : Date.now(),
+          lastSync: backupItem.updated_at ? new Date(backupItem.updated_at).getTime() : 0,
+        };
+      }
+    } catch (e) {
+      console.warn("Failed to check backup list", e);
+    }
+  }
+
+  // 3. FALLBACK: If still missing and Online, fetch specific row from Supabase
+  if (!currentData && navigator.onLine) {
+    try {
+       const { data, error } = await supabase.from("observations").select("*").eq("id", id).single();
+       if (data && !error) {
+          currentData = {
+             ...data,
+             updatedAt: new Date(data.updated_at).getTime(),
+             lastSync: new Date(data.updated_at).getTime(),
+          };
+       }
+    } catch (e) {}
+  }
+
+  // 4. Safety Abort
+  if (!currentData) {
+     alert("Error: Could not find the full observation data to save.\n\nTry refreshing the page.");
+     return;
+  }
+
+  // 5. Prepare the Update (Mark as Dirty)
+  const now = Date.now();
+  const updatedData = {
+     ...currentData,
+     meta: {
+        ...currentData.meta,
+        ...updatedMeta
+     },
+     // Update top-level fields for sorting/searching
+     teacherName: updatedMeta.teacherName ?? currentData.teacherName ?? currentData.meta.teacherName,
+     schoolName: updatedMeta.schoolName ?? currentData.schoolName ?? currentData.meta.schoolName,
+     campus: updatedMeta.campus ?? currentData.campus ?? currentData.meta.campus,
+     unit: updatedMeta.unit ?? currentData.unit ?? currentData.meta.unit,
+     lesson: updatedMeta.lesson ?? currentData.lesson ?? currentData.meta.lesson,
+     supportType: updatedMeta.supportType ?? currentData.supportType ?? currentData.meta.supportType,
+     
+     // 🟢 CRITICAL: This triggers the "Sync Now" button
+     updatedAt: now, 
+     // Do NOT update lastSync yet! (lastSync < updatedAt = Blue Button)
+     syncStatus: 'local-changes' 
+  };
+
+  // 6. Save to IndexedDB (Creates the physical "Local File" so Phase 3 sees it)
+  await set(storageKey, updatedData);
+
+  // 7. Update UI Instantly (Turn button blue immediately)
   setObservations(prev =>
     prev.map(obs =>
       obs.id === id
-        ? { ...obs,
-            teacherName: updatedMeta.teacherName ?? obs.teacherName,
-            schoolName: updatedMeta.schoolName ?? obs.schoolName,
-            campus: updatedMeta.campus ?? obs.campus,
-            unit: updatedMeta.unit ?? obs.unit,
-            lesson: updatedMeta.lesson ?? obs.lesson,
-            supportType: updatedMeta.supportType ?? obs.supportType,
-            isoDate: updatedMeta.date ?? obs.isoDate,
-            dateLabel: updatedMeta.date ? new Date(updatedMeta.date).toLocaleDateString() : obs.dateLabel,
-            meta: { ...obs.meta, ...updatedMeta }
+        ? { 
+            ...obs, 
+            ...updatedData, 
+            dateLabel: new Date(updatedData.updatedAt).toLocaleDateString(),
+            syncStatus: 'local-changes', // Force UI refresh
+            updatedAt: now // Ensure sort logic sees the new time
           }
         : obs
     )
   );
 
-  // 2. Persist to DB (and local storage via persistMergedLinkToObservationMeta)
-  // We need to construct the patch carefully, as persistMergedLinkToObservationMeta expects
-  // the keys to be directly under 'meta'
-  const patchForPersistence = {
-    teacherName: updatedMeta.teacherName,
-    schoolName: updatedMeta.schoolName,
-    campus: updatedMeta.campus,
-    unit: updatedMeta.unit,
-    lesson: updatedMeta.lesson,
-    supportType: updatedMeta.supportType,
-    date: updatedMeta.date, // Use 'date' for ISO date string in meta
-  };
-  await persistMergedLinkToObservationMeta(id, patchForPersistence);
-
+  // 8. Close Modal (No Auto-Sync)
+  console.log("✅ Metadata saved locally. Sync button should appear.");
   setEditingObservation(null);
   setShowEditModal(false);
 }, [setObservations]);
-
 // --- Now, continue with the rest of your component's code ---
 
-  const grouped = React.useMemo(() => {
+const grouped = React.useMemo(() => {
     if (groupMode === "none") return null;
 
     if (groupMode === "month") {
