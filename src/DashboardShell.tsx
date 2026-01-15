@@ -1070,7 +1070,7 @@ const handleConflictResolved = async (mergedData: any) => {
           });
         }
 
-        // --- PHASE B: SCAN LOCAL FILES (GHOSTS) ---
+      // --- PHASE B: SCAN LOCAL FILES (GHOSTS) ---
         try {
           const allKeys = await keys();
           const sourceIdSet = new Set(sourceData.map((d) => d.id));
@@ -1091,10 +1091,23 @@ const handleConflictResolved = async (mergedData: any) => {
 
             const isMissingFromSource = !sourceIdSet.has(localData.id);
             
-            // 🟢 FIX 2 (False Alarm): Only warn if it WAS synced before.
+            // 🟢 FIX: Immediate Ghost Detection (No Buffer)
             if (isMissingFromSource) {
-               if (isNetworkSource && (localData.lastSync || 0) > 0) {
+               const lastSync = localData.lastSync || 0;
+               const updatedAt = localData.updatedAt || 0;
+               
+               // 1. Check for unsaved changes (Dirty)
+               const isDirty = updatedAt > lastSync;
+
+               // 🟢 THE CONDITION:
+               // Trigger immediately if:
+               // - Loading from Network
+               // - WAS synced before (lastSync > 0)
+               // - NO new local edits (!isDirty)
+               // *Buffer removed per request*
+               if (isNetworkSource && lastSync > 0 && !isDirty) {
                    ghostsFound.push(localData.id);
+                   continue; // Skip adding to dashboard rows
                }
             }
 
