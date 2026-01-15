@@ -18,6 +18,9 @@ import type {
   IndicatorState 
 } from "./constants";
 
+// Add to imports
+import { stitchHandwritingBatches } from "./utils/imageStitcher";
+
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
 const DEFAULT_CANVAS_HEIGHT = 300; 
 const MIN_CANVAS_HEIGHT = 100;
@@ -379,6 +382,181 @@ const lastServerVersionRef = useRef(lastServerVersion);
 // Add this state
 const [isResizerLocked, setIsResizerLocked] = useState(false);
 const [isCanvasLocked, setIsCanvasLocked] = useState(false);
+// Inside ObservationWorkspaceShell component
+const [isBatchOcrRunning, setIsBatchOcrRunning] = useState(false);
+const [batchOcrProgress, setBatchOcrProgress] = useState(""); // e.g., "Processing batch 1 of 3..."
+
+
+// Helper to extract IDs like "1.1", "3.4" from any messy string
+const extractIds = (text: string): string[] => {
+  // Finds patterns like "1.1", "10.5", etc.
+  // It ignores dashes, spaces, and text like "Task"
+  const matches = text.match(/\d+\.\d+/g);
+  return matches ? matches : [];
+};
+
+const handleConvertAllInk = async () => {
+    setOcrError(null);
+    if (isBatchOcrRunning) return;
+
+    // 1. Identify Candidates
+    const candidates = indicators.filter(ind => {
+      const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
+      return hasInk && !ind.ocrUsed;
+    });
+
+    if (candidates.length === 0) {
+      alert("No new handwriting found to convert.");
+      return;
+    }
+
+    if (!window.confirm(`Found ${candidates.length} items with handwriting. Convert them all?`)) {
+      return;
+    }
+
+    setIsBatchOcrRunning(true);
+    setBatchOcrProgress("Preparing images...");
+
+    try {
+      // 2. Prepare Data for Stitcher
+      const stitchItems = candidates.map(ind => ({
+        id: ind.number, 
+        strokes: ind.strokes
+      }));
+
+      // 3. Generate Stitched Batches
+      const batches = await stitchHandwritingBatches(stitchItems, 6);
+
+      // 4. Process Batches
+      let processedCount = 0;
+      let successCount = 0;
+      const newUpdates: Record<string, Partial<IndicatorState>> = {};
+
+      for (let i = 0; i < batches.length; i++) {
+        setBatchOcrProgress(`Processing batch ${i + 1} of ${batches.length}...`);
+        
+        const batch = batches[i];
+        let attempts = 0;
+        let success = false;
+        let delay = 2000;
+
+        // 🔄 RETRY LOOP
+        while (attempts < 5 && !success) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 45000); 
+
+                const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-gemini`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ 
+                    imageBase64: batch.imageBase64,
+                    isBatch: true 
+                  }),
+                  signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (response.status === 503) {
+                    console.warn(`Batch ${i} - Server overloaded (503). Retrying...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    delay *= 2; 
+                    attempts++;
+                    continue;
+                }
+
+                if (!response.ok) {
+                   const errText = await response.text().catch(() => "Unknown error");
+                   throw new Error(`HTTP ${response.status}: ${errText}`);
+                }
+
+                const data = await response.json();
+                const resultsMap = data.results || {};
+                
+                // -----------------------------------------------------------
+                // 5. "SET OVERLAP" MATCHING LOGIC (The Robust Fix)
+                // -----------------------------------------------------------
+                Object.entries(resultsMap).forEach(([key, text]) => {
+                   const strText = text as string;
+                   if (!strText) return;
+
+                   // A. Extract clean IDs from the AI Key (e.g. "3.4 - 5.1" -> ["3.4", "5.1"])
+                   const aiIds = extractIds(key);
+
+                   // B. Find indicators whose Numbers overlap with these AI IDs
+                   const targets = indicators.filter(ind => {
+                       // Extract IDs from the Indicator Number (e.g. "3.4 – 5.1" -> ["3.4", "5.1"])
+                       const indIds = extractIds(ind.number);
+                       
+                       // Check for intersection: Do they share ANY common ID?
+                       return indIds.some(id => aiIds.includes(id));
+                   });
+
+                   if (targets.length === 0) {
+                       console.warn(`FAILED MATCH: Key "${key}" (IDs: ${aiIds}) matched nothing.`);
+                   }
+
+                   // C. Apply Update
+                   targets.forEach(originalInd => {
+                       const existing = originalInd.commentText.trim();
+                       
+                       if (existing.includes(strText)) return;
+
+                       const combined = existing 
+                         ? `${existing}\n\n[OCR]\n${strText}`
+                         : `[OCR]\n${strText}`;
+
+                       newUpdates[originalInd.id] = {
+                         commentText: combined,
+                         ocrUsed: true,
+                         ocrPendingReview: true,
+                         ocrLastRunAt: Date.now()
+                       };
+                       successCount++;
+                   });
+                });
+                
+                success = true; 
+                processedCount += batch.idsInBatch.length;
+
+            } catch (err: any) {
+                console.warn(`Batch ${i} attempt ${attempts + 1} failed:`, err);
+                attempts++;
+                await new Promise(r => setTimeout(r, 2000)); 
+            }
+        }
+      }
+
+      // 6. Bulk Update React State
+      if (Object.keys(newUpdates).length > 0) {
+        setIndicators(prev => prev.map(ind => {
+           if (newUpdates[ind.id]) {
+             return { ...ind, ...newUpdates[ind.id] };
+           }
+           return ind;
+        }));
+        
+        isDirtyRef.current = true;
+        alert(`Successfully converted ${successCount} items!`);
+      } else {
+         if (processedCount > 0) {
+             alert(`OCR Finished. AI found text, but we couldn't match it to your indicators.\n\nCheck Console (F12) for details.`);
+         } else {
+             alert("OCR failed to process any items.");
+         }
+      }
+
+    } catch (err) {
+      console.error("Batch OCR System Failure", err);
+      alert("An unexpected error occurred.");
+    } finally {
+      setIsBatchOcrRunning(false);
+      setBatchOcrProgress("");
+    }
+};
+
+
 // Update the startSidebarResize function
 const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) => {
   // 🔒 STOP if locked
@@ -392,6 +570,7 @@ const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) 
   const [sidebarWidth, setSidebarWidth] = useState(getPersistedSidebarWidth);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
 
   // const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) => {
   //   // Prevent text selection during drag
@@ -1782,6 +1961,29 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               >
                 {isAiPolishing ? "✨ Polishing..." : "✨ Polish All"}
               </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={handleConvertAllInk}
+                disabled={isLocked || isBatchOcrRunning || isAiPolishing}
+                style={{
+                  // Distinct color (e.g., Orange/Amber)
+                  background: isBatchOcrRunning 
+                    ? "#d97706" 
+                    : "linear-gradient(135deg, #f59e0b, #b45309)", 
+                  border: "none",
+                  color: "white",
+                  marginLeft: 8,
+                  fontWeight: 500,
+                  minWidth: 100 // Prevent resize jitter when text changes
+                }}
+              >
+                {isBatchOcrRunning ? (
+                  <span>⌛ {batchOcrProgress || "Processing..."}</span>
+                ) : (
+                  "📝 Convert All"
+                )}
+              </button>
 
               <button
                 className="btn"
@@ -1789,7 +1991,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 onClick={handleToggleLock}
                 style={{ fontWeight: 600 }}
               >
-                {isLocked ? "Reopen as Draft" : "Mark Completed / Lock"}
+                {isLocked ? "Reopen as Draft" : "Mark Completed"}
               </button>
 
               {/* 🔍 PREVIEWS */}
