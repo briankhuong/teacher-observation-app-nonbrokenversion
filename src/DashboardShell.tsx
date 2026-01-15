@@ -593,33 +593,51 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 // 🟢 START: Cache Teachers & Schools for Offline Mode 🟢
   // This runs automatically in the background when the user is online.
   React.useEffect(() => {
+    // 1. Exit if offline or no user
     if (!user?.id || !navigator.onLine) return;
 
     const cacheOfflineResources = async () => {
       try {
-        console.log("💾 Starting background cache for offline mode...");
+        console.log(`☁️ Checking Supabase for schools assigned to: ${user.id}`);
 
-        // A. Fetch Teachers
-        const { data: teachers, error: tError } = await supabase
-          .from("teachers")
-          .select("id, name, school_name, campus, email,worksheet_url") // 🟢 Added 'campus'
-          .order("name");
-        
-        if (teachers && !tError) {
-          await set("offline_teachers", teachers); // Saves to IndexedDB
-        }
-
-        // B. Fetch Schools
+        // 2. Fetch Schools (Strictly Filtered by Trainer ID)
+        // Note: If RLS is enabled on Supabase, this will return [] unless a policy exists!
         const { data: schools, error: sError } = await supabase
           .from("schools")
-          .select("id, school_name, campus_name, admin_workbook_url, admin_workbook_view_url")
+          .select("id, school_name, campus_name, admin_workbook_url, admin_workbook_view_url, trainer_id")
+          .eq("trainer_id", user.id)
           .order("school_name");
 
-        if (schools && !sError) {
-          await set("offline_schools", schools); // Saves to IndexedDB
+        if (sError) throw sError;
+
+        const safeSchools = schools || [];
+        console.log(`🔥 Fetched ${safeSchools.length} schools from database.`);
+
+        // 3. Save to Offline Cache (Overwrites old data)
+        await set("offline_schools", safeSchools);
+
+        // 4. Fetch Teachers (Only if we have schools)
+        // This prevents leaking teachers (and thus schools) from the Owner
+        if (safeSchools.length > 0) {
+            const mySchoolNames = safeSchools.map(s => s.school_name);
+            
+            const { data: teachers, error: tError } = await supabase
+              .from("teachers")
+              .select("id, name, school_name, campus, email, worksheet_url")
+              .in("school_name", mySchoolNames) // 🟢 Only fetch teachers for MY schools
+              .order("name");
+            
+            if (!tError) {
+              await set("offline_teachers", teachers || []); 
+              console.log(`🔥 Fetched ${teachers?.length || 0} teachers.`);
+            }
+        } else {
+            // If I have no schools, I should have no teachers in the cache
+            console.warn("⚠️ No schools found for this user. Offline list may revert to default/owner list.");
+            await set("offline_teachers", []);
         }
 
-        console.log("✅ Teachers and Schools cached for offline use.");
+        console.log("✅ Offline resources updated successfully.");
       } catch (err) {
         console.warn("⚠️ Failed to cache offline resources:", err);
       }
