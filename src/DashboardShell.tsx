@@ -33,6 +33,25 @@ type StatusColor = "good" | "mixed" | "growth";
 type GroupMode = "none" | "month" | "school" | "campus";
 type SortMode = "newest" | "oldest" | "teacher-az" | "teacher-za";
 
+// --- Skeleton Component (Dark Mode) ---
+const SkeletonRow = () => (
+  <div className="obs-row" style={{ pointerEvents: "none", opacity: 0.6 }}>
+    <div className="obs-status-strip" style={{ background: "#4a5568" }} />
+    <div className="obs-row-left" style={{ width: "100%" }}>
+      <div className="obs-row-header" style={{ marginBottom: "8px" }}>
+        {/* Fake Text Bars (Dark Theme: Faint White) */}
+        <div style={{ width: "30%", height: "16px", background: "rgba(255,255,255,0.1)", borderRadius: "4px" }}></div>
+      </div>
+      <div className="obs-meta">
+        <div style={{ width: "50%", height: "12px", background: "rgba(255,255,255,0.05)", borderRadius: "4px" }}></div>
+      </div>
+      <div className="obs-tags-row" style={{ marginTop: "12px" }}>
+        <div style={{ width: "60px", height: "20px", background: "rgba(255,255,255,0.1)", borderRadius: "12px" }}></div>
+      </div>
+    </div>
+  </div>
+);
+
 export interface DashboardObservationRow {
   id: string;
   teacherName: string;
@@ -549,6 +568,8 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const [recentMergePanel, setRecentMergePanel] =
    useState<RecentMergePanel>(null);
 
+   const [loading, setLoading] = useState(true); // 🟢 Tracks initial cache load
+
   // State to hold the settings fetched from DB
   const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
@@ -932,96 +953,23 @@ const handleConflictResolved = async (mergedData: any) => {
     }
   };
 
-React.useEffect(() => {
-    // 🛑 FIX: Check user.id specifically to prevent infinite loops
-    if (!user?.id) {
-      setObservations([]);
-      return;
-    }
+// 🟢 CORE LOGIC: CACHE-FIRST LOADING + GHOST MERGE
+  React.useEffect(() => {
+    if (!user?.id) { setObservations([]); return; }
 
     const load = async () => {
-      let dbData: any[] = [];
-      const processedIds = new Set<string>(); // 🟢 Track what we've seen
-      
-      // 🟢 PHASE 0: HANDLE PENDING DELETES (The "Zombie" Fix)
-      // Check if we have items waiting to be deleted
-      let pendingDeletes: string[] = [];
-      try {
-         pendingDeletes = (await get<string[]>("pending_deletes")) || [];
-         
-         // If we are online and have deletions queued, execute them now
-         if (navigator.onLine && pendingDeletes.length > 0) {
-            console.log("🧹 Flushing pending deletes to server:", pendingDeletes);
-            const { error } = await supabase.from("observations").delete().in("id", pendingDeletes);
-            
-            if (!error) {
-               // Success! Clear the queue so we don't try again
-               await del("pending_deletes");
-               pendingDeletes = []; 
-            } else {
-               console.warn("Failed to flush deletes, will retry later", error);
-            }
-         }
-      } catch (err) {
-         console.error("Error handling pending deletes", err);
-      }
+      const processAndDisplay = async (sourceData: any[], isNetworkSource: boolean) => {
+        const rows: DashboardObservationRow[] = [];
+        const processedIds = new Set<string>();
+        const pendingDeletes = (await get<string[]>("pending_deletes")) || [];
 
-      // 🟢 PHASE 1: FETCH DATA (Network First -> IndexedDB Fallback)
-      try {
-        const { data, error } = await supabase
-          .from("observations")
-          .select(
-            "id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn"
-          )
-          .eq("trainer_id", user.id)
-          .order("observation_date", { ascending: false })
-          .order("created_at", { ascending: false });
+        // --- PHASE A: PROCESS SERVER/CACHE ROWS ---
+        for (const dbRow of sourceData) {
+          if (pendingDeletes.includes(dbRow.id)) continue;
+          processedIds.add(dbRow.id);
 
-        if (error) throw error;
-
-        // ✅ SUCCESS: Save fresh data to "IndexedDB Vault"
-        // 🟢 CRITICAL: Filter out any items that are currently marked for deletion locally
-        dbData = (data ?? []).filter(row => !pendingDeletes.includes(row.id));
-        
-        // Save list to Vault (Non-blocking)
-        set("dashboard_backup_list", dbData).catch(err => 
-          console.warn("Failed to save dashboard backup", err)
-        );
-        
-      } catch (err) {
-        // ❌ FAIL: Network Error? Load from "IndexedDB Vault"
-        console.warn("[Dashboard] Offline mode detected. Loading backup...", err);
-        
-        try {
-          const backup = await get<any[]>("dashboard_backup_list");
-          if (backup) {
-            console.log("📂 Loaded dashboard from IndexedDB");
-            // 🟢 CRITICAL: Filter backup list too
-            dbData = backup.filter(row => !pendingDeletes.includes(row.id));
-          } else {
-            console.error("[Dashboard] No offline backup found.");
-            // Fallback to localStorage (Migration support)
-            const oldBackup = localStorage.getItem("dashboard_backup_list");
-            if (oldBackup) {
-               const parsed = JSON.parse(oldBackup);
-               // 🟢 CRITICAL: Filter localStorage list too
-               dbData = Array.isArray(parsed) ? parsed.filter((row: any) => !pendingDeletes.includes(row.id)) : [];
-            }
-          }
-        } catch (readErr) {
-          console.error("Failed to read from IndexedDB", readErr);
-        }
-      }
-
-// 🟢 PHASE 2: PROCESS SERVER ROWS (Merge with Local Edits)
-      const rows: DashboardObservationRow[] = [];
-
-      try {
-        for (const dbRow of dbData) {
-          processedIds.add(dbRow.id); // 🟢 Mark as processed so Phase 3 skips it
           const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
           let parsed: any = null;
-          
           try {
             const localDraft = await get<any>(storageKey);
             if (localDraft) parsed = localDraft;
@@ -1043,14 +991,21 @@ React.useEffect(() => {
             };
           }
 
-          // Sync Status Logic
+          // 🟢 FIX 3 (Edit Zombie): "Trust The Receipt"
           const localUpdatedAt = parsed.updatedAt || 0;
+          const lastSync = parsed.lastSync || 0;
           const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
           const BUFFER = 2000;
+          
           let syncStatus: 'synced' | 'local-changes' | 'server-newer' = 'synced';
 
-          if (localUpdatedAt > dbUpdatedAt + BUFFER) syncStatus = 'local-changes';
-          else if (dbUpdatedAt > localUpdatedAt + BUFFER) syncStatus = 'server-newer';
+          if (lastSync >= localUpdatedAt) {
+             syncStatus = 'synced'; // Trust local sync receipt over stale server data
+          } else if (localUpdatedAt > dbUpdatedAt + BUFFER) {
+             syncStatus = 'local-changes';
+          } else if (dbUpdatedAt > localUpdatedAt + BUFFER) {
+             syncStatus = 'server-newer';
+          }
 
           // Stats
           const indicatorsArray = Array.isArray(parsed.indicators) ? parsed.indicators : [];
@@ -1096,147 +1051,268 @@ React.useEffect(() => {
             updatedAt: parsed.updatedAt || 0,
           });
         }
-      } catch (err) {
-        console.error("[Dashboard] Unexpected error processing observations", err);
-      }
 
-      // 🟢 PHASE 3: SCAN LOCAL FILES & DETECT GHOSTS
-      try {
-        const allKeys = await keys();
-        const serverIdSet = new Set(dbData.map((d) => d.id));
-        const ghostsFound: string[] = []; 
+        // --- PHASE B: SCAN LOCAL FILES (GHOSTS) ---
+        try {
+          const allKeys = await keys();
+          const sourceIdSet = new Set(sourceData.map((d) => d.id));
+          const ghostsFound: string[] = []; 
 
-        const keysToFetch = allKeys.filter((k) => {
-          if (typeof k !== "string" || !k.startsWith(STORAGE_PREFIX)) return false;
-          const id = k.replace(STORAGE_PREFIX, "");
-          
-          if (processedIds.has(id)) return false; // 🛑 Prevents Duplicates (Checked against Phase 2)
-          if (pendingDeletes.includes(id)) return false; 
-          return true;
-        });
-
-        const offlineFiles = await Promise.all(keysToFetch.map((key) => get<any>(key)));
-
-        for (const localData of offlineFiles) {
-          if (!localData) continue;
-
-          // Ghost Check
-          const isMissingFromServer = !serverIdSet.has(localData.id);
-          const lastSyncTime = localData.lastSync || 0;
-          const updateTime = localData.updatedAt || 0;
-          const isUnchanged = lastSyncTime >= updateTime;
-
-          if (isMissingFromServer && isUnchanged && navigator.onLine) {
-             ghostsFound.push(localData.id);
-          }
-
-          // Stats
-          const indicatorsArray = Array.isArray(localData.indicators) ? localData.indicators : [];
-          const stats = indicatorsArray.reduce((acc: any, ind: any) => {
-              if (ind.good || ind.growth || ind.commentText?.trim()) acc.progress++;
-              if (ind.good) acc.good++;
-              if (ind.growth) acc.growth++;
-              return acc;
-            }, { good: 0, growth: 0, progress: 0 });
-
-          let statusColor: StatusColor = (stats.growth > 0 && stats.good === 0) ? "growth" : (stats.good > 0 && stats.growth === 0) ? "good" : "mixed";
-
-          let rawDate = localData.updatedAt || Date.now();
-          let displayDate = new Date(rawDate).toLocaleDateString();
-          if (localData.meta?.date) {
-            const ts = safeParseTimestamp(localData.meta.date);
-            if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
-          }
-
-          rows.push({
-            id: localData.id,
-            teacherName: localData.meta?.teacherName || "Unknown",
-            schoolName: localData.meta?.schoolName || "Unknown",
-            campus: localData.meta?.campus || "",
-            unit: localData.meta?.unit || "",
-            lesson: localData.meta?.lesson || "",
-            supportType: localData.meta?.supportType || "Visit",
-            dateLabel: displayDate,
-            isoDate: localData.meta?.date,
-            rawDate,
-            status: localData.status || "draft",
-            progress: stats.progress,
-            totalIndicators: indicatorsArray.length,
-            statusColor,
-            teacherWorkbookUrl: localData.meta?.teacherWorkbookUrl || null,
-            adminWorkbookUrl: localData.meta?.adminWorkbookUrl || null,
-            adminViewOnlyUrl: localData.meta?.adminViewOnlyUrl || null,
-            admin_summary_vn: localData.adminSummaryVN || null,
-            syncStatus: 'local-changes', 
-            meta: localData.meta || {},
-            lastSync: localData.lastSync || 0,
-            updatedAt: localData.updatedAt || 0,
+          const keysToFetch = allKeys.filter((k) => {
+            if (typeof k !== "string" || !k.startsWith(STORAGE_PREFIX)) return false;
+            const id = k.replace(STORAGE_PREFIX, "");
+            if (processedIds.has(id)) return false; 
+            if (pendingDeletes.includes(id)) return false; 
+            return true;
           });
-        }
 
-        // Warning UI
-        if (ghostsFound.length > 0) {
-           setTimeout(async () => {
-              const confirmDelete = window.confirm(
-                 `We found ${ghostsFound.length} observation(s) that were deleted from the server.\n\n` + 
-                 `Since you haven't edited them, do you want to remove them from this device?`
-              );
+          const offlineFiles = await Promise.all(keysToFetch.map((key) => get<any>(key)));
 
-              if (confirmDelete) {
-                 const currentPending = (await get<string[]>("pending_deletes")) || [];
-                 await set("pending_deletes", [...new Set([...currentPending, ...ghostsFound])]);
-                 await Promise.all(ghostsFound.map(id => del(`${STORAGE_PREFIX}${id}`)));
-                 setObservations(prev => prev.filter(o => !ghostsFound.includes(o.id)));
-              } else {
-                 await Promise.all(ghostsFound.map(async (id) => {
-                    const key = `${STORAGE_PREFIX}${id}`;
-                    const data = await get<any>(key);
-                    if(data) { data.updatedAt = Date.now(); await set(key, data); }
-                 }));
-                 window.location.reload();
-              }
-           }, 500);
-        }
-      } catch (err) {
-        console.error("Error scanning for new offline files", err);
-      }
-    
+          for (const localData of offlineFiles) {
+            if (!localData) continue;
 
-      // ✅ ENRICH: Bulk fetch defaults (Only if Online)
-      let finalRows = rows;
-      try {
-        //if (navigator.onLine) {
+            const isMissingFromSource = !sourceIdSet.has(localData.id);
+            
+            // 🟢 FIX 2 (False Alarm): Only warn if it WAS synced before.
+            if (isMissingFromSource) {
+               if (isNetworkSource && (localData.lastSync || 0) > 0) {
+                   ghostsFound.push(localData.id);
+               }
+            }
+
+            // Stats
+            const indicatorsArray = Array.isArray(localData.indicators) ? localData.indicators : [];
+            const stats = indicatorsArray.reduce((acc: any, ind: any) => {
+               if (ind.good || ind.growth || ind.commentText?.trim()) acc.progress++;
+               if (ind.good) acc.good++;
+               if (ind.growth) acc.growth++;
+               return acc;
+             }, { good: 0, growth: 0, progress: 0 });
+
+            let statusColor: StatusColor = (stats.growth > 0 && stats.good === 0) ? "growth" : (stats.good > 0 && stats.growth === 0) ? "good" : "mixed";
+
+            let rawDate = localData.updatedAt || Date.now();
+            let displayDate = new Date(rawDate).toLocaleDateString();
+            if (localData.meta?.date) {
+              const ts = safeParseTimestamp(localData.meta.date);
+              if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
+            }
+
+            // 🟢 FIX 4 (Resurrection Zombie): Trust Receipt for Ghosts too
+            // If we just synced it (lastSync >= updatedAt), show Green immediately.
+            const isLocalSynced = (localData.lastSync || 0) >= (localData.updatedAt || 0);
+
+            rows.push({
+              id: localData.id,
+              teacherName: localData.meta?.teacherName || "Unknown",
+              schoolName: localData.meta?.schoolName || "Unknown",
+              campus: localData.meta?.campus || "",
+              unit: localData.meta?.unit || "",
+              lesson: localData.meta?.lesson || "",
+              supportType: localData.meta?.supportType || "Visit",
+              dateLabel: displayDate,
+              isoDate: localData.meta?.date,
+              rawDate,
+              status: localData.status || "draft",
+              progress: stats.progress,
+              totalIndicators: indicatorsArray.length,
+              statusColor,
+              teacherWorkbookUrl: localData.meta?.teacherWorkbookUrl || null,
+              adminWorkbookUrl: localData.meta?.adminWorkbookUrl || null,
+              adminViewOnlyUrl: localData.meta?.adminViewOnlyUrl || null,
+              admin_summary_vn: localData.adminSummaryVN || null,
+              syncStatus: isLocalSynced ? 'synced' : 'local-changes', // 🟢 Dynamic Status
+              meta: localData.meta || {},
+              lastSync: localData.lastSync || 0,
+              updatedAt: localData.updatedAt || 0,
+            });
+          }
+
+          // Warning UI
+          if (isNetworkSource && ghostsFound.length > 0 && navigator.onLine) {
+             setTimeout(async () => {
+               const confirmDelete = window.confirm(
+                  `We found ${ghostsFound.length} observation(s) that were deleted from the server.\n\n` + 
+                  `Since you haven't edited them, do you want to remove them from this device?`
+               );
+               
+               if (confirmDelete) {
+                  const currentPending = (await get<string[]>("pending_deletes")) || [];
+                  await set("pending_deletes", [...new Set([...currentPending, ...ghostsFound])]);
+                  await Promise.all(ghostsFound.map(id => del(`${STORAGE_PREFIX}${id}`)));
+                  setObservations(prev => prev.filter(o => !ghostsFound.includes(o.id)));
+               } else {
+                  // 🟢 FIX 1 (Infinite Loop): Reset lastSync to 0.
+                  await Promise.all(ghostsFound.map(async (id) => {
+                     const key = `${STORAGE_PREFIX}${id}`;
+                     const data = await get<any>(key);
+                     if(data) { 
+                         data.updatedAt = Date.now(); 
+                         data.lastSync = 0; 
+                         await set(key, data); 
+                     }
+                  }));
+                  window.location.reload();
+               }
+             }, 500);
+          }
+        } catch (err) { console.error("Error processing local/ghost files", err); }
+
+        // --- PHASE C: ENRICH & SET ---
+        let finalRows = rows;
+        try {
            finalRows = await enrichObservationsWithDefaults(rows);
-       // } else {
-           console.log("⚠️ Offline: Skipping school/workbook enrichment.");
-        //}
-      } catch (enrichErr) {
-        console.warn("Enrichment failed (likely offline)", enrichErr);
-      }
-      
-      // Sort finally by rawDate (newest first)
-      finalRows.sort((a, b) => (b.rawDate || 0) - (a.rawDate || 0));
-console.log(`📊 Final Rows count: ${finalRows.length}`);
-      setObservations(finalRows);
+        } catch (e) {}
+        
+        finalRows.sort((a, b) => (b.rawDate || 0) - (a.rawDate || 0));
+        setObservations(finalRows);
+        setLoading(false);
+      };
 
-      // Load AM summary "sent" markers
+      // 1. Instant Load
+      try {
+        const backup = await get<any[]>("dashboard_backup_list");
+        if (backup && backup.length > 0) await processAndDisplay(backup, false);
+      } catch (e) { }
+
+      // 2. Background Sync
+      try {
+        let pendingDeletes = (await get<string[]>("pending_deletes")) || [];
+        if (navigator.onLine && pendingDeletes.length > 0) {
+           await supabase.from("observations").delete().in("id", pendingDeletes);
+           await del("pending_deletes");
+        }
+
+        const { data, error } = await supabase
+          .from("observations")
+          .select("id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn")
+          .eq("trainer_id", user.id)
+          .order("observation_date", { ascending: false })
+          .order("created_at", { ascending: false });
+
+        if (!error && data) {
+           await set("dashboard_backup_list", data);
+           await processAndDisplay(data, true);
+        }
+      } catch (err) { console.error("Background sync failed", err); } 
+      finally { setLoading(false); }
+
       try {
         const raw = localStorage.getItem(SUMMARY_STATE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === "object") {
-            setAmSummarySentMap(parsed as AmSummarySentMap);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load AM summary state", err);
-      }
+        if (raw) setAmSummarySentMap(JSON.parse(raw));
+      } catch {}
     };
 
     load();
-  }, [user?.id]); // 🟢 CRITICAL FIX: Only re-run if ID changes, not the whole object
+  }, [user?.id]);
 
+  // 🟢 HELPER: Process & Merge Logic (Extracting this makes the useEffect cleaner)
+  async function processRows(dbRows: any[], pendingDeletes: string[]) {
+    const processedIds = new Set<string>();
+    const rows: DashboardObservationRow[] = [];
 
+    // Step A: Process Server Rows
+    for (const row of dbRows) {
+        if (pendingDeletes.includes(row.id)) continue;
+        processedIds.add(row.id);
+
+        const storageKey = `${STORAGE_PREFIX}${row.id}`;
+        let localData = await get<any>(storageKey);
+        
+        // Fallback to localStorage if IDB fails
+        if (!localData) {
+            try { const raw = localStorage.getItem(storageKey); if (raw) localData = JSON.parse(raw); } catch {}
+        }
+
+        // Merge: Local wins if exists
+        const finalData = localData || {
+           id: row.id,
+           meta: row.meta || {},
+           indicators: row.indicators || [],
+           status: row.status || "draft",
+           updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+           lastSync: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+        };
+
+        // Calc Sync Status
+        const localTime = finalData.updatedAt || 0;
+        const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+        let syncStatus = 'synced';
+        if (localTime > serverTime + 2000) syncStatus = 'local-changes';
+
+        // Stats Calculation
+        const inds = Array.isArray(finalData.indicators) ? finalData.indicators : [];
+        let good = 0, growth = 0, progress = 0;
+        inds.forEach((i: any) => {
+           if (i.good) good++;
+           if (i.growth) growth++;
+           if (i.good || i.growth || i.commentText) progress++;
+        });
+        const statusColor = (growth > 0 && good === 0) ? "growth" : (good > 0 && growth === 0) ? "good" : "mixed";
+
+        rows.push({
+           id: finalData.id,
+           teacherName: finalData.meta.teacherName || "Unknown",
+           schoolName: finalData.meta.schoolName || "Unknown",
+           campus: finalData.meta.campus || "",
+           unit: finalData.meta.unit || "",
+           lesson: finalData.meta.lesson || "",
+           supportType: finalData.meta.supportType || "Visit",
+           dateLabel: new Date(finalData.updatedAt).toLocaleDateString(),
+           isoDate: finalData.meta.date,
+           rawDate: finalData.updatedAt,
+           status: finalData.status,
+           progress, 
+           totalIndicators: inds.length,
+           statusColor: statusColor as StatusColor,
+           teacherWorkbookUrl: finalData.meta.teacherWorkbookUrl,
+           adminWorkbookUrl: finalData.meta.adminWorkbookUrl,
+           adminViewOnlyUrl: finalData.meta.adminViewOnlyUrl,
+           admin_summary_vn: row.admin_summary_vn,
+           meta: finalData.meta,
+           lastSync: finalData.lastSync,
+           updatedAt: finalData.updatedAt,
+           syncStatus
+        });
+    }
+
+    // Step B: Ghost Loop (Find Local-Only items)
+    try {
+        const allKeys = await keys();
+        const obsKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(STORAGE_PREFIX));
+        for (const k of obsKeys) {
+            const id = (k as string).replace(STORAGE_PREFIX, "");
+            // If server didn't send it, and we didn't delete it -> It's a Ghost
+            if (processedIds.has(id) || pendingDeletes.includes(id)) continue;
+            
+            const local = await get<any>(k);
+            if (!local) continue;
+
+            rows.push({
+               id: local.id,
+               teacherName: local.meta.teacherName || "Unknown",
+               schoolName: local.meta.schoolName || "Unknown",
+               campus: local.meta.campus || "",
+               unit: local.meta.unit, lesson: local.meta.lesson,
+               supportType: local.meta.supportType,
+               dateLabel: new Date(local.updatedAt).toLocaleDateString(),
+               isoDate: local.meta.date,
+               rawDate: local.updatedAt,
+               status: local.status || "draft",
+               progress: 0, totalIndicators: 0, statusColor: "mixed",
+               teacherWorkbookUrl: local.meta.teacherWorkbookUrl,
+               adminWorkbookUrl: local.meta.adminWorkbookUrl,
+               adminViewOnlyUrl: null, admin_summary_vn: null,
+               meta: local.meta,
+               lastSync: 0, updatedAt: local.updatedAt, 
+               syncStatus: 'local-changes' // Force Blue Cloud
+            });
+        }
+    } catch(e) {}
+
+    // Enrich with School Data
+    return await enrichObservationsWithDefaults(rows);
+  }
   /* ------------------------------
       FILTER + SORT + GROUP
   --------------------------------- */
@@ -2555,9 +2631,31 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
         </div>
 
         <div className="obs-list">
-          {groupMode === "none" || !grouped
-            ? filteredAndSorted.map((obs) => renderRow(obs))
-            : grouped.map(renderGroup)}
+          {/* 🟢 SHOW SKELETONS IF LOADING & EMPTY */}
+          {loading && observations.length === 0 ? (
+              <>
+                <SkeletonRow />
+                <SkeletonRow />
+                <SkeletonRow />
+                <SkeletonRow />
+                <SkeletonRow />
+              </>
+          ) : (
+              <>
+                {/* Existing Group Logic */}
+                {groupMode === "none" || !grouped
+                  ? filteredAndSorted.map((obs) => renderRow(obs))
+                  : grouped.map(renderGroup)
+                }
+                
+                {/* Existing Empty State Logic */}
+                {!loading && observations.length === 0 && (
+                   <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>
+                      No observations found.
+                   </div>
+                )}
+              </>
+          )}
         </div>
       </div>
 
