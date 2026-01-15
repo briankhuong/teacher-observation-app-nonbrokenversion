@@ -56,6 +56,7 @@ export interface StrokePoint {
   pressure: number;
 }
 export interface Stroke {
+  id: string;
   color: string;
   size: number;
   points: StrokePoint[];
@@ -78,6 +79,32 @@ function isStrokeIntersecting(eraserPoints: StrokePoint[], targetStroke: Stroke)
   }
   return false;
 }
+// 🟢 ADD THIS HELPER
+function findHitStrokes(
+  point: StrokePoint,
+  strokes: Stroke[],
+  ignoredIds: Set<string>
+): string[] {
+  const hitDist = 10; // "Finger width" tolerance
+  const hits: string[] = [];
+  
+  // Loop backwards to hit top strokes first
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const s = strokes[i];
+    if (ignoredIds.has(s.id) || s.mode !== "pen") continue;
+
+    for (const p of s.points) {
+      const dx = p.x - point.x;
+      const dy = p.y - point.y;
+      if (dx * dx + dy * dy < hitDist * hitDist) {
+        hits.push(s.id);
+        break; // Stop checking points for this stroke
+      }
+    }
+  }
+  return hits;
+}
+
 interface CanvasPadProps {
   strokes: Stroke[];
   onChange: (strokes: Stroke[]) => void;
@@ -103,6 +130,7 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
   const history = useRef<Stroke[]>(strokes);
   const currentStroke = useRef<StrokePoint[]>([]);
   const isDrawing = useRef(false);
+  const erasedIDs = useRef<Set<string>>(new Set());
   // Tools
   const [mode, setMode] = usePersistedState<"pen" | "eraser">("canvas-tool-mode", "pen");
   const [color, setColor] = usePersistedState<string>("canvas-tool-color", "#e5e7eb");
@@ -172,12 +200,14 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
     const width = staticCanvas.width;
     const height = staticCanvas.height;
     const dpr = window.devicePixelRatio || 1;
+    
     // Clear
     ctx.clearRect(0, 0, width, height);
    
     // Background
     ctx.fillStyle = "#020617";
     ctx.fillRect(0, 0, width, height);
+    
     // Grid
     ctx.fillStyle = "rgba(148,163,184,0.35)";
     const spacing = 20 * dpr;
@@ -188,8 +218,16 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
         ctx.fill();
       }
     }
+    
     // Draw History
-    history.current.forEach(stroke => stampPrettyStroke(ctx, stroke));
+    history.current.forEach((stroke) => {
+      // 🟢 VISUAL GHOSTING LOGIC:
+      // If this stroke's ID is in our "Ghost Set", skip drawing it.
+      // This makes it look deleted instantly without touching the heavy data array.
+      if (erasedIDs.current.has(stroke.id)) return;
+
+      stampPrettyStroke(ctx, stroke);
+    });
   };
   // ----------------------------------------------------------------
   // 4. Props Sync (Handling Undo/Redo from Parent)
@@ -259,9 +297,23 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDrawing.current) return;
       e.preventDefault();
-      currentStroke.current.push(getPoint(e.clientX, e.clientY));
+      const p = getPoint(e.clientX, e.clientY);
+      currentStroke.current.push(p);
+
+      // 🟢 START NEW ERASER LOGIC
+      if (toolsRef.current.mode === "eraser") {
+        const hits = findHitStrokes(p, history.current, erasedIDs.current);
+        if (hits.length > 0) {
+          hits.forEach(id => erasedIDs.current.add(id));
+          redrawAll(); // Instantly hide them!
+        }
+      }
+      // 🔴 END NEW ERASER LOGIC
+
       requestAnimationFrame(drawAll);
     };
+
+
     const handleMouseUp = (e: MouseEvent) => {
       if (!isDrawing.current) return;
       isDrawing.current = false;
@@ -302,32 +354,23 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
       isDrawing.current = false;
       commitStroke();
     };
-    const commitStroke = () => {
+const commitStroke = () => {
       if (currentStroke.current.length > 0) {
         const currentMode = toolsRef.current.mode;
         let newHistory = history.current;
 
         if (currentMode === "eraser") {
-          const eraserPoints = currentStroke.current;
-
-          // Filter out any strokes that intersect with the eraser path
-          const keptStrokes = history.current.filter((stroke) => {
-            // Only consider pen strokes for deletion
-            if (stroke.mode !== "pen") return true; 
-            return !isStrokeIntersecting(eraserPoints, stroke);
-          });
-
-          if (keptStrokes.length !== history.current.length) {
-            newHistory = keptStrokes;
-          } else {
-            // No stroke was deleted, just clear current and return
-            currentStroke.current = [];
-            requestAnimationFrame(drawAll);
-            return;
+          // 🟢 NEW: FAST DELETE
+          // Just remove whatever is in the erasedIDs set
+          if (erasedIDs.current.size > 0) {
+             newHistory = history.current.filter(s => !erasedIDs.current.has(s.id));
           }
+          erasedIDs.current.clear(); // Reset for next time
+          
         } else {
-          // Pen mode: create and add a new stroke
+          // Pen mode
           const newStroke: Stroke = {
+            id: crypto.randomUUID(), // <--- 🟢 ADD ID HERE
             color: toolsRef.current.color,
             size: toolsRef.current.size,
             points: [...currentStroke.current],
@@ -355,6 +398,8 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
         onChange([...history.current]);
       }
     };
+
+
     // Attach listeners to live canvas
     const ro = new ResizeObserver(resize);
     ro.observe(container);
