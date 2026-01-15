@@ -8,6 +8,7 @@ export interface StrokePoint {
 }
 
 export interface Stroke {
+    id: string;
   color: string;
   size: number;
   points: StrokePoint[];
