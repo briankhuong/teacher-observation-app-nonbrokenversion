@@ -382,33 +382,57 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
     return () => { cancelled = true; };
   }, [user]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!user) return;
     let cancelled = false;
 
     async function loadSchools() {
-      try {
-        setSchoolsLoading(true);
-        setSchoolsError(null);
+      setSchoolsLoading(true);
+      setSchoolsError(null);
+      
+      let loadedData: SchoolRow[] = [];
 
-        const { data, error } = await supabase
-          .from("schools")
-          .select("*")
-          .eq("trainer_id", user!.id)
-          .order("school_name", { ascending: true })
-          .order("campus_name", { ascending: true });
+      // A. Try Network First
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase
+            .from("schools")
+            .select("*")
+            .eq("trainer_id", user!.id)
+            .order("school_name", { ascending: true })
+            .order("campus_name", { ascending: true });
 
-        if (error) {
-          console.error("[DB] load schools error", error);
-          if (!cancelled) setSchoolsError(error.message);
-          return;
+          if (error) throw error;
+          
+          if (data) {
+            loadedData = data as SchoolRow[];
+            // Update cache silently
+            // We cast to any because SchoolRow structure might differ slightly from what's expected in cache, 
+            // but usually it matches enough for the dropdown.
+            await set('offline_schools', loadedData); 
+          }
+        } catch (err: any) {
+          console.warn("[NewObs] Network load failed, checking cache...", err);
+          // If network error, we proceed to cache
         }
+      }
 
-        if (!cancelled && data) {
-          setSchools(data as SchoolRow[]);
+      // B. If Network failed or yielded nothing (Offline), load from Cache
+      if (loadedData.length === 0) {
+        try {
+          const cached = await get<SchoolRow[]>('offline_schools');
+          if (cached && Array.isArray(cached)) {
+            loadedData = cached;
+            console.log("📱 Loaded schools from offline cache:", loadedData.length);
+          }
+        } catch (e) {
+          console.warn("Failed to load offline schools", e);
         }
-      } finally {
-        if (!cancelled) setSchoolsLoading(false);
+      }
+
+      if (!cancelled) {
+        setSchools(loadedData);
+        setSchoolsLoading(false);
       }
     }
 
