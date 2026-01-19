@@ -868,6 +868,45 @@ if (autoCreateToken) {
         }
       : undefined;
 
+// Inside TeachersScreen.tsx
+
+  const handleTestApi = async () => {
+    try {
+      // --- STEP 1: GET TOKEN ---
+      console.log("🚀 Step 1: Getting Token...");
+      const tokenResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, {
+        method: "POST",
+      });
+
+      if (!tokenResponse.ok) throw new Error("Failed to get token");
+      const tokenData = await tokenResponse.json();
+      const accessToken = tokenData.access_token;
+      
+      console.log("✅ Got Token:", accessToken.substring(0, 15) + "...");
+
+      // --- STEP 2: GET DATA ---
+      console.log("🚀 Step 2: Fetching Class Data...");
+      const dataResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-classes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: accessToken }), // Send the token to backend
+      });
+
+      if (!dataResponse.ok) {
+         const err = await dataResponse.json();
+         throw new Error(`Data Error: ${err.details || err.error}`);
+      }
+
+      const classData = await dataResponse.json();
+
+      alert(`Success! Data loaded. Check Console (F12) to see the teachers/classes.`);
+
+    } catch (error: any) {
+      console.error("Test Failed:", error);
+      alert(`Error: ${error.message}`);
+    }
+  };
+
   return (
     <>
       <div className="card">
@@ -888,6 +927,15 @@ if (autoCreateToken) {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Teacher, school, campus…"
               />
+              {/* 🟢 NEW: Fetch Button */}
+              <button 
+                type="button" 
+                className="btn" 
+                onClick={handleTestApi}
+                style={{ marginLeft: '8px' }}
+              >
+                Fetch
+              </button>
             </div>
 
             <div className="toolbar-group">
