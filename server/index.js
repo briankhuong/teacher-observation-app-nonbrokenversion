@@ -138,6 +138,103 @@ app.post("/api/ocr-azure", async (req, res) => {
   }
 });
 
+// 👇 D. NEW ROUTE: Secure Proxy for GrapeSEED Token
+app.post("/api/get-grapeseed-token", async (req, res) => {
+    console.log("🚀 Request received for GrapeSEED token");
+
+    // 1. Get Secrets
+    const authHeader = (process.env.GRAPESEED_AUTH_HEADER || "").trim();
+    const username = (process.env.GRAPESEED_USERNAME || "").trim();
+    const password = (process.env.GRAPESEED_PASSWORD || "").trim();
+
+    try {
+        // 🟢 FIX 1: The Correct URL
+        const url = "https://account.grapeseed.com/connect/token";
+
+        // Validate secrets
+        if (!username || !password || !authHeader) {
+            console.error("Missing credentials in .env.azure");
+            return res.status(500).json({ error: "Server misconfiguration" });
+        }
+
+        // 🟢 FIX 2: Correct Body for 'connect/token' endpoints
+        // Usually 'connect/token' uses 'grant_type=password' standard OAuth
+        const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Authorization": authHeader,
+                "Content-Type": "application/x-www-form-urlencoded",
+                // 🟢 FIX 3: Removed manual 'Host' header. 
+                // Fetch will automatically set Host to 'account.grapeseed.com'
+            },
+            body: bodyString,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Upstream Error: ${response.status}`);
+            console.error("Details:", errorText);
+            return res.status(response.status).json({ 
+                error: "Token request failed", 
+                details: errorText 
+            });
+        }
+
+        const data = await response.json();
+        console.log("✅ Success! Token received.");
+        res.json(data);
+
+    } catch (error) {
+        console.error("Server Error:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+// 👇 E. NEW ROUTE: Fetch Class Data using the Token
+app.post("/api/get-grapeseed-classes", async (req, res) => {
+    console.log("🚀 Request received for Class Data");
+    
+    // 1. Get the Token passed from the Frontend
+    const { token } = req.body;
+
+    if (!token) {
+        return res.status(400).json({ error: "Missing Access Token" });
+    }
+
+    try {
+        // ⚠️ PASTE YOUR FULL, REAL URL HERE (Replace the "..." parts)
+        const dataUrl = "https://services.grapeseed.com/admin/v1/resources/users/b6133f96-5f21-47ca-9ab3-1b4205bf073f/landingresources/9?filterText=&sortBy=schoolName&sortBy=campusName&disabled=false&sortBy=schoolClassName"
+
+        const response = await fetch(dataUrl, {
+            method: "GET",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/x-www-form-urlencoded",
+                // 🟢 CRITICAL HEADER (From your VBA)
+                "x-gl-origin": "https://schools.grapeseed.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            },
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Upstream Data Error: ${response.status}`);
+            return res.status(response.status).json({ error: "Data fetch failed", details: errorText });
+        }
+
+        const data = await response.json();
+        console.log("✅ Class Data Retrieved Successfully!");
+        res.json(data);
+
+    } catch (error) {
+        console.error("Server Error:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+
 // 👇 C. Merge Routes (Excel Logic)
 app.use(mergeRoutes); 
 
@@ -153,5 +250,6 @@ const PORT = process.env.OCR_SERVER_PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ Main server (OCR/Merge) running at http://localhost:${PORT}`);
   console.log(`   - Gemini OCR: /api/ocr-gemini`);
+  console.log(`   - GSeed Token: /api/get-grapeseed-token`);
   console.log(`   - Azure OCR:  /api/ocr-azure (Backup)`);
 });
