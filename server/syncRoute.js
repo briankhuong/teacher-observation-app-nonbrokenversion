@@ -19,7 +19,7 @@ router.post("/api/sync-grapeseed", async (req, res) => {
   const logs = [];
   const log = (m) => { console.log(m); logs.push(m); };
 
-  log("🚀 Sync Started: Full Reconciliation (3-State Tags)...");
+  log("🚀 Sync Started: Full Reconciliation (3-State Tags + Auto-Insert)...");
 
   try {
     const supabase = getSupabase();
@@ -45,6 +45,7 @@ router.post("/api/sync-grapeseed", async (req, res) => {
     if (dbError) throw new Error(`Supabase Error: ${dbError.message}`);
     const validSchools = mySchools || [];
     const mySchoolCodes = new Set(validSchools.map(s => s.official_code).filter(Boolean));
+    const schoolCodeToIdMap = new Map(validSchools.map(s => [s.official_code, s.id]));
     
     // 3. FETCH MASTER CLASS LIST
     const vbaUserId = "b6133f96-5f21-47ca-9ab3-1b4205bf073f";
@@ -64,6 +65,7 @@ router.post("/api/sync-grapeseed", async (req, res) => {
 
     const apiSchoolMap = new Map(); 
     const activeTeacherIdsInMySchools = new Set();
+    const teacherIdToMetadata = new Map(); 
 
     if (Array.isArray(allData)) {
       allData.forEach(item => {
@@ -71,7 +73,18 @@ router.post("/api/sync-grapeseed", async (req, res) => {
         if (mySchoolCodes.has(sId)) {
              if (!apiSchoolMap.has(sId)) apiSchoolMap.set(sId, false);
              if (!item.teacherId) apiSchoolMap.set(sId, true);
-             if (item.teacherId) activeTeacherIdsInMySchools.add(item.teacherId);
+             
+             if (item.teacherId) {
+                activeTeacherIdsInMySchools.add(item.teacherId);
+                if (!teacherIdToMetadata.has(item.teacherId)) {
+                   teacherIdToMetadata.set(item.teacherId, {
+                      name: item.teacherName, 
+                      school_name: item.schoolName,
+                      campus: item.campusName,
+                      school_id: schoolCodeToIdMap.get(sId)
+                   });
+                }
+             }
         }
       });
     }
@@ -85,9 +98,6 @@ router.post("/api/sync-grapeseed", async (req, res) => {
 
     // 4. TAG AUDIT (THE PRE-FILL SOLUTION)
     const teacherAuditResults = new Map(); 
-    
-    // 🟢 IMPORTANT: Initialize everyone found in your schools to "No tag"
-    // This handles the teachers who GrapeSEED omits from the tags response entirely
     activeTeacherIdsInMySchools.forEach(id => teacherAuditResults.set(id, "No tag"));
 
     if (activeTeacherIdsInMySchools.size > 0) {
@@ -109,7 +119,6 @@ router.post("/api/sync-grapeseed", async (req, res) => {
                     .map(t => t.name?.toLowerCase().trim())
                     .filter(name => name && isNaN(name));
 
-                // 🟢 Overwrite the pre-filled "No tag" if data exists in API
                 if (trainerNames.length === 1 && trainerNames[0] === myTrainerTagName) {
                     teacherAuditResults.set(entity.entityId, "CLEAR"); 
                 } else if (trainerNames.length > 0) {
@@ -119,8 +128,11 @@ router.post("/api/sync-grapeseed", async (req, res) => {
         }
     }
 
-    // 5. RESOLVE EMAILS (CHUNKED BY 50)
+    // 5. RESOLVE EMAILS & NAMES (CHUNKED BY 50)
     const emailToAuditMap = new Map(); 
+    const teacherIdToEmailMap = new Map();
+    const teacherIdToResolvedNameMap = new Map();
+
     if (activeTeacherIdsInMySchools.size > 0) {
         const teacherIds = Array.from(activeTeacherIdsInMySchools);
         const chunkSize = 50; 
@@ -142,8 +154,10 @@ router.post("/api/sync-grapeseed", async (req, res) => {
                 chunkUsers.forEach(u => {
                     if (u.email) {
                         const email = u.email.trim().toLowerCase();
-                        // Link resolved email to the Audit status found in Step 4
                         emailToAuditMap.set(email, teacherAuditResults.get(u.id));
+                        teacherIdToEmailMap.set(u.id, email);
+                        // Captured from your browser observation: property is 'name'
+                        teacherIdToResolvedNameMap.set(u.id, u.name || u.fullName || u.displayName);
                     }
                 });
             }
@@ -153,18 +167,23 @@ router.post("/api/sync-grapeseed", async (req, res) => {
     // 6. FINAL DB RECONCILIATION
     const { data: dbTeachers } = await supabase
         .from("teachers")
-        .select("id, email, name, tags, is_active, status")
+        .select("id, email, name, tags, is_active, status, grapeseed_id")
         .eq("trainer_id", userId);
 
+    const existingEmails = new Set();
+    const existingGsIds = new Set();
     let activeCount = 0;
     let inactiveCount = 0;
 
     for (const teacher of (dbTeachers || [])) {
+        if (teacher.email) existingEmails.add(teacher.email.trim().toLowerCase());
+        if (teacher.grapeseed_id) existingGsIds.add(teacher.grapeseed_id);
+
         if (!teacher.email) continue;
         const dbEmail = teacher.email.trim().toLowerCase();
         
         const auditResult = emailToAuditMap.get(dbEmail); 
-        const isCurrentlyTeaching = emailToAuditMap.has(dbEmail); // Found in YOUR schools
+        const isCurrentlyTeaching = emailToAuditMap.has(dbEmail); 
 
         const updateData = {
             is_active: isCurrentlyTeaching,
@@ -173,8 +192,6 @@ router.post("/api/sync-grapeseed", async (req, res) => {
 
         if (isCurrentlyTeaching) {
             let currentTags = Array.isArray(teacher.tags) ? teacher.tags : [];
-            
-            // 3-State Tag Application
             if (auditResult === "No tag") {
                 if (!currentTags.includes("No tag")) currentTags.push("No tag");
                 currentTags = currentTags.filter(t => t !== "Mutual");
@@ -184,21 +201,55 @@ router.post("/api/sync-grapeseed", async (req, res) => {
                 currentTags = currentTags.filter(t => t !== "No tag");
             } 
             else if (auditResult === "CLEAR") {
-                // Exclusive: Remove state strings
                 currentTags = currentTags.filter(t => t !== "Mutual" && t !== "No tag");
             }
-
             updateData.tags = currentTags;
             activeCount++;
         } else {
             inactiveCount++;
         }
-
         await supabase.from("teachers").update(updateData).eq("id", teacher.id);
     }
 
+    // 7. AUTO-INSERT MISSING TEACHERS
+    let insertedCount = 0;
+    for (const gsId of Array.from(activeTeacherIdsInMySchools)) {
+        const email = teacherIdToEmailMap.get(gsId);
+        if (!email) continue;
+
+        if (!existingEmails.has(email) && !existingGsIds.has(gsId)) {
+            const meta = teacherIdToMetadata.get(gsId);
+            const auditResult = teacherAuditResults.get(gsId);
+            const finalName = teacherIdToResolvedNameMap.get(gsId) || meta.name || "New Teacher";
+            
+            const insertTags = [];
+            if (auditResult === "No tag") insertTags.push("No tag");
+            if (auditResult === "Mutual") insertTags.push("Mutual");
+
+            const { error: insErr } = await supabase.from("teachers").insert({
+                trainer_id: userId,
+                name: finalName, 
+                email: email,
+                school_name: meta.school_name,
+                campus: meta.campus,
+                school_id: meta.school_id,
+                grapeseed_id: gsId,
+                is_active: true,
+                status: "Active",
+                tags: insertTags
+            });
+
+            if (!insErr) {
+                insertedCount++;
+                log(`✨ New Teacher Added: ${finalName} (${email})`);
+            } else {
+                log(`⚠️ Insert failed for ${email}: ${insErr.message}`);
+            }
+        }
+    }
+
     log(`✅ Sync Complete for ${displayName}.`);
-    log(`🎯 Results: ${activeCount} Active, ${inactiveCount} Inactive.`);
+    log(`🎯 Results: ${activeCount} Updated, ${insertedCount} Inserted, ${inactiveCount} Inactive.`);
 
     res.json({ success: true, logs });
 
