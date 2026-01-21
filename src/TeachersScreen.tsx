@@ -24,6 +24,7 @@ export interface TeacherRow {
   school_name: string;
   status: string | null;    // 🟢 NEW FIELD
   is_active: boolean | null;// 🟢 NEW FIELD
+  tags: string[] | null; // 🟢 ADDED THIS
   campus: string;
   worksheet_url: string | null;
   created_at: string;
@@ -494,23 +495,25 @@ export const TeachersScreen: React.FC = () => {
   accessorKey: "name",
   header: "Teacher",
   cell: (info) => {
-    // 🟢 NEW: Get status variables
-    const { status, is_active } = info.row.original;
-    const isInactive = is_active === false; // Explicit check for false
+    const { status, is_active, tags } = info.row.original;
+    
+    // 🟢 Logic Fixes:
+    const isInactive = is_active === false; 
+    const isMutual = Array.isArray(tags) && tags.includes("Mutual");
 
     return (
       <>
         <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
           {info.getValue() as string}
 
-          {/* 🟢 NEW: Inactive Badge */}
+          {/* Inactive Badge */}
           {isInactive && (
             <span className="badge badge-inactive">Inactive</span>
           )}
 
-          {/* 🟢 NEW: Mutual Badge */}
-          {status === 'mutual' && (
-             <span className="badge badge-mutual" title="Shared with another trainer or works at outside school">
+          {/* Mutual Badge - Now checks the tags array */}
+          {isMutual && (
+             <span className="badge badge-mutual" title="Shared with another trainer">
                Mutual
              </span>
           )}
@@ -699,6 +702,7 @@ export const TeachersScreen: React.FC = () => {
         worksheet_url,
         status,
         is_active,
+        tags,
         created_at,
         updated_at
       `) // Ensure no comments, emojis, or "ADD THIS" text remains here
