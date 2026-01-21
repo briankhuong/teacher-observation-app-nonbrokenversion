@@ -6,6 +6,7 @@ import mergeRoutes from "./mergeRoutes.js";
 // 👇 Import the new Gemini Route
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
 import polishGroqRoute from "./polishGroqRoute.js";
+import syncRoute from "./syncRoute.js";
 
 dotenv.config({ path: ".env.azure" });
 
@@ -240,7 +241,7 @@ app.use(mergeRoutes);
 
 // 👇 USE NEW ROUTE
 app.use(polishGroqRoute);
-
+app.use(syncRoute);
 // -----------------------------------------------------------------
 // 4. Start Server
 // -----------------------------------------------------------------

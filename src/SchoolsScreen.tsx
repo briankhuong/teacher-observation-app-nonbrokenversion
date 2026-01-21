@@ -36,6 +36,7 @@ export interface SchoolRow {
   city: string | null;
   notes: string | null;
   admin_workbook_url: string | null;
+  has_empty_class: boolean; // 🟢 NEW FIELD
   created_at: string;
   updated_at: string;
 }
@@ -532,19 +533,28 @@ export const SchoolsScreen: React.FC = () => {
   // Define Columns
   const columns = useMemo<ColumnDef<SchoolRow>[]>(
     () => [
-      {
-        accessorKey: "school_name",
-        header: "School & Campus",
-        cell: (info) => (
-          <>
-            <div className="entity-cell-main">{info.row.original.school_name}</div>
-            <div className="entity-cell-sub">{info.row.original.campus_name}</div>
-          </>
-        ),
-        id: "school_name",
-        minSize: 150,
-        size: 250,
-      },
+     {
+  accessorKey: "school_name",
+  header: "School & Campus",
+  cell: (info) => (
+    <>
+      <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {info.row.original.school_name}
+        
+        {/* 🟢 NEW: No Teacher Badge */}
+        {info.row.original.has_empty_class && (
+          <span className="badge badge-danger" title="This school has classes with no teacher assigned">
+            No Teacher
+          </span>
+        )}
+      </div>
+      <div className="entity-cell-sub">{info.row.original.campus_name}</div>
+    </>
+  ),
+  id: "school_name",
+  minSize: 150,
+  size: 250,
+},
       {
         accessorKey: "campus_name",
         header: "Campus Name",
@@ -773,6 +783,7 @@ export const SchoolsScreen: React.FC = () => {
             city,
             notes,
             admin_workbook_url,
+            has_empty_class,
             created_at,
             updated_at
           `
