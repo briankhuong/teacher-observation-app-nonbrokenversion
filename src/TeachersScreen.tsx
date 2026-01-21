@@ -491,30 +491,35 @@ export const TeachersScreen: React.FC = () => {
   // Define Columns
   const columns = useMemo<ColumnDef<TeacherRow>[]>(
     () => [
-      {
+      // Inside columns definition in TeachersScreen.tsx
+{
   accessorKey: "name",
   header: "Teacher",
   cell: (info) => {
-    const { status, is_active, tags } = info.row.original;
+    const { is_active, tags } = info.row.original;
     
-    // 🟢 Logic Fixes:
     const isInactive = is_active === false; 
     const isMutual = Array.isArray(tags) && tags.includes("Mutual");
+    // 🟢 NEW: Logic for the "No tag" literal string badge
+    const isNoTag = Array.isArray(tags) && tags.includes("No tag");
 
     return (
       <>
         <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
           {info.getValue() as string}
 
-          {/* Inactive Badge */}
-          {isInactive && (
-            <span className="badge badge-inactive">Inactive</span>
-          )}
+          {isInactive && <span className="badge badge-inactive">Inactive</span>}
 
-          {/* Mutual Badge - Now checks the tags array */}
           {isMutual && (
              <span className="badge badge-mutual" title="Shared with another trainer">
                Mutual
+             </span>
+          )}
+
+          {/* 🟢 NEW: Render the "No tag" badge */}
+          {isNoTag && (
+             <span className="badge badge-notag" title="No trainer tags found in GrapeSEED">
+               No tag
              </span>
           )}
         </div>
