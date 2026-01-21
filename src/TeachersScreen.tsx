@@ -22,6 +22,8 @@ export interface TeacherRow {
   name: string;
   email: string | null;
   school_name: string;
+  status: string | null;    // 🟢 NEW FIELD
+  is_active: boolean | null;// 🟢 NEW FIELD
   campus: string;
   worksheet_url: string | null;
   created_at: string;
@@ -489,18 +491,38 @@ export const TeachersScreen: React.FC = () => {
   const columns = useMemo<ColumnDef<TeacherRow>[]>(
     () => [
       {
-        accessorKey: "name",
-        header: "Teacher",
-        cell: (info) => (
-          <>
-            <div className="entity-cell-main">{info.getValue() as string}</div>
-            <div className="entity-cell-sub">{info.row.original.email || "—"}</div>
-          </>
-        ),
-        id: "name",
-        minSize: 150,
-        size: 200,
-      },
+  accessorKey: "name",
+  header: "Teacher",
+  cell: (info) => {
+    // 🟢 NEW: Get status variables
+    const { status, is_active } = info.row.original;
+    const isInactive = is_active === false; // Explicit check for false
+
+    return (
+      <>
+        <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          {info.getValue() as string}
+
+          {/* 🟢 NEW: Inactive Badge */}
+          {isInactive && (
+            <span className="badge badge-inactive">Inactive</span>
+          )}
+
+          {/* 🟢 NEW: Mutual Badge */}
+          {status === 'mutual' && (
+             <span className="badge badge-mutual" title="Shared with another trainer or works at outside school">
+               Mutual
+             </span>
+          )}
+        </div>
+        <div className="entity-cell-sub">{info.row.original.email || "—"}</div>
+      </>
+    );
+  },
+  id: "name",
+  minSize: 150,
+  size: 200,
+},
       {
         id: "school_campus",
         header: "School & Campus",
@@ -661,44 +683,44 @@ export const TeachersScreen: React.FC = () => {
     let cancelled = false;
 
     async function loadTeachers() {
-      try {
-        setLoading(true);
-        setLoadError(null);
+  try {
+    setLoading(true);
+    setLoadError(null);
 
-        const { data, error } = await supabase
-          .from("teachers")
-          .select(
-            `
-            id,
-            trainer_id,
-            name,
-            email,
-            school_name,
-            campus,
-            worksheet_url,
-            created_at,
-            updated_at
-          `
-          )
-          .eq("trainer_id", trainerId)
-          // Initial sorting is now handled by TanStack Table state
-          .order("school_name", { ascending: true })
-          .order("campus", { ascending: true })
-          .order("name", { ascending: true });
+    const { data, error } = await supabase
+      .from("teachers")
+      .select(`
+        id,
+        trainer_id,
+        name,
+        email,
+        school_name,
+        campus,
+        worksheet_url,
+        status,
+        is_active,
+        created_at,
+        updated_at
+      `) // Ensure no comments, emojis, or "ADD THIS" text remains here
+      .eq("trainer_id", trainerId)
+      .order("school_name", { ascending: true })
+      .order("campus", { ascending: true })
+      .order("name", { ascending: true });
 
-        if (error) {
-          console.error("[DB] load teachers error", error);
-          if (!cancelled) setLoadError(error.message);
-          return;
-        }
-
-        if (!cancelled && data) {
-          setRows(data as TeacherRow[]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    if (error) {
+      console.error("[DB] load teachers error", error);
+      if (!cancelled) setLoadError(error.message);
+      return;
     }
+
+    if (!cancelled && data) {
+      // This cast will now work because the 'data' structure matches TeacherRow
+      setRows(data as TeacherRow[]); 
+    }
+  } finally {
+    if (!cancelled) setLoading(false);
+  }
+}
 
     loadTeachers();
     return () => {
@@ -868,44 +890,111 @@ if (autoCreateToken) {
         }
       : undefined;
 
-// Inside TeachersScreen.tsx
-
   const handleTestApi = async () => {
     try {
-      // --- STEP 1: GET TOKEN ---
+      // 1. Get Token
       console.log("🚀 Step 1: Getting Token...");
-      const tokenResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, {
-        method: "POST",
-      });
+      const tokenResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, { method: "POST" });
+      const { access_token } = await tokenResponse.json();
 
-      if (!tokenResponse.ok) throw new Error("Failed to get token");
-      const tokenData = await tokenResponse.json();
-      const accessToken = tokenData.access_token;
-      
-      console.log("✅ Got Token:", accessToken.substring(0, 15) + "...");
-
-      // --- STEP 2: GET DATA ---
-      console.log("🚀 Step 2: Fetching Class Data...");
-      const dataResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-classes`, {
+      // 2. Get Class List to find a Teacher ID
+      console.log("🚀 Step 2: Fetching Class List...");
+      const classResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-classes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: accessToken }), // Send the token to backend
+        body: JSON.stringify({ token: access_token }),
+      });
+      const classData = await classResponse.json();
+      
+      // Find a valid Teacher ID
+      const sampleClass = classData.find((c: any) => c.teacherId);
+      if (!sampleClass) throw new Error("No classes with teachers found.");
+
+      const targetId = sampleClass.teacherId;
+      console.log(`🎯 Found Teacher ID: ${targetId}`);
+
+      // 3. 🕵️ THE PROBE: Try to fetch User Details
+      // We are guessing the URL pattern here. This is common in API discovery.
+      const probeUrl = `https://services.grapeseed.com/admin/v1/users/${targetId}`;
+      
+      console.log(`🚀 Step 3: Probing User Profile at ${probeUrl}...`);
+      
+      // We use the exact same headers as before
+      const userResponse = await fetch(probeUrl, {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${access_token}`,
+            "x-gl-origin": "https://schools.grapeseed.com/", // Critical Header
+            "Content-Type": "application/json"
+        }
       });
 
-      if (!dataResponse.ok) {
-         const err = await dataResponse.json();
-         throw new Error(`Data Error: ${err.details || err.error}`);
+      if (userResponse.ok) {
+        const userData = await userResponse.json();
+        console.log("--- ✨ SUCCESS! FOUND USER DATA ✨ ---");
+        console.log("Name:", userData.firstName, userData.lastName, userData.fullName);
+        console.log("Email:", userData.email || userData.username || "❌ No Email Field");
+        console.log("-------------------------------------");
+        console.log("Full Object:", userData);
+        alert(`Success! Found email: ${userData.email}`);
+      } else {
+        console.error(`❌ Probe Failed: ${userResponse.status}`);
+        const errText = await userResponse.text();
+        console.error("Error Details:", errText);
+        alert("Probe failed. We need to find the correct API endpoint manually.");
       }
-
-      const classData = await dataResponse.json();
-
-      alert(`Success! Data loaded. Check Console (F12) to see the teachers/classes.`);
 
     } catch (error: any) {
       console.error("Test Failed:", error);
       alert(`Error: ${error.message}`);
     }
   };
+ // 1. THE HANDLER
+  const handleSync = async () => {
+    // 🛑 CRITICAL CHECK: Make sure we know WHO you are before starting
+    if (!user?.id) {
+      alert("Error: Could not find User ID. Please refresh or log in again.");
+      return;
+    }
+
+    const confirmSync = window.confirm("Start GrapeSEED Sync?\n\nThis will ONLY sync schools associated with YOUR account.");
+    if (!confirmSync) return;
+
+    try {
+      setLoading(true); 
+
+      // Get Token
+      const tokenResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, { method: "POST" });
+      if (!tokenResponse.ok) throw new Error("Failed to authenticate with GrapeSEED.");
+      const { access_token } = await tokenResponse.json();
+
+      // Call Sync
+      const syncResponse = await fetch(`${MERGE_SERVER_BASE}/api/sync-grapeseed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: access_token,
+          userId: user.id,      // <--- CHANGED: Matches 'const { userId } = req.body' in backend
+          trainerNameTag: "brian" // (Optional: kept if you use it for teacher tagging later)
+        }),
+      });
+
+      const result = await syncResponse.json();
+
+      if (!result.success) throw new Error(result.error || "Sync failed");
+
+      console.log("--- SYNC LOGS ---", result.logs);
+      alert("Sync Complete! Only your specific schools were checked.");
+      setRefreshKey(prev => prev + 1);
+
+    } catch (error: any) {
+      console.error(error);
+      alert(`Sync Failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   return (
     <>
@@ -927,19 +1016,19 @@ if (autoCreateToken) {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Teacher, school, campus…"
               />
-              {/* 🟢 NEW: Fetch Button */}
+              <div className="toolbar-group">
+      {/* 2. THE BUTTON */}
               <button 
                 type="button" 
                 className="btn" 
-                onClick={handleTestApi}
-                style={{ marginLeft: '8px' }}
+                onClick={handleSync}
+                style={{ marginRight: '8px', backgroundColor: '#e0e7ff', color: '#3730a3' }}
               >
-                Fetch
+                🔄 Sync GS
               </button>
-            </div>
 
-            <div className="toolbar-group">
-               <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
+              <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
+          </div>
             </div>
 
             <div className="toolbar-group">
