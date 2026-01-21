@@ -19,6 +19,9 @@ router.post("/api/sync-grapeseed", async (req, res) => {
   const logs = [];
   const log = (m) => { console.log(m); logs.push(m); };
 
+  // 🛑 CONFIG: Change this to your actual GrapeSEED trainer tag name
+  const myTrainerTagName = "brian"; 
+
   log("🚀 Sync Started: Processing Active & Inactive Teachers...");
 
   try {
@@ -73,8 +76,37 @@ router.post("/api/sync-grapeseed", async (req, res) => {
       }
     }
 
-    // 4. RESOLVE EMAILS FROM API
-    const resolvedEmails = new Set();
+    // 4. NEW: TAG AUDIT (Identify Mutual Teachers)
+    const teacherAuditResults = new Map(); // Maps Teacher ID -> "Mutual" or "Exclusive"
+    if (myTeacherIds.size > 0) {
+        const idList = Array.from(myTeacherIds);
+        const tagResp = await fetch("https://services.grapeseed.com/admin/v1/tags/entitytags", {
+            method: "POST",
+            headers: { 
+                "Authorization": `Bearer ${token}`, 
+                "Content-Type": "application/json", 
+                "x-gl-origin": "https://schools.grapeseed.com/" 
+            },
+            body: JSON.stringify({ ids: idList })
+        });
+
+        if (tagResp.ok) {
+            const tagData = await tagResp.json();
+            tagData.forEach(entity => {
+                // Filter out non-string tags like "2019" (keep only trainer names)
+                const trainerNames = (entity.tags || [])
+                    .map(t => t.name?.toLowerCase())
+                    .filter(name => name && isNaN(name));
+
+                // LOGIC: >1 trainer OR 1 trainer that isn't you = Mutual
+                const isMutual = trainerNames.length > 1 || (trainerNames.length === 1 && !trainerNames.includes(myTrainerTagName.toLowerCase()));
+                teacherAuditResults.set(entity.entityId, isMutual ? "Mutual" : "Exclusive");
+            });
+        }
+    }
+
+    // 5. RESOLVE EMAILS FROM API
+    const emailToAuditMap = new Map(); // Maps Email -> "Mutual" or "Exclusive"
     if (myTeacherIds.size > 0) {
         const teacherIds = Array.from(myTeacherIds);
         const chunkSize = 50; 
@@ -95,13 +127,17 @@ router.post("/api/sync-grapeseed", async (req, res) => {
             if (userDetailsResp.ok) {
                 const chunkUsers = await userDetailsResp.json();
                 chunkUsers.forEach(u => {
-                    if (u.email) resolvedEmails.add(u.email.trim().toLowerCase());
+                    if (u.email) {
+                        const email = u.email.trim().toLowerCase();
+                        // Link the resolved email to the Audit status found in Step 4
+                        emailToAuditMap.set(email, teacherAuditResults.get(u.id));
+                    }
                 });
             }
         }
     }
 
-    // 5. COMPARE & UPDATE TEACHER STATUS (ACTIVE VS INACTIVE)
+    // 6. COMPARE & UPDATE TEACHER STATUS (Modified for Tag Audit)
     const { data: dbTeachers } = await supabase
         .from("teachers")
         .select("id, email, name, tags, is_active, status")
@@ -113,20 +149,37 @@ router.post("/api/sync-grapeseed", async (req, res) => {
     for (const teacher of (dbTeachers || [])) {
         if (!teacher.email) continue;
         const dbEmail = teacher.email.trim().toLowerCase();
-        const isCurrentlyTeaching = resolvedEmails.has(dbEmail);
+        
+        const auditResult = emailToAuditMap.get(dbEmail); // "Mutual", "Exclusive", or undefined
+        const isCurrentlyTeaching = !!auditResult;
 
         const updateData = {
             is_active: isCurrentlyTeaching,
             status: isCurrentlyTeaching ? "Active" : "Inactive"
         };
 
-        // If active, ensure the tag exists
         if (isCurrentlyTeaching) {
             let currentTags = Array.isArray(teacher.tags) ? teacher.tags : [];
+            
+            // Standard Active Tag
             if (!currentTags.includes("Active-Jan-2026")) {
                 currentTags.push("Active-Jan-2026");
-                updateData.tags = currentTags;
             }
+
+            // Logic: Apply or Remove "Mutual" tag
+            if (auditResult === "Mutual") {
+                if (!currentTags.includes("Mutual")) {
+                    currentTags.push("Mutual");
+                    log(`🏷️ Demoted: ${teacher.name} (${teacher.email}) -> Added Mutual tag.`);
+                }
+            } else if (auditResult === "Exclusive") {
+                if (currentTags.includes("Mutual")) {
+                    currentTags = currentTags.filter(t => t !== "Mutual");
+                    log(`✨ Promoted: ${teacher.name} (${teacher.email}) -> Removed Mutual tag.`);
+                }
+            }
+
+            updateData.tags = currentTags;
             activeCount++;
         } else {
             inactiveCount++;
