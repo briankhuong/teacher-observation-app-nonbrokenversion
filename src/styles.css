@@ -2675,4 +2675,65 @@ input[type="date"].input {
   height: 100%;
 }
 
+/* 🟢 Isolated Pill Styles for Schools */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 9999px; 
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-width: 1px;
+  border-style: solid;
+  white-space: nowrap;
+}
 
+/* 🔴 No Teacher: Balanced Red Tint */
+.tag-pill-notag {
+  background-color: rgba(239, 68, 68, 0.15); /* 15% Red Tint */
+  border-color: #f87171;                    /* Solid Red Border */
+  color: #fca5a5;                           /* Soft Red Text */
+}
+/* 🟠 Mutual: Orange Tint */
+.tag-pill-mutual {
+  background-color: rgba(234, 88, 12, 0.1); /* 10% Orange Tint */
+  border-color: #ea580c;                    /* Solid Orange Border */
+  color: #c2410c;                          /* Dark Orange Text */
+}
+
+/* ⚪ Inactive: Grayish/Slate Tint */
+.tag-pill-inactive {
+  background-color: rgba(100, 116, 139, 0.1); /* 10% Slate Tint */
+  border-color: #94a3b8;                    /* Grayish Border */
+  color: #475569;                          /* Dark Gray Text */
+}
+/* 🟢 RESTORED: Specific Header Badge Styles */
+.trainer-badge {
+  display: inline-flex !important; /* Force original style */
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  font-size: 14px;
+  font-weight: 500;
+  background: transparent;
+  text-transform: none !important; /* Block the uppercase override */
+}
+
+.online-status {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  border-radius: 9999px;
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  text-transform: none !important; /* Block the uppercase override */
+}
