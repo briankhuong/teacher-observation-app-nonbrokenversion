@@ -492,6 +492,7 @@ export const TeachersScreen: React.FC = () => {
   const columns = useMemo<ColumnDef<TeacherRow>[]>(
     () => [
       // Inside columns definition in TeachersScreen.tsx
+// Inside your columns definition in TeachersScreen.tsx
 {
   accessorKey: "name",
   header: "Teacher",
@@ -500,7 +501,6 @@ export const TeachersScreen: React.FC = () => {
     
     const isInactive = is_active === false; 
     const isMutual = Array.isArray(tags) && tags.includes("Mutual");
-    // 🟢 NEW: Logic for the "No tag" literal string badge
     const isNoTag = Array.isArray(tags) && tags.includes("No tag");
 
     return (
@@ -508,17 +508,17 @@ export const TeachersScreen: React.FC = () => {
         <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
           {info.getValue() as string}
 
-          {isInactive && <span className="badge badge-inactive">Inactive</span>}
+          {/* ⚡ FIXED: Using unique .tag-pill classes to protect the Header Badges */}
+          {isInactive && <span className="tag-pill tag-pill-inactive">Inactive</span>}
 
           {isMutual && (
-             <span className="badge badge-mutual" title="Shared with another trainer">
+             <span className="tag-pill tag-pill-mutual" title="Shared with another trainer">
                Mutual
              </span>
           )}
 
-          {/* 🟢 NEW: Render the "No tag" badge */}
           {isNoTag && (
-             <span className="badge badge-notag" title="No trainer tags found in GrapeSEED">
+             <span className="tag-pill tag-pill-notag" title="No trainer tags found in GrapeSEED">
                No tag
              </span>
           )}
@@ -958,52 +958,44 @@ if (autoCreateToken) {
       alert(`Error: ${error.message}`);
     }
   };
- // 1. THE HANDLER
-  const handleSync = async () => {
-    // 🛑 CRITICAL CHECK: Make sure we know WHO you are before starting
-    if (!user?.id) {
-      alert("Error: Could not find User ID. Please refresh or log in again.");
-      return;
-    }
 
-    const confirmSync = window.confirm("Start GrapeSEED Sync?\n\nThis will ONLY sync schools associated with YOUR account.");
-    if (!confirmSync) return;
+const handleSync = async () => {
+  if (!user?.id) {
+    alert("Error: Could not find User ID. Please refresh or log in again.");
+    return;
+  }
 
-    try {
-      setLoading(true); 
+  try {
+    setLoading(true); 
 
-      // Get Token
-      const tokenResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, { method: "POST" });
-      if (!tokenResponse.ok) throw new Error("Failed to authenticate with GrapeSEED.");
-      const { access_token } = await tokenResponse.json();
+    // 1. Get Token
+    const tokenResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, { method: "POST" });
+    if (!tokenResponse.ok) throw new Error("Failed to authenticate.");
+    const { access_token } = await tokenResponse.json();
 
-      // Call Sync
-      const syncResponse = await fetch(`${MERGE_SERVER_BASE}/api/sync-grapeseed`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: access_token,
-          userId: user.id,      // <--- CHANGED: Matches 'const { userId } = req.body' in backend
-          trainerNameTag: "brian" // (Optional: kept if you use it for teacher tagging later)
-        }),
-      });
+    // 2. Immediate Live Sync
+    const syncResponse = await fetch(`${MERGE_SERVER_BASE}/api/sync-grapeseed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: access_token,
+        userId: user.id,
+        dryRun: false 
+      }),
+    });
 
-      const result = await syncResponse.json();
+    const result = await syncResponse.json();
+    if (!result.success) throw new Error(result.error || "Sync failed");
 
-      if (!result.success) throw new Error(result.error || "Sync failed");
+    alert(`✅ Sync Complete!\n- Updated: ${result.stats.updated}\n- Inserted: ${result.stats.inserted}\n- Inactivated: ${result.stats.inactivated}`);
+    setRefreshKey(prev => prev + 1);
 
-      console.log("--- SYNC LOGS ---", result.logs);
-      alert("Sync Complete! Only your specific schools were checked.");
-      setRefreshKey(prev => prev + 1);
-
-    } catch (error: any) {
-      console.error(error);
-      alert(`Sync Failed: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  } catch (error: any) {
+    alert(`Sync Failed: ${error.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <>

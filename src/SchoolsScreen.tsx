@@ -533,7 +533,7 @@ export const SchoolsScreen: React.FC = () => {
   // Define Columns
   const columns = useMemo<ColumnDef<SchoolRow>[]>(
     () => [
-     {
+{
   accessorKey: "school_name",
   header: "School & Campus",
   cell: (info) => (
@@ -541,9 +541,9 @@ export const SchoolsScreen: React.FC = () => {
       <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         {info.row.original.school_name}
         
-        {/* 🟢 NEW: No Teacher Badge */}
+        {/* ⚡ FIXED: Using the unique Tinted Pill style */}
         {info.row.original.has_empty_class && (
-          <span className="badge badge-danger" title="This school has classes with no teacher assigned">
+          <span className="tag-pill tag-pill-notag" title="This school has classes with no teacher assigned">
             No Teacher
           </span>
         )}
