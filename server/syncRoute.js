@@ -14,198 +14,128 @@ function getSupabase() {
   return supabaseInstance;
 }
 
-router.post("/api/sync-grapeseed", async (req, res) => {
-  const { token, userId, dryRun = false } = req.body; 
+const clean = (str) => (str || "").trim().toLowerCase();
+
+router.post("/api/sync-preparation", async (req, res) => {
+  const { token, userId } = req.body;
   const logs = [];
   const log = (m) => { console.log(m); logs.push(m); };
 
-  log(`🚀 Sync Started (Mode: ${dryRun ? "DRY RUN" : "LIVE"})`);
-  const startTime = Date.now();
+  log(`🛡️ PHASE 1: Data Preparation (Schools & Campuses)`);
 
   try {
     const supabase = getSupabase();
     if (!userId) throw new Error("❌ CRITICAL: No User ID provided.");
 
-    // 1. RESOLVE TRAINER NAME (Metadata)
-    const { data: userData } = await supabase.auth.admin.getUserById(userId);
-    const meta = userData?.user?.user_metadata || {};
-    const displayName = meta.display_name || meta.full_name || meta.name || ""; 
-    const myTrainerTagName = displayName.split(" ")[0].toLowerCase().trim(); 
+    // 1. Fetch current DB schools
+    const { data: dbSchools, error: dbError } = await supabase
+      .from("schools")
+      .select("*")
+      .eq("trainer_id", userId);
 
-    // 2. GET YOUR SCHOOLS
-    const { data: mySchools } = await supabase.from("schools").select("id, official_code").eq("trainer_id", userId);
-    const mySchoolCodes = new Set((mySchools || []).map(s => s.official_code).filter(Boolean));
-    const schoolCodeToIdMap = new Map(mySchools.map(s => [s.official_code, s.id]));
-    
-    // 3. FETCH MASTER CLASS LIST (ACTIVE CLASSES ONLY)
-    const vbaUserId = "b6133f96-5f21-47ca-9ab3-1b4205bf073f";
-    const myurl = `https://services.grapeseed.com/admin/v1/resources/users/${vbaUserId}/landingresources/9?filterText=&sortBy=schoolName&sortBy=campusName&disabled=false&sortBy=schoolClassName`;
+    if (dbError) throw dbError;
+    log(`📚 DB: Found ${dbSchools.length} school records.`);
 
-    const response = await fetch(myurl, {
-      headers: { "Authorization": `Bearer ${token}`, "x-gl-origin": "https://schools.grapeseed.com/", "Content-Type": "application/json" }
-    });
-    const allData = await response.json();
+    const uniqueCodes = [...new Set(dbSchools.map(s => s.official_code).filter(Boolean))];
+    const finalPayload = [];
+    const claimedDbRowIds = new Set(); // Tracks which DB row (UUID) is already "taken"
 
-    const apiSchoolMap = new Map(); 
-    const activeTeacherIdsInMySchools = new Set();
-    const teacherIdToMetadata = new Map(); 
-
-    if (Array.isArray(allData)) {
-      allData.forEach(item => {
-        if (mySchoolCodes.has(item.schoolId)) {
-          if (!apiSchoolMap.has(item.schoolId)) apiSchoolMap.set(item.schoolId, false);
-          if (!item.teacherId) apiSchoolMap.set(item.schoolId, true);
-          if (item.teacherId) {
-            activeTeacherIdsInMySchools.add(item.teacherId);
-            if (!teacherIdToMetadata.has(item.teacherId)) {
-              teacherIdToMetadata.set(item.teacherId, {
-                name: item.teacherName, school_name: item.schoolName, campus: item.campusName, school_id: schoolCodeToIdMap.get(item.schoolId)
-              });
-            }
-          }
-        }
+    // 2. Process each Official Code
+    for (const code of uniqueCodes) {
+      log(`📡 Fetching API for code: ${code}`);
+      const apiUrl = `https://services.grapeseed.com/admin/v1/schools/${code}/campuses/accessiblecampuses`;
+      
+      const response = await fetch(apiUrl, {
+        headers: { "Authorization": `Bearer ${token}`, "x-gl-origin": "https://schools.grapeseed.com/" }
       });
-    }
 
-    // 4. TAG AUDIT (THE PRE-FILL SOLUTION)
-    const teacherAuditResults = new Map(); 
-    activeTeacherIdsInMySchools.forEach(id => teacherAuditResults.set(id, "No tag"));
+      if (!response.ok) continue;
 
-    if (activeTeacherIdsInMySchools.size > 0) {
-        const tagResp = await fetch("https://services.grapeseed.com/admin/v1/tags/entitytags", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "x-gl-origin": "https://schools.grapeseed.com/" },
-            body: JSON.stringify({ ids: Array.from(activeTeacherIdsInMySchools) })
-        });
+      const apiCampuses = await response.json();
+      const dbSiblings = dbSchools.filter(s => s.official_code === code);
 
-        if (tagResp.ok) {
-            const tagData = await tagResp.json();
-            tagData.forEach(entity => {
-                const trainerNames = (entity.tags || []).map(t => t.name?.toLowerCase().trim()).filter(name => name && isNaN(name));
-                if (trainerNames.length === 1 && trainerNames[0] === myTrainerTagName) teacherAuditResults.set(entity.entityId, "CLEAR"); 
-                else if (trainerNames.length > 0) teacherAuditResults.set(entity.entityId, "Mutual");
-            });
-        }
-    }
-
-    // 5. RESOLVE EMAILS (PARALLEL FETCH CHUNKED BY 50)
-    const emailToAuditMap = new Map(); 
-    const teacherIdToEmailMap = new Map();
-    const teacherIdToResolvedNameMap = new Map();
-
-    if (activeTeacherIdsInMySchools.size > 0) {
-        const teacherIds = Array.from(activeTeacherIdsInMySchools);
-        const chunks = [];
-        for (let i = 0; i < teacherIds.length; i += 50) chunks.push(teacherIds.slice(i, i + 50));
-
-        await Promise.all(chunks.map(async (chunk) => {
-            const res = await fetch("https://services.grapeseed.com/account/v1/users/getUsersByIds", {
-                method: "POST",
-                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "x-gl-origin": "https://schools.grapeseed.com/" },
-                body: JSON.stringify({ ids: chunk }) 
-            });
-            if (res.ok) {
-                const users = await res.json();
-                users.forEach(u => {
-                    if (u.email) {
-                        const email = u.email.trim().toLowerCase();
-                        emailToAuditMap.set(email, teacherAuditResults.get(u.id));
-                        teacherIdToEmailMap.set(u.id, email);
-                        teacherIdToResolvedNameMap.set(u.id, u.name || u.fullName || u.displayName);
-                    }
-                });
-            }
-        }));
-    }
-
-    // 6. PREPARE BULK PAYLOAD
-    const { data: dbTeachers } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
-    const existingEmails = new Set(dbTeachers.map(t => t.email?.toLowerCase()));
-    const existingGsIds = new Set(dbTeachers.map(t => t.grapeseed_id));
-
-    const finalUploadData = [];
-    const stats = { updated: 0, inserted: 0, inactivated: 0 };
-
-    dbTeachers.forEach(teacher => {
-        if (!teacher.email) return;
-        const email = teacher.email.toLowerCase();
-        const auditResult = emailToAuditMap.get(email);
-        const isTeaching = emailToAuditMap.has(email);
-
-        let currentTags = Array.isArray(teacher.tags) ? [...teacher.tags] : [];
-        if (isTeaching) {
-            if (auditResult === "No tag") {
-                if (!currentTags.includes("No tag")) currentTags.push("No tag");
-                currentTags = currentTags.filter(t => t !== "Mutual");
-            } else if (auditResult === "Mutual") {
-                if (!currentTags.includes("Mutual")) currentTags.push("Mutual");
-                currentTags = currentTags.filter(t => t !== "No tag");
-            } else if (auditResult === "CLEAR") {
-                currentTags = currentTags.filter(t => t !== "Mutual" && t !== "No tag");
-            }
-            stats.updated++;
-        } else {
-            stats.inactivated++;
-        }
-
-        finalUploadData.push({
-            id: teacher.id,
+      // --- STEP A: MATCH BY UUID (Highest Priority) ---
+      // We do this first so existing IDs are locked in.
+      for (const apiC of apiCampuses) {
+        const match = dbSiblings.find(s => s.campus_id === apiC.id);
+        if (match) {
+          finalPayload.push({
+            id: match.id,
             trainer_id: userId,
-            is_active: isTeaching,
-            status: isTeaching ? "Active" : "Inactive",
-            tags: currentTags
-        });
-    });
-
-    activeTeacherIdsInMySchools.forEach(gsId => {
-        const email = teacherIdToEmailMap.get(gsId);
-        if (email && !existingEmails.has(email) && !existingGsIds.has(gsId)) {
-            const meta = teacherIdToMetadata.get(gsId);
-            const audit = teacherAuditResults.get(gsId);
-            const finalName = teacherIdToResolvedNameMap.get(gsId) || meta.name;
-            
-            const insertTags = [];
-            if (audit === "No tag") insertTags.push("No tag");
-            if (audit === "Mutual") insertTags.push("Mutual");
-
-            finalUploadData.push({
-                trainer_id: userId,
-                name: finalName,
-                email: email,
-                school_name: meta.school_name,
-                campus: meta.campus,
-                school_id: meta.school_id,
-                grapeseed_id: gsId,
-                is_active: true,
-                status: "Active",
-                tags: insertTags
-            });
-            stats.inserted++;
+            official_code: code,
+            school_name: match.school_name,
+            campus_name: apiC.name,
+            campus_id: apiC.id,
+            address: apiC.fullAddress || apiC.address || null,
+            disabled: apiC.disabled === true,
+            updated_at: new Date().toISOString()
+          });
+          claimedDbRowIds.add(match.id);
+          log(`   ✅ UUID Match: ${apiC.name}`);
         }
-    });
+      }
 
-    // 7. EXECUTE
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      // --- STEP B: MATCH BY NAME (Only for Unclaimed rows with NULL campus_id) ---
+      // We iterate API items again, but only look at those NOT matched in Step A.
+      for (const apiC of apiCampuses) {
+        // Skip if this API item was already matched by UUID
+        if (finalPayload.some(p => p.campus_id === apiC.id)) continue;
+        
+        // IMPORTANT: Only match ENABLED API items by name to avoid disabled items "stealing" rows.
+        if (apiC.disabled === true) continue;
 
-    if (dryRun) {
-        return res.json({ success: true, isDryRun: true, stats, duration, sample: finalUploadData.slice(0, 3), logs });
+        const apiNameClean = clean(apiC.name);
+        const match = dbSiblings.find(s => 
+          !claimedDbRowIds.has(s.id) && 
+          (s.campus_id === null || s.campus_id === "") && 
+          clean(s.campus_name) === apiNameClean
+        );
+
+        if (match) {
+          finalPayload.push({
+            id: match.id,
+            trainer_id: userId,
+            official_code: code,
+            school_name: match.school_name,
+            campus_name: apiC.name,
+            campus_id: apiC.id,
+            address: apiC.fullAddress || apiC.address || null,
+            disabled: false,
+            updated_at: new Date().toISOString()
+          });
+          claimedDbRowIds.add(match.id);
+          log(`   🔄 Name Match (Claimed): ${apiC.name}`);
+        } else {
+          // --- STEP C: CREATE NEW (If no match found and enabled) ---
+          const template = dbSiblings[0] || {};
+          finalPayload.push({
+            trainer_id: userId,
+            official_code: code,
+            school_name: template.school_name || "New School",
+            campus_name: apiC.name,
+            campus_id: apiC.id,
+            address: apiC.fullAddress || apiC.address || null,
+            disabled: false,
+            updated_at: new Date().toISOString()
+          });
+          log(`   ✨ New Campus Created: ${apiC.name}`);
+        }
+      }
     }
 
-    if (finalUploadData.length > 0) {
-        await supabase.from("teachers").upsert(finalUploadData, { onConflict: 'id' });
+    // 3. Final Batch Execution
+    if (finalPayload.length > 0) {
+      log(`💾 Sending ${finalPayload.length} unique operations to Supabase...`);
+      const { error: err } = await supabase.from("schools").upsert(finalPayload, { onConflict: 'id' });
+      if (err) throw err;
     }
 
-    const schoolUpdates = Array.from(apiSchoolMap.entries()).map(([code, hasEmpty]) => ({
-      id: schoolCodeToIdMap.get(code), has_empty_class: hasEmpty
-    }));
-    if (schoolUpdates.length > 0) await supabase.from("schools").upsert(schoolUpdates);
-
-    log(`✅ Sync Complete in ${duration}s.`);
-    res.json({ success: true, logs, stats });
+    log(`✅ Phase 1 Complete.`);
+    res.json({ success: true, stats: { processed: finalPayload.length }, logs });
 
   } catch (error) {
     log(`❌ Error: ${error.message}`);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message, logs });
   }
 });
 
