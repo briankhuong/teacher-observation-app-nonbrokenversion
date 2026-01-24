@@ -958,7 +958,6 @@ if (autoCreateToken) {
       alert(`Error: ${error.message}`);
     }
   };
-
 const handleSync = async () => {
   if (!user?.id) {
     alert("Error: Could not find User ID. Please refresh or log in again.");
@@ -973,30 +972,29 @@ const handleSync = async () => {
     if (!tokenResponse.ok) throw new Error("Failed to authenticate.");
     const { access_token } = await tokenResponse.json();
 
-    // 2. Immediate Live Sync
-    const syncResponse = await fetch(`${MERGE_SERVER_BASE}/api/sync-grapeseed`, {
+    // 2. Trigger Phase 1: Data Preparation
+    const syncResponse = await fetch(`${MERGE_SERVER_BASE}/api/sync-preparation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token: access_token,
-        userId: user.id,
-        dryRun: false 
+        userId: user.id
       }),
     });
 
     const result = await syncResponse.json();
     if (!result.success) throw new Error(result.error || "Sync failed");
 
-    alert(`✅ Sync Complete!\n- Updated: ${result.stats.updated}\n- Inserted: ${result.stats.inserted}\n- Inactivated: ${result.stats.inactivated}`);
+    alert(`✅ Phase 1 Complete!\n- Total School/Campus records processed: ${result.stats.processed}\n\nThe database is now ready for the teacher update.`);
     setRefreshKey(prev => prev + 1);
 
   } catch (error: any) {
+    console.error("Sync Error:", error);
     alert(`Sync Failed: ${error.message}`);
   } finally {
     setLoading(false);
   }
 };
-
   return (
     <>
       <div className="card">
