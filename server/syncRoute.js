@@ -17,11 +17,19 @@ const supabase = createClient(
 const clean = (s) =>
   (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
 
-const getHeaders = (token) => ({
-  Authorization: `Bearer ${token}`,
-  "Content-Type": "application/json",
-  "x-gl-origin": "https://schools.grapeseed.com/",
-});
+// Updated getHeaders to include the Regional Passport
+const getHeaders = (token, regionId = null) => {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    "x-gl-origin": "https://schools.grapeseed.com/",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+  };
+  if (regionId) {
+    headers["x-gl-regionid"] = regionId;
+  }
+  return headers;
+};
 
 /* -------------------------------------------------- */
 /* SYNC ROUTE                                         */
@@ -31,6 +39,9 @@ router.post("/api/sync-teachers", async (req, res) => {
   const { token, userId } = req.body;
   const logs = [];
   const log = (m) => { console.log(m); logs.push(m); };
+
+  // Vietnam Regional ID derived from your network logs
+  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
 
   log("🚀 Starting Full Sync Process...");
 
@@ -196,12 +207,10 @@ router.post("/api/sync-teachers", async (req, res) => {
     log("✅ Phase 2 Complete.");
 
     /* ================================================================================= */
-    /* PHASE 3.1: CLASS MEMBERSHIP DISCOVERY (REVISED URL & STRUCTURE)                   */
+    /* PHASE 3.1 & 3.3: CLASS & TAG DISCOVERY (INDIVIDUAL LOOKUP)                        */
     /* ================================================================================= */
-    log("🔍 Starting Phase 3.1: Class Membership Discovery (Updated URL)...");
+    log("🔍 Starting Phase 3.1 & 3.3: Class and Tag Discovery...");
 
-    // Fetch teachers with confirmed Campus UUIDs and their school's official_code
-    // We join with schools to get the official_code needed for the URL
     const { data: activeTeachers, error: tFetchErr } = await supabase
       .from("teachers")
       .select(`
@@ -215,55 +224,77 @@ router.post("/api/sync-teachers", async (req, res) => {
       .not("campus_id", "is", null);
 
     if (tFetchErr) {
-      log(`🚨 Error fetching teachers for Phase 3.1: ${tFetchErr.message}`);
+      log(`🚨 Error fetching teachers for Phase 3: ${tFetchErr.message}`);
     } else if (activeTeachers?.length > 0) {
-      log(`📊 Scanning classes for ${activeTeachers.length} teachers...`);
+      log(`📊 Scanning ${activeTeachers.length} teachers...`);
 
-      // Optimization: Cache campus class lists so we don't spam the API for every teacher
       const campusClassCache = new Map();
 
       for (const t of activeTeachers) {
         try {
+          // --- PART A: DYNAMIC TAG FETCH (Phase 3.3) ---
+          let trainerAttribution = "";
+          const targetGSeedId = (t.grapeseed_id || "").toLowerCase();
+
+          if (targetGSeedId) {
+            const tagUrl = `https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${t.grapeseed_id}&regionId=${VIETNAM_REGION_ID}`;
+            
+            // USING REGIONAL PASSPORT HEADERS
+            const tagResp = await fetch(tagUrl, { 
+              headers: getHeaders(token, VIETNAM_REGION_ID) 
+            });
+            
+            if (tagResp.ok) {
+              const tagData = await tagResp.json();
+              
+              // Determine if tags are at root or in a property
+              const tags = tagData.tags || tagData.entityTags || (Array.isArray(tagData) ? tagData : []);
+              
+              const trainerNames = tags
+                .map(tag => (tag.name || "").trim())
+                .filter(name => name && isNaN(Number(name))) 
+                .map(name => name.split(' ')[0].toLowerCase());
+
+              if (trainerNames.length > 0) {
+                trainerAttribution = ` - ${[...new Set(trainerNames)].join(" & ")}`;
+              }
+            }
+          }
+
+          // --- PART B: CLASS FETCH (Phase 3.1) ---
           const officialCode = t.schools?.official_code;
           const campusId = t.campus_id;
 
-          if (!officialCode) {
-            log(`⚠️ Skip ${t.name}: No official_code found.`);
-            continue;
-          }
+          if (!officialCode) continue;
 
-          // Fetch or Cache the class list for this campus
           if (!campusClassCache.has(campusId)) {
             const url = `https://services.grapeseed.com/admin/v1/schools/${officialCode}/classes?campusId=${campusId}&offset=0&limit=100&disabled=false`;
-            
             const classResp = await fetch(url, { headers: getHeaders(token) });
 
             if (classResp.ok) {
               const data = await classResp.json();
-              // Based on your JSON, the classes are likely in a 'schoolClasses' property or the root array
               const classList = Array.isArray(data) ? data : (data.schoolClasses || []);
               campusClassCache.set(campusId, classList);
-            } else {
-              log(`❌ API Error for Campus ${campusId}: ${classResp.status}`);
-              continue;
             }
           }
 
           const allCampusClasses = campusClassCache.get(campusId) || [];
+          
+          // Preserved Active/Inactive status logic with casing normalization
+          const teacherClasses = allCampusClasses.filter(c => {
+             const classTeacherId = (c.teacherId || "").toLowerCase();
+             const subIds = (c.substituteTeacherIds || []).map(id => id.toLowerCase());
+             return classTeacherId === targetGSeedId || subIds.includes(targetGSeedId);
+          });
 
-          // MATCHING LOGIC: Using the 'teacherId' field from your JSON snippet
-          const teacherClasses = allCampusClasses.filter(c => 
-            c.teacherId === t.grapeseed_id || 
-            (c.substituteTeacherIds && c.substituteTeacherIds.includes(t.grapeseed_id))
-          );
-
+          // Final Log construction with Active/Inactive and Trainer Tags
           if (teacherClasses.length > 0) {
-            log(`✅ [ACTIVE] ${t.name} has ${teacherClasses.length} class(es).`);
+            log(`✅ [ACTIVE${trainerAttribution}] ${t.name} has ${teacherClasses.length} class(es).`);
             teacherClasses.forEach(c => {
               log(`   - Class: "${c.name}" | Unit: ${c.currentUnit} | Students: ${c.studentCount}`);
             });
           } else {
-            log(`⚪ [INACTIVE] ${t.name} (ID: ${t.grapeseed_id}) has 0 assigned classes at this campus.`);
+            log(`⚪ [INACTIVE${trainerAttribution}] ${t.name} (ID: ${t.grapeseed_id}) has 0 assigned classes.`);
           }
         } catch (e) {
           log(`🚨 Error processing ${t.name}: ${e.message}`);
@@ -271,7 +302,8 @@ router.post("/api/sync-teachers", async (req, res) => {
       }
     }
 
-    log("✅ Phase 3.1 Complete.");
+    log("✅ Phase 3.1 & 3.3 Complete.");
+    res.json({ success: true, logs });
 
   } catch (err) {
     console.error(err);
