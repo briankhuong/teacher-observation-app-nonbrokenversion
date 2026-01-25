@@ -960,41 +960,83 @@ if (autoCreateToken) {
   };
 const handleSync = async () => {
   if (!user?.id) {
-    alert("Error: Could not find User ID. Please refresh or log in again.");
+    alert("User session not found. Please log in again.");
     return;
   }
 
   try {
-    setLoading(true); 
+    setLoading(true);
 
-    // 1. Get Token
-    const tokenResponse = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, { method: "POST" });
-    if (!tokenResponse.ok) throw new Error("Failed to authenticate.");
-    const { access_token } = await tokenResponse.json();
+    /* 1️⃣ Get Grapeseed access token */
+    const tokenResp = await fetch(
+      `${MERGE_SERVER_BASE}/api/get-grapeseed-token`,
+      { method: "POST" }
+    );
 
-    // 2. Trigger Phase 1: Data Preparation
-    const syncResponse = await fetch(`${MERGE_SERVER_BASE}/api/sync-preparation`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        token: access_token,
-        userId: user.id
-      }),
-    });
+    if (!tokenResp.ok) {
+      throw new Error("Failed to communicate with Token Server");
+    }
 
-    const result = await syncResponse.json();
-    if (!result.success) throw new Error(result.error || "Sync failed");
+    const { access_token } = await tokenResp.json();
+    if (!access_token) {
+      throw new Error("No access token received from GrapeSEED");
+    }
 
-    alert(`✅ Phase 1 Complete!\n- Total School/Campus records processed: ${result.stats.processed}\n\nThe database is now ready for the teacher update.`);
-    setRefreshKey(prev => prev + 1);
+    /* 2️⃣ Run FULL sync (Server-Side) */
+    console.log("🚀 Starting Teacher Sync...");
+
+    const syncResp = await fetch(
+      `${MERGE_SERVER_BASE}/api/sync-teachers`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: access_token, 
+          userId: user.id,     // Matches 'userId' extracted in syncRoute.js
+        }),
+      }
+    );
+
+    // Safety: Check if server returned HTML (common in Vercel/Server timeouts)
+    const contentType = syncResp.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      const textErr = await syncResp.text();
+      console.error("Server Crash/Timeout Response:", textErr);
+      throw new Error("Server returned a non-JSON response. Check backend logs.");
+    }
+
+    const result = await syncResp.json();
+
+    if (!result.success) {
+      throw new Error(result.error || "Unknown sync error");
+    }
+
+    /* 3️⃣ Log Output (New Feature) */
+    // The new backend sends back a 'logs' array. We print it to console for clarity.
+    /* 3️⃣ Log Output (New Feature) */
+    if (result.logs && Array.isArray(result.logs)) {
+      console.groupCollapsed("📋 Sync Operation Logs");
+      // FIX: Add ': string' to the parameter
+      result.logs.forEach((log: string) => console.log(log));
+      console.groupEnd();
+    }
+
+    /* 4️⃣ UI Refresh */
+    // Trigger re-fetch of lists
+    setRefreshKey((prev) => prev + 1);
+
+    alert("✅ Teacher sync completed successfully!");
 
   } catch (error: any) {
-    console.error("Sync Error:", error);
-    alert(`Sync Failed: ${error.message}`);
+    console.error("Sync Process Failed:", error);
+    alert(`❌ Sync Failed: ${error.message || error}`);
   } finally {
     setLoading(false);
   }
 };
+
+
+
   return (
     <>
       <div className="card">
