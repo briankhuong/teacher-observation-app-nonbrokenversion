@@ -51,9 +51,7 @@ router.post("/api/sync-teachers", async (req, res) => {
 
     if (schoolErr) throw new Error("DB Error: " + schoolErr.message);
     
-    if (!dbSchools?.length) {
-      log("⚠️ No schools found in DB. Skipping Phase 1.");
-    } else {
+    if (dbSchools?.length > 0) {
       const schoolsByCode = {};
       dbSchools.forEach(row => {
         if (row.official_code) {
@@ -75,7 +73,6 @@ router.post("/api/sync-teachers", async (req, res) => {
 
         let apiCampuses = await apiResp.json();
 
-        // SORT: Disabled First, Active Last (Active overwrites)
         apiCampuses.sort((a, b) => {
           if (a.disabled && !b.disabled) return -1;
           if (!a.disabled && b.disabled) return 1;
@@ -141,12 +138,10 @@ router.post("/api/sync-teachers", async (req, res) => {
     }
 
     /* ================================================================================= */
-    /* PHASE 2: TEACHER UUID ALIGNMENT (STRICT ID + NAME MATCH)                          */
+    /* PHASE 2: TEACHER UUID ALIGNMENT (PRESERVED)                                       */
     /* ================================================================================= */
     log("🚀 Starting Phase 2: Perfect Pair UUID Alignment...");
 
-    // 1. Re-fetch FRESH Schools (Source of Truth for UUIDs)
-    // Filter strictly for ACTIVE rows as requested
     const { data: activeSchools, error: fsErr } = await supabase
       .from("schools")
       .select("id, campus_name, campus_id")
@@ -155,16 +150,12 @@ router.post("/api/sync-teachers", async (req, res) => {
 
     if (fsErr) throw new Error("Phase 2 Reference Error: " + fsErr.message);
 
-    // Map format: "SchoolRowID|CleanName" -> CampusUUID
     const schoolUuidMap = new Map();
     activeSchools.forEach(s => {
       const key = `${s.id}|${clean(s.campus_name)}`;
       schoolUuidMap.set(key, s.campus_id);
     });
 
-    log(`✅ Loaded ${schoolUuidMap.size} active campus UUIDs for matching.`);
-
-    // 2. Fetch Teachers to align
     const { data: teachers, error: tErr } = await supabase
       .from("teachers")
       .select("id, name, email, grapeseed_id, school_id, campus, campus_id, school_name")
@@ -174,18 +165,14 @@ router.post("/api/sync-teachers", async (req, res) => {
 
     const teacherUpdates = [];
 
-    // 3. Perfect Pair Comparison
     for (const t of teachers) {
       if (!t.school_id || !t.campus) continue;
-
       const teacherKey = `${t.school_id}|${clean(t.campus)}`;
       const correctUuid = schoolUuidMap.get(teacherKey);
 
       if (correctUuid && t.campus_id !== correctUuid) {
-        log(`🎯 [ALIGN] ${t.name}: Linking to UUID ${correctUuid}`);
         teacherUpdates.push({
           id: t.id,
-          // Pass-throughs
           name: t.name,
           email: t.email,
           grapeseed_id: t.grapeseed_id,
@@ -193,24 +180,98 @@ router.post("/api/sync-teachers", async (req, res) => {
           campus: t.campus,
           school_id: t.school_id,
           trainer_id: userId,
-          // The Alignment
           campus_id: correctUuid,
           updated_at: new Date()
         });
       }
     }
 
-    // 4. Batch Commit Alignment
     if (teacherUpdates.length > 0) {
-      const { error: tUpsertErr } = await supabase.from("teachers").upsert(teacherUpdates);
-      if (tUpsertErr) throw new Error("Phase 2 Commit Failed: " + tUpsertErr.message);
-      log(`🔗 Successfully aligned ${teacherUpdates.length} teacher UUIDs.`);
+      await supabase.from("teachers").upsert(teacherUpdates);
+      log(`🔗 Aligned ${teacherUpdates.length} teacher UUIDs.`);
     } else {
-      log("⚪ All teacher campus_id links are already correct.");
+      log("⚪ Teacher UUIDs already aligned.");
     }
 
     log("✅ Phase 2 Complete.");
-    res.json({ success: true, logs });
+
+    /* ================================================================================= */
+    /* PHASE 3.1: CLASS MEMBERSHIP DISCOVERY (REVISED URL & STRUCTURE)                   */
+    /* ================================================================================= */
+    log("🔍 Starting Phase 3.1: Class Membership Discovery (Updated URL)...");
+
+    // Fetch teachers with confirmed Campus UUIDs and their school's official_code
+    // We join with schools to get the official_code needed for the URL
+    const { data: activeTeachers, error: tFetchErr } = await supabase
+      .from("teachers")
+      .select(`
+        id, 
+        name, 
+        campus_id, 
+        grapeseed_id,
+        schools!inner (official_code)
+      `)
+      .eq("trainer_id", userId)
+      .not("campus_id", "is", null);
+
+    if (tFetchErr) {
+      log(`🚨 Error fetching teachers for Phase 3.1: ${tFetchErr.message}`);
+    } else if (activeTeachers?.length > 0) {
+      log(`📊 Scanning classes for ${activeTeachers.length} teachers...`);
+
+      // Optimization: Cache campus class lists so we don't spam the API for every teacher
+      const campusClassCache = new Map();
+
+      for (const t of activeTeachers) {
+        try {
+          const officialCode = t.schools?.official_code;
+          const campusId = t.campus_id;
+
+          if (!officialCode) {
+            log(`⚠️ Skip ${t.name}: No official_code found.`);
+            continue;
+          }
+
+          // Fetch or Cache the class list for this campus
+          if (!campusClassCache.has(campusId)) {
+            const url = `https://services.grapeseed.com/admin/v1/schools/${officialCode}/classes?campusId=${campusId}&offset=0&limit=100&disabled=false`;
+            
+            const classResp = await fetch(url, { headers: getHeaders(token) });
+
+            if (classResp.ok) {
+              const data = await classResp.json();
+              // Based on your JSON, the classes are likely in a 'schoolClasses' property or the root array
+              const classList = Array.isArray(data) ? data : (data.schoolClasses || []);
+              campusClassCache.set(campusId, classList);
+            } else {
+              log(`❌ API Error for Campus ${campusId}: ${classResp.status}`);
+              continue;
+            }
+          }
+
+          const allCampusClasses = campusClassCache.get(campusId) || [];
+
+          // MATCHING LOGIC: Using the 'teacherId' field from your JSON snippet
+          const teacherClasses = allCampusClasses.filter(c => 
+            c.teacherId === t.grapeseed_id || 
+            (c.substituteTeacherIds && c.substituteTeacherIds.includes(t.grapeseed_id))
+          );
+
+          if (teacherClasses.length > 0) {
+            log(`✅ [ACTIVE] ${t.name} has ${teacherClasses.length} class(es).`);
+            teacherClasses.forEach(c => {
+              log(`   - Class: "${c.name}" | Unit: ${c.currentUnit} | Students: ${c.studentCount}`);
+            });
+          } else {
+            log(`⚪ [INACTIVE] ${t.name} (ID: ${t.grapeseed_id}) has 0 assigned classes at this campus.`);
+          }
+        } catch (e) {
+          log(`🚨 Error processing ${t.name}: ${e.message}`);
+        }
+      }
+    }
+
+    log("✅ Phase 3.1 Complete.");
 
   } catch (err) {
     console.error(err);
