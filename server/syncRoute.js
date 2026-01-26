@@ -1,7 +1,7 @@
 import express from "express";
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
-import { runHardProbe } from "./probeService.js";
+
 
 const router = express.Router();
 router.use(express.json());
@@ -42,16 +42,13 @@ router.post("/api/sync-teachers", async (req, res) => {
 
   const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
 
-  log("🚀 Starting Full Sync Process (LOG ONLY - DB SAFE)...");
+  log("🚀 Starting Full Sync Process (LOG ONLY - WITH ID DISPLAY)...");
 
   try {
     /* 1. Validate Trainer */
     const { data: { user }, error: userErr } = await supabase.auth.admin.getUserById(userId);
     if (userErr || !user) throw new Error("Trainer not found");
     log(`👤 Trainer ID: ${userId}`);
-
-    // Standard Probe check
-    await runHardProbe(token, log);
 
     /* ================================================================================= */
     /* PHASE 1: SCHOOL & CAMPUS SYNC (PRESERVED)                                         */
@@ -148,13 +145,13 @@ router.post("/api/sync-teachers", async (req, res) => {
     log("✅ Phase 2 Complete.");
 
     /* ================================================================================= */
-    /* PHASE 3: DISCOVERY & TAGS (LOG ONLY - NO DB WRITE)                                */
+    /* PHASE 3: DISCOVERY & TAGS (LOG ONLY - LINKED ID SHOWN)                            */
     /* ================================================================================= */
     log("🔍 Starting Phase 3: Discovery & Metadata Reconciliation...");
 
     const { data: teachers } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
     
-    // Arrays to hold bulk changes (Calculated but NOT Saved)
+    // Arrays to hold bulk changes
     const updatesToSave = [];
     const insertsToSave = [];
 
@@ -180,6 +177,9 @@ router.post("/api/sync-teachers", async (req, res) => {
       const campusDbTeachers = (teachers || []).filter(t => t.campus_id === campusId);
       const campusDbIds = new Set(campusDbTeachers.map(t => (t.grapeseed_id || "").toLowerCase()));
 
+      // A. PREPARE MANUAL LOOKUP LIST
+      const manualTeachers = campusDbTeachers.filter(t => !t.grapeseed_id && t.email);
+
       // -----------------------------------------------------
       // 1. PROCESS EXISTING TEACHERS
       // -----------------------------------------------------
@@ -190,7 +190,7 @@ router.post("/api/sync-teachers", async (req, res) => {
         let logTagLabel = "";
 
         if (isActive) {
-          // ACTIVE LOGIC: Check API for tags
+          // ACTIVE LOGIC
           let apiTags = [];
           if (gseedId && gseedId !== "null") {
             const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
@@ -200,29 +200,22 @@ router.post("/api/sync-teachers", async (req, res) => {
             }
           }
 
-          // 1. Clean names
           const rawNames = apiTags
             .map(tag => (tag.name || "").trim())
             .filter(name => isNaN(Number(name)))
             .map(name => name.split(' ')[0].toLowerCase());
           
-          // 2. Check for Brian
           const hasBrian = rawNames.some(n => n === 'brian');
-          
-          // 3. Filter out Brian for the "Other" check
           const otherTrainers = [...new Set(rawNames.filter(n => n !== 'brian'))];
 
           if (otherTrainers.length > 0) {
-             // Case A: Tagged by others (e.g. Natalie or Brian & Natalie)
              finalTagString = otherTrainers.join(" & ");
              logTagLabel = `[${finalTagString}] `;
           } else {
              if (hasBrian) {
-               // Case B: Tagged ONLY by Brian -> Remove tag completely (null)
                finalTagString = null; 
-               logTagLabel = ""; // Empty string = No badge in log
+               logTagLabel = ""; 
              } else {
-               // Case C: Truly No Tags -> Show "No tag"
                finalTagString = "No tag";
                logTagLabel = "[No tag] ";
              }
@@ -247,7 +240,7 @@ router.post("/api/sync-teachers", async (req, res) => {
       }
 
       // -----------------------------------------------------
-      // 2. DISCOVER [NEW] TEACHERS
+      // 2. DISCOVER [NEW] OR [LINK] TEACHERS
       // -----------------------------------------------------
       const missingIds = [...apiActiveIds].filter(id => id && !campusDbIds.has(id));
       for (const id of missingIds) {
@@ -260,8 +253,8 @@ router.post("/api/sync-teachers", async (req, res) => {
             const profile = Array.isArray(profiles) ? profiles[0] : profiles;
             
             if (profile && profile.name) {
-              // Calculate Tags for New Teacher
-              let newTeacherTag = "No tag";
+              // --- CALCULATE TAGS ---
+              let calculatedTag = "No tag";
               let apiTags = [];
               const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
               
@@ -277,32 +270,58 @@ router.post("/api/sync-teachers", async (req, res) => {
                 const hasBrian = rawNames.some(n => n === 'brian');
                 const otherTrainers = [...new Set(rawNames.filter(n => n !== 'brian'))];
 
-                if (otherTrainers.length > 0) {
-                    newTeacherTag = otherTrainers.join(" & ");
-                } else if (hasBrian) {
-                    newTeacherTag = null; // Only Brian -> Empty
-                }
-                // else stays "No tag"
+                if (otherTrainers.length > 0) calculatedTag = otherTrainers.join(" & ");
+                else if (hasBrian) calculatedTag = null; 
               }
 
-              insertsToSave.push({
-                trainer_id: userId,
-                grapeseed_id: id,
-                name: profile.name,
-                email: profile.email || "",
-                school_id: s.id,
-                school_name: schoolName,
-                campus: campusName,
-                campus_id: campusId,
-                tags: newTeacherTag,
-                created_at: new Date(),
-                updated_at: new Date()
-              });
+              // --- CHECK FOR MANUAL MATCH VIA EMAIL ---
+              const apiEmail = (profile.email || "").toLowerCase();
+              const manualMatch = manualTeachers.find(t => (t.email || "").toLowerCase() === apiEmail);
 
-              let newLogLabel = newTeacherTag ? `[${newTeacherTag}] ` : "";
-              if (newTeacherTag === "No tag") newLogLabel = "[No tag] ";
+              if (manualMatch && apiEmail) {
+                // >> MATCH FOUND! LINK IT! <<
+                
+                // 1. Remove the "Inactive" update queued in Step 1
+                const pendingIndex = updatesToSave.findIndex(u => u.id === manualMatch.id);
+                if (pendingIndex > -1) updatesToSave.splice(pendingIndex, 1);
 
-              log(`✨ [ACTIVE] [New] ${newLogLabel}${profile.name} - ${profile.email || 'no email'} - ${schoolName} - ${campusName} - ${officialCode} - ${campusId} - ${id}`);
+                // 2. Queue the "Link" Update
+                updatesToSave.push({
+                  id: manualMatch.id,           
+                  grapeseed_id: id,             
+                  name: profile.name,          
+                  tags: calculatedTag,          
+                  updated_at: new Date()
+                });
+
+                let linkLogLabel = calculatedTag ? `[${calculatedTag}] ` : "";
+                if (calculatedTag === "No tag") linkLogLabel = "[No tag] ";
+
+                // >>> LOG UPDATE HERE: Showing the ID <<<
+                log(`🔗 [LINKED] [ACTIVE] ${linkLogLabel}${profile.name} (Matched via ${apiEmail}) - ${id}`);
+
+              } else {
+                // >> NO MATCH. NEW INSERT <<
+                
+                insertsToSave.push({
+                  trainer_id: userId,
+                  grapeseed_id: id,
+                  name: profile.name,
+                  email: profile.email || "",
+                  school_id: s.id,
+                  school_name: schoolName,
+                  campus: campusName,
+                  campus_id: campusId,
+                  tags: calculatedTag,
+                  created_at: new Date(),
+                  updated_at: new Date()
+                });
+
+                let newLogLabel = calculatedTag ? `[${calculatedTag}] ` : "";
+                if (calculatedTag === "No tag") newLogLabel = "[No tag] ";
+
+                log(`✨ [ACTIVE] [New] ${newLogLabel}${profile.name} - ${profile.email || 'no email'} - ${schoolName} - ${campusName} - ${officialCode} - ${campusId} - ${id}`);
+              }
             }
           }
         } catch (e) {
@@ -312,13 +331,13 @@ router.post("/api/sync-teachers", async (req, res) => {
     }
 
     // -----------------------------------------------------
-    // 3. BULK SAVE (DISABLED FOR DRY RUN)
+    // 3. BULK SAVE (DISABLED FOR LOGGING)
     // -----------------------------------------------------
     /*
     if (updatesToSave.length > 0) {
       const { error: upErr } = await supabase.from("teachers").upsert(updatesToSave);
       if (upErr) log(`❌ DB Update Error: ${upErr.message}`);
-      else log(`💾 Updated tags for ${updatesToSave.length} existing teachers.`);
+      else log(`💾 Updated tags/links for ${updatesToSave.length} existing teachers.`);
     }
 
     if (insertsToSave.length > 0) {
