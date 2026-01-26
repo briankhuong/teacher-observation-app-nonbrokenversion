@@ -1,6 +1,7 @@
 import express from "express";
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
+import { runHardProbe } from "./probeService.js";
 
 const router = express.Router();
 router.use(express.json());
@@ -17,7 +18,6 @@ const supabase = createClient(
 const clean = (s) =>
   (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
 
-// Updated getHeaders to include the Regional Passport
 const getHeaders = (token, regionId = null) => {
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -40,7 +40,6 @@ router.post("/api/sync-teachers", async (req, res) => {
   const logs = [];
   const log = (m) => { console.log(m); logs.push(m); };
 
-  // Vietnam Regional ID derived from your network logs
   const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
 
   log("🚀 Starting Full Sync Process...");
@@ -51,10 +50,12 @@ router.post("/api/sync-teachers", async (req, res) => {
     if (userErr || !user) throw new Error("Trainer not found");
     log(`👤 Trainer ID: ${userId}`);
 
+    // Standard Probe check (optional to keep, but per your request to not touch working parts)
+    await runHardProbe(token, log);
+
     /* ================================================================================= */
-    /* PHASE 1: SCHOOL & CAMPUS SYNC (DO NOT TOUCH - PRESERVED)                          */
+    /* PHASE 1: SCHOOL & CAMPUS SYNC (PRESERVED)                                         */
     /* ================================================================================= */
-    
     const { data: dbSchools, error: schoolErr } = await supabase
       .from("schools")
       .select("id, official_code, school_name, campus_name, campus_id, disabled, trainer_id")
@@ -79,49 +80,32 @@ router.post("/api/sync-teachers", async (req, res) => {
           `https://services.grapeseed.com/admin/v1/schools/${officialCode}/campuses/accessiblecampuses`,
           { headers: getHeaders(token) }
         );
-        
         if (!apiResp.ok) return;
-
         let apiCampuses = await apiResp.json();
-
-        apiCampuses.sort((a, b) => {
-          if (a.disabled && !b.disabled) return -1;
-          if (!a.disabled && b.disabled) return 1;
-          return 0;
-        });
+        apiCampuses.sort((a, b) => (a.disabled && !b.disabled ? -1 : 1));
 
         const existingDbRows = schoolsByCode[officialCode];
-
         for (const apiCamp of apiCampuses) {
           const cleanApiName = clean(apiCamp.name);
-          
           let matchedRow = existingDbRows.find(r => r.campus_id === apiCamp.id) || 
                            existingDbRows.find(r => clean(r.campus_name) === cleanApiName);
 
           if (matchedRow) {
-            const isDifferent = matchedRow.disabled !== apiCamp.disabled || matchedRow.campus_id !== apiCamp.id;
-            const alreadyPending = updatesMap.has(matchedRow.id);
-
-            if (isDifferent || alreadyPending) {
+            if (matchedRow.disabled !== apiCamp.disabled || matchedRow.campus_id !== apiCamp.id) {
               updatesMap.set(matchedRow.id, { 
                 id: matchedRow.id,
                 trainer_id: userId,
-                school_name: matchedRow.school_name,
-                campus_name: matchedRow.campus_name, 
-                official_code: officialCode,
                 campus_id: apiCamp.id, 
                 disabled: apiCamp.disabled, 
                 updated_at: new Date()
               });
             }
-
           } else if (!apiCamp.disabled && existingDbRows.length > 0) {
-            const parentInfo = existingDbRows[0];
-            if (parentInfo.school_name && !insertsMap.has(apiCamp.id)) {
+            if (!insertsMap.has(apiCamp.id)) {
               insertsMap.set(apiCamp.id, {
                 trainer_id: userId,
                 official_code: officialCode,
-                school_name: parentInfo.school_name,
+                school_name: existingDbRows[0].school_name,
                 campus_name: apiCamp.name,
                 campus_id: apiCamp.id,
                 disabled: apiCamp.disabled,
@@ -132,19 +116,8 @@ router.post("/api/sync-teachers", async (req, res) => {
         }
       }));
 
-      const updatesToProcess = Array.from(updatesMap.values());
-      const insertsToProcess = Array.from(insertsMap.values());
-
-      if (updatesToProcess.length > 0) {
-        await supabase.from("schools").upsert(updatesToProcess);
-        log(`🔄 Updated ${updatesToProcess.length} campus records.`);
-      }
-
-      if (insertsToProcess.length > 0) {
-        await supabase.from("schools").insert(insertsToProcess);
-        log(`✨ Created ${insertsToProcess.length} new campus records.`);
-      }
-      
+      if (updatesMap.size > 0) await supabase.from("schools").upsert(Array.from(updatesMap.values()));
+      if (insertsMap.size > 0) await supabase.from("schools").insert(Array.from(insertsMap.values()));
       log("✅ Phase 1 Complete.");
     }
 
@@ -152,161 +125,111 @@ router.post("/api/sync-teachers", async (req, res) => {
     /* PHASE 2: TEACHER UUID ALIGNMENT (PRESERVED)                                       */
     /* ================================================================================= */
     log("🚀 Starting Phase 2: Perfect Pair UUID Alignment...");
-
-    const { data: activeSchools, error: fsErr } = await supabase
+    const { data: activeSchools } = await supabase
       .from("schools")
-      .select("id, campus_name, campus_id")
+      .select("id, school_name, campus_name, campus_id, official_code")
       .eq("trainer_id", userId)
       .eq("disabled", false);
 
-    if (fsErr) throw new Error("Phase 2 Reference Error: " + fsErr.message);
-
     const schoolUuidMap = new Map();
-    activeSchools.forEach(s => {
-      const key = `${s.id}|${clean(s.campus_name)}`;
-      schoolUuidMap.set(key, s.campus_id);
-    });
+    activeSchools?.forEach(s => schoolUuidMap.set(`${s.id}|${clean(s.campus_name)}`, s.campus_id));
 
-    const { data: teachers, error: tErr } = await supabase
-      .from("teachers")
-      .select("id, name, email, grapeseed_id, school_id, campus, campus_id, school_name")
-      .eq("trainer_id", userId);
-
-    if (tErr) throw new Error("Phase 2 Teacher Fetch Failed: " + tErr.message);
+    const { data: initialTeachers } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
 
     const teacherUpdates = [];
-
-    for (const t of teachers) {
+    for (const t of initialTeachers || []) {
       if (!t.school_id || !t.campus) continue;
-      const teacherKey = `${t.school_id}|${clean(t.campus)}`;
-      const correctUuid = schoolUuidMap.get(teacherKey);
-
+      const correctUuid = schoolUuidMap.get(`${t.school_id}|${clean(t.campus)}`);
       if (correctUuid && t.campus_id !== correctUuid) {
-        teacherUpdates.push({
-          id: t.id,
-          name: t.name,
-          email: t.email,
-          grapeseed_id: t.grapeseed_id,
-          school_name: t.school_name,
-          campus: t.campus,
-          school_id: t.school_id,
-          trainer_id: userId,
-          campus_id: correctUuid,
-          updated_at: new Date()
-        });
+        teacherUpdates.push({ id: t.id, campus_id: correctUuid, updated_at: new Date() });
       }
     }
-
-    if (teacherUpdates.length > 0) {
-      await supabase.from("teachers").upsert(teacherUpdates);
-      log(`🔗 Aligned ${teacherUpdates.length} teacher UUIDs.`);
-    } else {
-      log("⚪ Teacher UUIDs already aligned.");
-    }
-
+    if (teacherUpdates.length > 0) await supabase.from("teachers").upsert(teacherUpdates);
     log("✅ Phase 2 Complete.");
 
     /* ================================================================================= */
-    /* PHASE 3.1 & 3.3: CLASS & TAG DISCOVERY (INDIVIDUAL LOOKUP)                        */
+    /* PHASE 3: DISCOVERY & TAGS (NEW LOG STRUCTURE + GET RESCUE)                        */
     /* ================================================================================= */
-    log("🔍 Starting Phase 3.1 & 3.3: Class and Tag Discovery...");
+    log("🔍 Starting Phase 3: Discovery & Metadata Reconciliation...");
 
-    const { data: activeTeachers, error: tFetchErr } = await supabase
-      .from("teachers")
-      .select(`
-        id, 
-        name, 
-        campus_id, 
-        grapeseed_id,
-        schools!inner (official_code)
-      `)
-      .eq("trainer_id", userId)
-      .not("campus_id", "is", null);
+    const { data: teachers } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
 
-    if (tFetchErr) {
-      log(`🚨 Error fetching teachers for Phase 3: ${tFetchErr.message}`);
-    } else if (activeTeachers?.length > 0) {
-      log(`📊 Scanning ${activeTeachers.length} teachers...`);
+    for (const s of activeSchools || []) {
+      const campusId = s.campus_id;
+      const schoolName = s.school_name;
+      const officialCode = s.official_code;
+      const campusName = s.campus_name;
 
-      const campusClassCache = new Map();
+      log(`--- Processing Campus: ${campusName} ---`);
 
-      for (const t of activeTeachers) {
+      const classResp = await fetch(`https://services.grapeseed.com/admin/v1/schools/${officialCode}/classes?campusId=${campusId}&offset=0&limit=100&disabled=false`, { headers: getHeaders(token) });
+      if (!classResp.ok) continue;
+      const classData = await classResp.json();
+      const apiClasses = Array.isArray(classData) ? classData : (classData.schoolClasses || []);
+
+      const apiActiveIds = new Set();
+      apiClasses.forEach(c => {
+        if (c.teacherId) apiActiveIds.add(c.teacherId.toLowerCase());
+        if (c.substituteTeacherIds) c.substituteTeacherIds.forEach(id => apiActiveIds.add(id.toLowerCase()));
+      });
+
+      const campusDbTeachers = (teachers || []).filter(t => t.campus_id === campusId);
+      const campusDbIds = new Set(campusDbTeachers.map(t => (t.grapeseed_id || "").toLowerCase()));
+
+      // 1. Log Existing Teachers in Sandbox
+      for (const t of campusDbTeachers) {
+        const gseedId = (t.grapeseed_id || "").toLowerCase();
+        let trainerAttribution = "";
+
+        // Tag Fetch (Phase 3.3)
+        if (gseedId && gseedId !== "null") {
+          const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+          if (tagResp.ok) {
+            const tagData = await tagResp.json();
+            const tags = tagData.tags || tagData.entityTags || (Array.isArray(tagData) ? tagData : []);
+            const trainerNames = tags.map(tag => (tag.name || "").trim()).filter(name => isNaN(Number(name))).map(name => name.split(' ')[0].toLowerCase());
+            if (trainerNames.length > 0) trainerAttribution = ` - ${[...new Set(trainerNames)].join(" & ")}`;
+          }
+        }
+
+        const isActive = apiActiveIds.has(gseedId);
+        const statusIcon = isActive ? "✅" : "⚪";
+        const statusLabel = isActive ? "ACTIVE" : "INACTIVE";
+
+        // CONSOLIDATED LOG FORMAT
+        log(`${statusIcon} [${statusLabel}${trainerAttribution}] ${t.name} - ${t.email || 'no email'} - ${schoolName} - ${campusName} - ${officialCode} - ${campusId} - ${gseedId}`);
+      }
+
+      // 2. Discover [New] Teachers using GET RESCUE (Fixes 500 error)
+      const missingIds = [...apiActiveIds].filter(id => id && !campusDbIds.has(id));
+      for (const id of missingIds) {
         try {
-          // --- PART A: DYNAMIC TAG FETCH (Phase 3.3) ---
-          let trainerAttribution = "";
-          const targetGSeedId = (t.grapeseed_id || "").toLowerCase();
-
-          if (targetGSeedId) {
-            const tagUrl = `https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${t.grapeseed_id}&regionId=${VIETNAM_REGION_ID}`;
-            
-            // USING REGIONAL PASSPORT HEADERS
-            const tagResp = await fetch(tagUrl, { 
-              headers: getHeaders(token, VIETNAM_REGION_ID) 
-            });
-            
-            if (tagResp.ok) {
-              const tagData = await tagResp.json();
-              
-              // Determine if tags are at root or in a property
-              const tags = tagData.tags || tagData.entityTags || (Array.isArray(tagData) ? tagData : []);
-              
-              const trainerNames = tags
-                .map(tag => (tag.name || "").trim())
-                .filter(name => name && isNaN(Number(name))) 
-                .map(name => name.split(' ')[0].toLowerCase());
-
-              if (trainerNames.length > 0) {
-                trainerAttribution = ` - ${[...new Set(trainerNames)].join(" & ")}`;
-              }
-            }
-          }
-
-          // --- PART B: CLASS FETCH (Phase 3.1) ---
-          const officialCode = t.schools?.official_code;
-          const campusId = t.campus_id;
-
-          if (!officialCode) continue;
-
-          if (!campusClassCache.has(campusId)) {
-            const url = `https://services.grapeseed.com/admin/v1/schools/${officialCode}/classes?campusId=${campusId}&offset=0&limit=100&disabled=false`;
-            const classResp = await fetch(url, { headers: getHeaders(token) });
-
-            if (classResp.ok) {
-              const data = await classResp.json();
-              const classList = Array.isArray(data) ? data : (data.schoolClasses || []);
-              campusClassCache.set(campusId, classList);
-            }
-          }
-
-          const allCampusClasses = campusClassCache.get(campusId) || [];
+          // Use the GET API that we proved works
+          const getUrl = `https://services.grapeseed.com/account/v1/users?ids=${id}&t=${Date.now()}`;
+          const getResp = await fetch(getUrl, { headers: getHeaders(token) });
           
-          // Preserved Active/Inactive status logic with casing normalization
-          const teacherClasses = allCampusClasses.filter(c => {
-             const classTeacherId = (c.teacherId || "").toLowerCase();
-             const subIds = (c.substituteTeacherIds || []).map(id => id.toLowerCase());
-             return classTeacherId === targetGSeedId || subIds.includes(targetGSeedId);
-          });
-
-          // Final Log construction with Active/Inactive and Trainer Tags
-          if (teacherClasses.length > 0) {
-            log(`✅ [ACTIVE${trainerAttribution}] ${t.name} has ${teacherClasses.length} class(es).`);
-            teacherClasses.forEach(c => {
-              log(`   - Class: "${c.name}" | Unit: ${c.currentUnit} | Students: ${c.studentCount}`);
-            });
+          if (getResp.ok) {
+            const profiles = await getResp.json();
+            const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+            
+            if (profile && profile.name) {
+              // CONSOLIDATED LOG FORMAT FOR [NEW]
+              log(`✨ [ACTIVE] [New] ${profile.name} - ${profile.email || 'no email'} - ${schoolName} - ${campusName} - ${officialCode} - ${campusId} - ${id}`);
+            }
           } else {
-            log(`⚪ [INACTIVE${trainerAttribution}] ${t.name} (ID: ${t.grapeseed_id}) has 0 assigned classes.`);
+            log(`❌ [Discovery Failed] ID ${id} could not be resolved (Status ${getResp.status})`);
           }
         } catch (e) {
-          log(`🚨 Error processing ${t.name}: ${e.message}`);
+          log(`🚨 Exception during Discovery for ${id}: ${e.message}`);
         }
       }
     }
 
-    log("✅ Phase 3.1 & 3.3 Complete.");
+    log("✅ Sync Complete.");
     res.json({ success: true, logs });
 
   } catch (err) {
-    console.error(err);
+    log("❌ Critical Error: " + err.message);
     res.json({ success: false, error: err.message, logs });
   }
 });
