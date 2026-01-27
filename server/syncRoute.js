@@ -25,44 +25,25 @@ const getHeaders = (token, regionId = null) => {
   return headers;
 };
 
-// Concurrency Helper
-async function pMap(array, mapper, { concurrency = 12 } = {}) {
-  const results = [];
-  const executing = [];
-  for (const item of array) {
-    const p = Promise.resolve().then(() => mapper(item));
-    results.push(p);
-    const e = p.then(() => executing.splice(executing.indexOf(e), 1));
-    executing.push(e);
-    if (executing.length >= concurrency) await Promise.race(executing);
-  }
-  return Promise.all(results);
-}
-
 /* -------------------------------------------------- */
 /* SYNC ROUTE                                         */
 /* -------------------------------------------------- */
 router.post("/api/sync-teachers", async (req, res) => {
   const { token, userId } = req.body;
-  
-  // TEST IDs
   const targetOfficialCode = "73683863-18de-4e91-ba09-c41e0bd40137";
   const targetCampusId = "cdc6985f-2bb5-4312-9c76-50afac183a93";
   const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
 
-  // VARS
   const startTime = Date.now();
   const logs = [];
   const log = (m) => { console.log(m); logs.push(m); };
 
   try {
-    /* 1. TRAINER IDENTITY (NORMALIZED) */
+    /* 1. TRAINER IDENTITY */
     const { data: { user: trainerUser }, error: userErr } = await supabase.auth.admin.getUserById(userId);
     if (userErr || !trainerUser) throw new Error("Trainer not found");
-    
-    // Force lowercase for comparison (e.g., "Brian" -> "brian")
-    const myNameRaw = trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "";
-    const myName = clean(myNameRaw).split(" ")[0]; 
+    // Dynamic Name Extraction (e.g. "Brian Nguyen" -> "brian")
+    const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0]; 
     log(`👤 Syncing for Trainer: "${myName}"`);
 
     /* ================================================================================= */
@@ -88,128 +69,230 @@ router.post("/api/sync-teachers", async (req, res) => {
     /* PHASE 2: TEACHER GEOGRAPHY REPAIR                                                 */
     /* ================================================================================= */
     log("📌 Phase 2: Aligning Teacher UUIDs...");
-    const { data: preSnapshot } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
+    const { data: globalSnapshot } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
     
-    // Find teachers at this school row (by ID or Name) who have the WRONG campus_id
-    const moveQueue = preSnapshot.filter(t => 
+    const moveQueue = globalSnapshot.filter(t => 
       t.school_id === schoolRow.id && 
       clean(t.campus) === clean(schoolRow.campus_name) && 
       t.campus_id !== targetCampusId
     );
     
     if (moveQueue.length > 0) {
-      await supabase.from("teachers").upsert(moveQueue.map(t => ({ id: t.id, trainer_id: userId, campus_id: targetCampusId })));
+      const idsToMove = moveQueue.map(t => t.id);
+      const { error: moveErr } = await supabase
+        .from("teachers")
+        .update({ campus_id: targetCampusId })
+        .in("id", idsToMove);
+
+      if (moveErr) throw new Error(`Phase 2 Fail: ${moveErr.message}`);
     }
-    log("✅ Phase 2 Complete.");
+    log(`✅ Phase 2 Complete. (${moveQueue.length} aligned)`);
 
     /* ================================================================================= */
     /* PHASE 3: IDENTITY HANDSHAKE & TAG LOGIC                                           */
     /* ================================================================================= */
     log("📌 Phase 3: Identity Handshake...");
-    const { data: globalSnapshot } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
-    
+
     const classResp = await fetch(`https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`, { headers: getHeaders(token) });
     const classData = await classResp.json();
     const apiClasses = classData.schoolClasses || classData || [];
 
-    // BUILD ACTIVE ROLL CALL
     const apiActiveIds = new Set();
     apiClasses.forEach(c => {
       if (c.teacherId) apiActiveIds.add(c.teacherId.toLowerCase());
       if (c.substituteTeacherIds) c.substituteTeacherIds.forEach(id => apiActiveIds.add(id.toLowerCase()));
     });
 
-    // --- LOGIC: INACTIVE STATUS ---
-    // Anyone in our DB sandbox who is NOT in the API Roll Call is Inactive
-    const inactivePayload = globalSnapshot
-      .filter(t => t.campus_id === targetCampusId && !apiActiveIds.has((t.grapeseed_id || "").toLowerCase()))
-      .map(t => ({ id: t.id, trainer_id: userId, tags: ["Inactive"], updated_at: new Date() }));
+    const updatesToSave = [];
+    const insertsToSave = [];
     
-    if (inactivePayload.length > 0) log(`⚠️ Found ${inactivePayload.length} Inactive teachers.`);
+    const { data: updatedSnapshot } = await supabase.from("teachers").select("*").eq("trainer_id", userId);
+    const currentSandboxTeachers = updatedSnapshot.filter(t => t.campus_id === targetCampusId);
 
-    const finalUpdates = [...inactivePayload];
-    const finalInserts = [];
-    const runEmails = new Set();
-
-    await pMap(Array.from(apiActiveIds), async (gseedId) => {
-      const [pResp, tResp] = await Promise.all([
-        fetch(`https://services.grapeseed.com/account/v1/users?ids=${gseedId}`, { headers: getHeaders(token) }),
-        fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) })
-      ]);
-
-      const prof = (await pResp.json())[0];
-      if (!prof) return;
-      const apiEmail = (prof.email || "").toLowerCase().trim();
-
-      // --- LOGIC: TAG FILTERING ---
-      let finalTags = [];
-      let rawTagNames = [];
-
-      if (tResp.ok) {
-        const tData = await tResp.json();
-        const raw = tData.tags || tData.entityTags || [];
-        // Normalize API tags to lowercase names
-        rawTagNames = raw.map(t => clean(t.name || "").split(" ")[0]).filter(n => n && isNaN(n));
-      }
-
-      if (rawTagNames.length > 0) {
-        // We have tags. Filter out MY name.
-        const others = rawTagNames.filter(name => name !== myName);
-        
-        if (others.length === 0 && rawTagNames.includes(myName)) {
-          // Case 1: Only I was there. Result: Exclusive (Empty Array).
-          finalTags = []; 
-        } else if (others.length > 0) {
-          // Case 2: Others are there (Shared). Result: Their names.
-          finalTags = others;
-        } else {
-           // Edge case: Tags existed but were weird/numbers, or didn't match me but also didn't match others (shouldn't happen with logic above)
-           // Default to whatever is left or "No tag" if purely empty
-           finalTags = others.length ? others : ["No tag"];
-        }
-      } else {
-        // Case 3: API returned empty list. Result: Ghost.
-        finalTags = ["No tag"];
-      }
-
-      // --- LOGIC: IDENTITY SEARCH ---
-      // 1. Match by ID + School Row (Most precise)
-      let match = globalSnapshot.find(t => (t.grapeseed_id || "").toLowerCase() === gseedId && t.school_id === schoolRow.id);
+    // -----------------------------------------------------
+    // A. PROCESS EXISTING TEACHERS
+    // -----------------------------------------------------
+    for (const t of currentSandboxTeachers) {
+      const gseedId = (t.grapeseed_id || "").toLowerCase();
+      const isActive = apiActiveIds.has(gseedId);
       
-      // 2. Rescue by Email + School Row + Campus Name (Manual Record Rescue)
-      if (!match && apiEmail) {
-        match = globalSnapshot.find(t => 
-          (t.email || "").toLowerCase().trim() === apiEmail && 
-          t.school_id === schoolRow.id && 
-          clean(t.campus) === clean(schoolRow.campus_name)
-        );
-      }
+      let finalTags = Array.isArray(t.tags) ? t.tags : [];
+      let logTagLabel = "";
 
-      const payload = {
-        trainer_id: userId, grapeseed_id: gseedId, name: prof.name, email: apiEmail,
-        school_id: schoolRow.id, school_name: schoolRow.school_name,
-        campus: schoolRow.campus_name, campus_id: targetCampusId,
-        tags: finalTags, updated_at: new Date()
-      };
+      if (isActive) {
+        // --- ACTIVE LOGIC ---
+        let rawTagObjects = [];
+        if (gseedId && gseedId !== "null") {
+          const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+          if (tagResp.ok) {
+            const tData = await tagResp.json();
+            
+            // >>> UNIVERSAL PARSER <<<
+            if (tData.tags) { 
+                rawTagObjects = tData.tags; // Object Wrapper
+            } else if (tData.entityTags) {
+                rawTagObjects = tData.entityTags; // Alt Object Wrapper
+            } else if (Array.isArray(tData)) {
+                // Check if it's an Array Wrapper (First item has .tags)
+                if (tData[0] && (tData[0].tags || tData[0].entityTags)) {
+                    rawTagObjects = tData[0].tags || tData[0].entityTags;
+                } else {
+                    // Assume Direct Array (The missing case!)
+                    rawTagObjects = tData;
+                }
+            }
+          }
+        }
 
-      if (match) {
-        finalUpdates.push({ id: match.id, ...payload });
-        log(`🔗 [MATCH] ${prof.name} | Tags: ${JSON.stringify(finalTags)}`);
+        const rawNames = rawTagObjects
+          .map(tag => (tag.name || "").trim())
+          .filter(name => isNaN(Number(name))) 
+          .map(name => clean(name).split(" ")[0]); 
+
+        const hasMe = rawNames.some(n => n === myName);
+        const others = [...new Set(rawNames.filter(n => n !== myName))];
+
+        if (others.length > 0) {
+          finalTags = others; 
+          logTagLabel = `[${finalTags.join(" & ")}] `;
+        } else {
+          if (hasMe) {
+            // EXCLUSIVE: You are there, no one else is.
+            finalTags = []; // BLANK ARRAY
+            logTagLabel = ""; 
+          } else {
+            // GHOST: API returned nothing (or only numbers)
+            finalTags = ["No tag"]; 
+            logTagLabel = "[No tag] ";
+          }
+        }
+        log(`🔗 [MATCH] [ACTIVE] ${logTagLabel}${t.name}`);
+
       } else {
-        if (apiEmail && runEmails.has(apiEmail)) return;
-        finalInserts.push({ ...payload, created_at: new Date() });
-        log(`✨ [NEW] ${prof.name} | Tags: ${JSON.stringify(finalTags)}`);
-        if (apiEmail) runEmails.add(apiEmail);
+        // --- INACTIVE LOGIC ---
+        logTagLabel = "[INACTIVE] ";
+        const currentClean = finalTags.filter(tag => tag.toLowerCase() !== "inactive");
+        finalTags = [...currentClean, "Inactive"];
+        log(`⚪ [MATCH] [INACTIVE] ${t.name}`);
       }
-    }, { concurrency: 12 });
+
+      updatesToSave.push({
+        id: t.id,
+        trainer_id: userId,
+        name: t.name,
+        email: t.email,
+        grapeseed_id: gseedId || t.grapeseed_id,
+        campus_id: targetCampusId, 
+        school_id: schoolRow.id,
+        school_name: schoolRow.school_name,
+        campus: schoolRow.campus_name,
+        tags: finalTags, 
+        updated_at: new Date()
+      });
+    }
+
+    // -----------------------------------------------------
+    // B. DISCOVER NEW TEACHERS
+    // -----------------------------------------------------
+    const sandboxIds = new Set(currentSandboxTeachers.map(t => (t.grapeseed_id || "").toLowerCase()));
+    const missingIds = [...apiActiveIds].filter(id => id && !sandboxIds.has(id));
+
+    for (const id of missingIds) {
+      const pResp = await fetch(`https://services.grapeseed.com/account/v1/users?ids=${id}`, { headers: getHeaders(token) });
+      const profiles = await pResp.json();
+      const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+
+      if (profile && profile.name) {
+        let calculatedTags = ["No tag"];
+        let rawTagObjects = [];
+        
+        const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+        if (tagResp.ok) {
+            const tData = await tagResp.json();
+            // >>> UNIVERSAL PARSER (Repeat) <<<
+            if (tData.tags) rawTagObjects = tData.tags;
+            else if (tData.entityTags) rawTagObjects = tData.entityTags;
+            else if (Array.isArray(tData)) {
+                if (tData[0] && (tData[0].tags || tData[0].entityTags)) {
+                    rawTagObjects = tData[0].tags || tData[0].entityTags;
+                } else {
+                    rawTagObjects = tData;
+                }
+            }
+        }
+
+        const rawNames = rawTagObjects
+          .map(tag => (tag.name || "").trim())
+          .filter(name => isNaN(Number(name)))
+          .map(name => clean(name).split(" ")[0]);
+
+        const hasMe = rawNames.some(n => n === myName);
+        const others = [...new Set(rawNames.filter(n => n !== myName))];
+
+        if (others.length > 0) calculatedTags = others; 
+        else if (hasMe) calculatedTags = []; 
+
+        const apiEmail = (profile.email || "").toLowerCase().trim();
+        const manualMatch = updatedSnapshot.find(t => 
+            (t.email || "").toLowerCase().trim() === apiEmail && 
+            t.school_id === schoolRow.id && 
+            clean(t.campus) === clean(schoolRow.campus_name) &&
+            !t.grapeseed_id
+        );
+
+        const logLabel = calculatedTags.length === 0 ? "" : `[${calculatedTags.join(" & ")}] `;
+
+        if (manualMatch) {
+            const idx = updatesToSave.findIndex(u => u.id === manualMatch.id);
+            if (idx > -1) updatesToSave.splice(idx, 1);
+
+            updatesToSave.push({
+                id: manualMatch.id,
+                trainer_id: userId,
+                name: profile.name,
+                email: apiEmail,
+                grapeseed_id: id,
+                campus_id: targetCampusId,
+                school_id: schoolRow.id,
+                school_name: schoolRow.school_name,
+                campus: schoolRow.campus_name,
+                tags: calculatedTags,
+                updated_at: new Date()
+            });
+            log(`🔗 [LINKED] ${logLabel}${profile.name} (via ${apiEmail})`);
+        } else {
+            insertsToSave.push({
+                trainer_id: userId,
+                grapeseed_id: id,
+                name: profile.name,
+                email: apiEmail,
+                school_id: schoolRow.id,
+                school_name: schoolRow.school_name,
+                campus: schoolRow.campus_name,
+                campus_id: targetCampusId,
+                tags: calculatedTags,
+                created_at: new Date(),
+                updated_at: new Date()
+            });
+            log(`✨ [NEW] ${logLabel}${profile.name}`);
+        }
+      }
+    }
 
     /* ================================================================================= */
-    /* PHASE 4: FINAL BATCH COMMIT                                                       */
+    /* PHASE 4: COMMIT                                                                   */
     /* ================================================================================= */
-    if (finalUpdates.length > 0) await supabase.from("teachers").upsert(finalUpdates, { onConflict: 'id' });
-    if (finalInserts.length > 0) await supabase.from("teachers").insert(finalInserts);
+    if (updatesToSave.length > 0) {
+      const { error: upErr } = await supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' });
+      if (upErr) throw new Error(`Update Failed: ${upErr.message}`);
+    }
+    
+    if (insertsToSave.length > 0) {
+      const { error: inErr } = await supabase.from("teachers").insert(insertsToSave);
+      if (inErr) throw new Error(`Insert Failed: ${inErr.message}`);
+    }
 
-    log(`🏁 Finished: ${finalUpdates.length} updated, ${finalInserts.length} new in ${((Date.now() - startTime)/1000).toFixed(2)}s`);
+    log(`🏁 Finished: ${updatesToSave.length} updated, ${insertsToSave.length} new in ${((Date.now() - startTime)/1000).toFixed(2)}s`);
     res.json({ success: true, logs });
 
   } catch (err) {
