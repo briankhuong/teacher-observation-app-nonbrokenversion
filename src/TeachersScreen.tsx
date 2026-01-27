@@ -189,13 +189,19 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
   // 🟢 NEW: Schools Data for Dropdowns
   const [schools, setSchools] = useState<{ id: string; school_name: string; campus_name: string; campus_id: string; }[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(false);
+  const [lookupResults, setLookupResults] = useState<{ school_name: string; campus: string; worksheet_url: string }[]>([]);
+  const [lookupStatus, setLookupStatus] = useState<"idle" | "searching" | "no_match" | "found">("idle");
+
 
   useEffect(() => {
     if (open) {
       setForm(initial ?? emptyForm);
       setSubmitting(false);
       setAutoCreate(false);
+      setLookupResults([]);
+      setLookupStatus("idle");
       loadSchools(); // 🟢 Load schools when modal opens
+
     }
   }, [open, initial]);
 
@@ -235,6 +241,36 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
+
+// 🟢 NEW: Global Workbook Lookup Logic
+const handleWorkbookLookup = async () => {
+  if (!form.email.trim() || !user) return;
+
+  setLookupStatus("searching");
+  setLookupResults([]);
+
+  const { data, error } = await supabase
+    .from("teachers")
+    .select("school_name, campus, worksheet_url")
+    .eq("trainer_id", user.id)
+    .eq("email", form.email.trim().toLowerCase())
+    .not("worksheet_url", "is", null);
+
+  if (error) {
+    console.error("Lookup failed", error);
+    setLookupStatus("idle");
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    setLookupStatus("no_match");
+  } else {
+    // De-duplicate results by URL
+    const uniqueResults = data.filter((v, i, a) => a.findIndex(t => t.worksheet_url === v.worksheet_url) === i);
+    setLookupResults(uniqueResults);
+    setLookupStatus("found");
+  }
+};
 
  const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -374,32 +410,79 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
           </div>
 
           <div className="form-row">
-            <label>Worksheet link</label>
-            {(mode === 'create' || !initial?.worksheet_url) && (
-               <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
-                 <input 
-                   type="checkbox" 
-                   id="chk-auto" 
-                   checked={autoCreate} 
-                   onChange={(e) => setAutoCreate(e.target.checked)} 
-                   style={{width:'auto', margin:0}} 
-                 />
-                 <label htmlFor="chk-auto" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>
-                   {mode === 'create' ? '✨ Auto-create Excel Workbook?' : '✨ Create missing workbook?'}
-                 </label>
-               </div>
-            )}
+  <label>Worksheet link</label>
+  {(mode === 'create' || !initial?.worksheet_url) && (
+     <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
+       <input 
+         type="checkbox" 
+         id="chk-auto" 
+         checked={autoCreate} 
+         onChange={(e) => setAutoCreate(e.target.checked)} 
+         style={{width:'auto', margin:0}} 
+       />
+       <label htmlFor="chk-auto" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>
+         {mode === 'create' ? '✨ Auto-create Excel Workbook?' : '✨ Create missing workbook?'}
+       </label>
+     </div>
+  )}
 
-            {!autoCreate && (
-                <input
-                  className="input"
-                  type="url"
-                  value={form.worksheet_url}
-                  onChange={handleChange("worksheet_url")}
-                  placeholder="Paste OneDrive workbook URL…"
-                />
-            )}
+  {!autoCreate && (
+      <div style={{ position: 'relative' }}>
+        {/* 🟢 FIXED: Joined Magnifier Layout */}
+        <div className="input-group">
+          <input
+            className="input"
+            type="url"
+            value={form.worksheet_url}
+            onChange={handleChange("worksheet_url")}
+            placeholder="Paste URL or search by email..."
+          />
+          <button
+            type="button"
+            className="btn-append"
+            title="Search for existing workbook by email"
+            disabled={!form.email.trim() || lookupStatus === "searching"}
+            onClick={handleWorkbookLookup}
+          >
+            {lookupStatus === "searching" ? "..." : "🔍"}
+          </button>
+        </div>
+
+        {/* 🟢 FIXED: Dark Themed No Match Message */}
+        {lookupStatus === "no_match" && (
+          <div style={{ fontSize: '12px', color: '#fca5a5', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+            <span>No workbook found for this email.</span>
+            <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setLookupStatus("idle")}>×</span>
           </div>
+        )}
+
+        {/* 🟢 FIXED: Dark Themed Result Picker */}
+        {lookupStatus === "found" && (
+          <div className="lookup-picker">
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', padding: '0 4px' }}>
+              <strong style={{ fontSize: '10px', textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.05em' }}>
+                Matches Found
+              </strong>
+              <span style={{ cursor: 'pointer', color: '#64748b' }} onClick={() => setLookupStatus("idle")}>×</span>
+            </div>
+            {lookupResults.map((res, i) => (
+              <div 
+                key={i} 
+                className="lookup-item"
+                onClick={() => {
+                  setForm(prev => ({ ...prev, worksheet_url: res.worksheet_url }));
+                  setLookupStatus("idle");
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '13px' }}>{res.school_name}</div>
+                <div style={{ fontSize: '11px', opacity: 0.6 }}>{res.campus}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+  )}
+</div>
 
           <div className="modal-footer">
             <button
