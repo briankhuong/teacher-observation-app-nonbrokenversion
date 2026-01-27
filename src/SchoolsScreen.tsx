@@ -10,6 +10,8 @@ import {
   getSortedRowModel,
   flexRender,
 } from "@tanstack/react-table";
+
+import { Search, Plus } from "lucide-react";
 import type {
   ColumnDef,
   SortingState,
@@ -972,41 +974,46 @@ export const SchoolsScreen: React.FC = () => {
   return (
     <>
       <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Schools & campuses</div>
-            <div className="card-subtitle">
-              Manage school metadata (admin, AM, address) used by observations
-              and reports.
-            </div>
-          </div>
-
-          <div className="toolbar">
-            <div className="toolbar-group">
-              <span>Search</span>
-              <input
-                className="input search-input"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="School, campus, city…"
-              />
-            </div>
-
-            <div className="toolbar-group">
-               <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
-            </div>
-
-            <div className="toolbar-group">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={openCreate}
-              >
-                + New school / campus
-              </button>
-            </div>
+        <div className="card-header tm-header-layout">
+        {/* Tier 1: Title & Info */}
+        <div className="tm-title-section">
+          <div className="card-title">Schools & campuses</div>
+          <div className="card-subtitle">
+            Manage school metadata (admin, AM, address) used by observations and reports.
           </div>
         </div>
+
+        {/* Tier 2: The Level Toolbar */}
+        <div className="tm-toolbar-row">
+          {/* Left: Pill Search */}
+          <div className="tm-search-wrapper">
+            <Search size={14} strokeWidth={2} className="tm-search-icon-svg" />
+            <input
+              className="tm-search-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search schools..."
+            />
+          </div>
+
+          {/* Right: Icon Group + Primary Action */}
+          <div className="tm-actions-group">
+            {/* Note: Ensure ImportSchoolsBtn is updated to use the same .tm-pure-icon 
+                style with Lucide Download/Upload icons as we did for Teachers. 
+            */}
+            <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
+
+            <button
+              type="button"
+              className="tm-btn-primary"
+              onClick={openCreate}
+            >
+              <Plus size={18} strokeWidth={2.5} style={{ marginRight: '6px' }} />
+              New school / campus
+            </button>
+          </div>
+        </div>
+      </div>
 
         <div className="card-body" style={{ position: "relative" }}>
           {loading && <div>Loading schools…</div>}

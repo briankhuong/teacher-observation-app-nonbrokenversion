@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import readXlsxFile from 'read-excel-file';
 import { supabase } from '../supabaseClient';
+import { Download, Upload, RefreshCw } from "lucide-react";
 
 export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComplete: () => void }) {
   const [loading, setLoading] = useState(false);
@@ -112,35 +113,41 @@ export default function ImportTeachersBtn({ onUploadComplete }: { onUploadComple
     }
   };
 
-  return (
-    <div className="flex items-center gap-2">
+return (
+    <>
+      {/* 1. Template Download Icon */}
       <a
         href="/templates/teachers_template.xlsx"
         download
-        className="btn btn-outline"
-        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+        className="tm-pure-icon"
+        title="Download Template"
       >
-        <span>📥</span> Template
+        <Download size={18} strokeWidth={2} />
       </a>
 
-      <div>
+      {/* 2. Import Action Icon */}
+      <div style={{ display: 'flex', alignItems: 'center' }}>
         <input
           type="file"
           id="file-upload-teachers"
           accept=".xlsx"
-          onChange={handleFileUpload}
+          onChange={() => onUploadComplete()}
           style={{ display: 'none' }}
           disabled={loading}
         />
         <label
           htmlFor="file-upload-teachers"
-          className="btn btn-primary"
-          style={{ cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          className="tm-pure-icon"
+          title={loading ? "Processing..." : "Import"}
+          style={{ cursor: loading ? 'wait' : 'pointer' }}
         >
-          <span>👩‍🏫</span>
-          {loading ? 'Processing...' : 'Import Teachers'}
+          {loading ? (
+            <RefreshCw size={18} strokeWidth={2} className="tm-spin" />
+          ) : (
+            <Upload size={18} strokeWidth={2} />
+          )}
         </label>
       </div>
-    </div>
+    </>
   );
 }
