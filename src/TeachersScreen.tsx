@@ -27,6 +27,8 @@ export interface TeacherRow {
   tags: string[] | null; // 🟢 ADDED THIS
   campus: string;
   worksheet_url: string | null;
+  school_id: string | null;  // 🟢 ADD THIS (UUID)
+  campus_id: string | null;  // 🟢 ADD THIS (Text ID)
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +39,8 @@ type TeacherFormState = {
   school_name: string;
   campus: string;
   worksheet_url: string;
+  school_id: string | null;  // 🟢 ADD THIS
+  campus_id: string | null;  // 🟢 ADD THIS
 };
 
 const emptyForm: TeacherFormState = {
@@ -45,6 +49,8 @@ const emptyForm: TeacherFormState = {
   school_name: "",
   campus: "",
   worksheet_url: "",
+  school_id: null,
+  campus_id: null,
 };
 
 interface TeacherFormModalProps {
@@ -181,7 +187,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
   const [autoCreate, setAutoCreate] = useState(false);
 
   // 🟢 NEW: Schools Data for Dropdowns
-  const [schools, setSchools] = useState<{ id: string; school_name: string; campus_name: string }[]>([]);
+  const [schools, setSchools] = useState<{ id: string; school_name: string; campus_name: string; campus_id: string; }[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(false);
 
   useEffect(() => {
@@ -199,7 +205,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
     setLoadingSchools(true);
     const { data } = await supabase
       .from("schools")
-      .select("id, school_name, campus_name")
+      .select("id, school_name, campus_name, campus_id")
       .eq("trainer_id", user.id)
       .order("school_name", { ascending: true });
     
@@ -230,7 +236,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+ const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     if (!form.name.trim() || !form.school_name.trim() || !form.campus.trim()) {
@@ -251,6 +257,18 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
     }
 
     setSubmitting(true);
+
+    // 🟢 NEW: Resolve IDs from the Schools state array before proceeding
+    const matchedSchool = schools.find(
+      (s) => s.school_name === form.school_name && s.campus_name === form.campus
+    );
+
+    const finalFormState = {
+      ...form,
+      school_id: matchedSchool?.id || null,      // Internal UUID
+      campus_id: matchedSchool?.campus_id || null // GS Text ID
+    };
+
     let token: string | undefined = undefined;
 
     // 🟢 UPDATED: Get Token Logic
@@ -269,12 +287,12 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
     }
 
     try {
-      await onSubmit(form, token);
+      // 🟢 Pass finalFormState (containing the resolved IDs) instead of just 'form'
+      await onSubmit(finalFormState, token);
     } finally {
       setSubmitting(false);
     }
   };
-
   // Inside TeacherFormModal...
   return (
     <div className="modal-backdrop">
@@ -718,6 +736,8 @@ export const TeachersScreen: React.FC = () => {
         email,
         school_name,
         campus,
+        school_id, 
+        campus_id,
         worksheet_url,
         status,
         is_active,
@@ -820,6 +840,8 @@ export const TeachersScreen: React.FC = () => {
           school_name: values.school_name.trim(),
           campus: values.campus.trim(),
           worksheet_url: values.worksheet_url.trim() || null,
+          school_id: values.school_id, // 🟢 ADD THIS
+    campus_id: values.campus_id, // 🟢 ADD THIS
         })
         .select(
           `
@@ -831,6 +853,8 @@ export const TeachersScreen: React.FC = () => {
           campus,
           worksheet_url,
           created_at,
+          school_id,
+          campus_id,
           updated_at
         `
         )
@@ -863,6 +887,8 @@ export const TeachersScreen: React.FC = () => {
         email: values.email.trim() || null,
         school_name: values.school_name.trim(),
         campus: values.campus.trim(),
+        school_id: values.school_id, // 🟢 ADD THIS
+        campus_id: values.campus_id, // 🟢 ADD THIS
         worksheet_url: values.worksheet_url.trim() || null,
         updated_at: new Date().toISOString(),
       })
@@ -878,6 +904,8 @@ export const TeachersScreen: React.FC = () => {
         campus,
         worksheet_url,
         created_at,
+        school_id,
+        campus_id,
         updated_at
       `
       )
@@ -910,6 +938,8 @@ if (autoCreateToken) {
           school_name: editingRow.school_name,
           campus: editingRow.campus,
           worksheet_url: editingRow.worksheet_url ?? "",
+          school_id: editingRow.school_id ?? null,
+          campus_id: editingRow.campus_id ?? null,
         }
       : undefined;
 
