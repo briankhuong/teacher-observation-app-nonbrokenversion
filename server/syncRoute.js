@@ -25,6 +25,20 @@ const getHeaders = (token, regionId = null) => {
   return headers;
 };
 
+// ⚡️ CONCURRENCY HELPER (Process 10 items at once)
+async function pMap(array, mapper, { concurrency = 10 } = {}) {
+  const results = [];
+  const executing = [];
+  for (const item of array) {
+    const p = Promise.resolve().then(() => mapper(item));
+    results.push(p);
+    const e = p.then(() => executing.splice(executing.indexOf(e), 1));
+    executing.push(e);
+    if (executing.length >= concurrency) await Promise.race(executing);
+  }
+  return Promise.all(results);
+}
+
 /* -------------------------------------------------- */
 /* SYNC ROUTE                                         */
 /* -------------------------------------------------- */
@@ -40,6 +54,7 @@ router.post("/api/sync-teachers", async (req, res) => {
     /* 1. TRAINER IDENTITY */
     const { data: { user: trainerUser }, error: userErr } = await supabase.auth.admin.getUserById(userId);
     if (userErr || !trainerUser) throw new Error("Trainer not found");
+    // Dynamic Name Extraction
     const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0]; 
     log(`👤 Syncing for Trainer: "${myName}"`);
 
@@ -56,84 +71,66 @@ router.post("/api/sync-teachers", async (req, res) => {
         return res.json({ success: true, logs });
     }
 
-    log(`🏫 Found ${dbSchools.length} active schools. Starting Loop...`);
+    log(`🏫 Found ${dbSchools.length} active schools. Starting Parallel Sync...`);
 
     /* ================================================================================= */
-    /* MASTER LOOP: PROCESS EACH SCHOOL                                                  */
+    /* MASTER LOOP: PROCESS EACH SCHOOL (PARALLEL)                                       */
     /* ================================================================================= */
-    for (const schoolRow of dbSchools) {
+    await pMap(dbSchools, async (schoolRow) => {
         const targetOfficialCode = schoolRow.official_code;
         let targetCampusId = schoolRow.campus_id; 
-        const schoolLogPrefix = `[${schoolRow.school_name} - ${schoolRow.campus_name}]`;
-
-        log(`\n👉 Processing ${schoolLogPrefix}...`);
+        const schoolLogPrefix = `[${schoolRow.school_name}]`;
 
         try {
-            /* ================================================================================= */
-            /* PHASE 1: SCHOOL CONTAINER REPAIR                                                  */
-            /* ================================================================================= */
-            // Fetch API Campuses for this Official Code to verify our DB ID is correct
+            /* ------------------------------------------------------ */
+            /* PHASE 1: SCHOOL CONTAINER REPAIR                       */
+            /* ------------------------------------------------------ */
             const apiCResp = await fetch(`https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/campuses/accessiblecampuses`, { headers: getHeaders(token) });
             if (!apiCResp.ok) {
                 log(`${schoolLogPrefix} ⚠️ Failed to fetch campuses (API ${apiCResp.status}). Skipping.`);
-                continue;
+                return; // Return instead of continue in pMap
             }
             const apiCampuses = await apiCResp.json();
             
-            // Match API campus by ID first, then by Name
             const targetApiCamp = apiCampuses.find(c => c.id === targetCampusId) || 
                                   apiCampuses.find(c => clean(c.name) === clean(schoolRow.campus_name));
 
             if (!targetApiCamp) {
                 log(`${schoolLogPrefix} ❌ Campus not found in API. Skipping.`);
-                continue;
+                return;
             }
 
-            // Update DB if ID mismatch
             if (targetCampusId !== targetApiCamp.id) {
-                log(`${schoolLogPrefix} 🛠 Fix: Updating Campus ID ${targetCampusId} -> ${targetApiCamp.id}`);
                 await supabase.from("schools").update({ campus_id: targetApiCamp.id }).eq("id", schoolRow.id);
-                targetCampusId = targetApiCamp.id; // Update local var for next phases
+                targetCampusId = targetApiCamp.id; 
             }
 
-            /* ================================================================================= */
-            /* PHASE 2: TEACHER GEOGRAPHY REPAIR                                                 */
-            /* ================================================================================= */
-            // Fetch teachers linked to this SCHOOL ROW in DB
+            /* ------------------------------------------------------ */
+            /* PHASE 2: TEACHER GEOGRAPHY REPAIR                      */
+            /* ------------------------------------------------------ */
             const { data: schoolTeachers } = await supabase.from("teachers").select("*").eq("trainer_id", userId).eq("school_id", schoolRow.id);
-            
-            // Filter: Anyone who has the wrong campus_id
             const moveQueue = schoolTeachers.filter(t => t.campus_id !== targetCampusId);
             
             if (moveQueue.length > 0) {
                 const idsToMove = moveQueue.map(t => t.id);
-                const { error: moveErr } = await supabase
-                    .from("teachers")
-                    .update({ campus_id: targetCampusId })
-                    .in("id", idsToMove);
-
-                if (moveErr) log(`${schoolLogPrefix} ❌ Phase 2 Fail: ${moveErr.message}`);
-                else log(`${schoolLogPrefix} ✅ Phase 2: Aligned ${moveQueue.length} teachers.`);
+                await supabase.from("teachers").update({ campus_id: targetCampusId }).in("id", idsToMove);
             }
 
-            /* ================================================================================= */
-            /* PHASE 3: IDENTITY HANDSHAKE & TAG LOGIC                                           */
-            /* ================================================================================= */
-            // 1. Fetch Class List
+            /* ------------------------------------------------------ */
+            /* PHASE 3: IDENTITY HANDSHAKE & TAG LOGIC                */
+            /* ------------------------------------------------------ */
             const classResp = await fetch(`https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`, { headers: getHeaders(token) });
             const classData = await classResp.json();
             const apiClasses = classData.schoolClasses || classData || [];
 
-            // 2. Build Roll Call
             const apiActiveIds = new Set();
             apiClasses.forEach(c => {
                 if (c.teacherId) apiActiveIds.add(c.teacherId.toLowerCase());
                 if (c.substituteTeacherIds) c.substituteTeacherIds.forEach(id => apiActiveIds.add(id.toLowerCase()));
             });
 
-            // 3. Re-fetch Snapshot (Scoped to School, now clean from Phase 2)
+            // Re-fetch Snapshot
             const { data: updatedSnapshot } = await supabase.from("teachers").select("*").eq("trainer_id", userId).eq("school_id", schoolRow.id);
-            // Strictly filter for this campus to be safe
             const currentSandboxTeachers = updatedSnapshot.filter(t => t.campus_id === targetCampusId);
 
             const updatesToSave = [];
@@ -148,7 +145,6 @@ router.post("/api/sync-teachers", async (req, res) => {
                 let logTagLabel = "";
 
                 if (isActive) {
-                    // Active Logic
                     let rawTagObjects = [];
                     if (gseedId && gseedId !== "null") {
                         const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
@@ -176,7 +172,7 @@ router.post("/api/sync-teachers", async (req, res) => {
                     const others = [...new Set(rawNames.filter(n => n !== myName))];
 
                     if (others.length > 0) {
-                        finalTags = others; // Shared
+                        finalTags = others; 
                         logTagLabel = `[${finalTags.join(" & ")}] `;
                     } else {
                         if (hasMe) {
@@ -187,14 +183,13 @@ router.post("/api/sync-teachers", async (req, res) => {
                             logTagLabel = "[No tag] ";
                         }
                     }
-                    log(`🔗 [MATCH] [ACTIVE] ${logTagLabel}${t.name}`);
+                    log(`${schoolLogPrefix} 🔗 [MATCH] ${logTagLabel}${t.name}`);
 
                 } else {
-                    // Inactive Logic
                     logTagLabel = "[INACTIVE] ";
                     const currentClean = finalTags.filter(tag => tag.toLowerCase() !== "inactive");
                     finalTags = [...currentClean, "Inactive"];
-                    log(`⚪ [MATCH] [INACTIVE] ${t.name}`);
+                    log(`${schoolLogPrefix} ⚪ [MATCH] [INACTIVE] ${t.name}`);
                 }
 
                 updatesToSave.push({
@@ -212,11 +207,12 @@ router.post("/api/sync-teachers", async (req, res) => {
                 });
             }
 
-            // --- B. DISCOVER NEW TEACHERS ---
+            // --- B. DISCOVER NEW TEACHERS (PARALLEL FETCH) ---
             const sandboxIds = new Set(currentSandboxTeachers.map(t => (t.grapeseed_id || "").toLowerCase()));
             const missingIds = [...apiActiveIds].filter(id => id && !sandboxIds.has(id));
 
-            for (const id of missingIds) {
+            // Run requests for new teachers in parallel chunks
+            await pMap(missingIds, async (id) => {
                 const pResp = await fetch(`https://services.grapeseed.com/account/v1/users?ids=${id}`, { headers: getHeaders(token) });
                 const profiles = await pResp.json();
                 const profile = Array.isArray(profiles) ? profiles[0] : profiles;
@@ -251,7 +247,6 @@ router.post("/api/sync-teachers", async (req, res) => {
                     if (others.length > 0) calculatedTags = others; 
                     else if (hasMe) calculatedTags = []; 
 
-                    // Rescue
                     const apiEmail = (profile.email || "").toLowerCase().trim();
                     const manualMatch = updatedSnapshot.find(t => 
                         (t.email || "").toLowerCase().trim() === apiEmail && 
@@ -261,6 +256,7 @@ router.post("/api/sync-teachers", async (req, res) => {
                     const logLabel = calculatedTags.length === 0 ? "" : `[${calculatedTags.join(" & ")}] `;
 
                     if (manualMatch) {
+                        // Check if we already staged this update in this loop to prevent dupes
                         const idx = updatesToSave.findIndex(u => u.id === manualMatch.id);
                         if (idx > -1) updatesToSave.splice(idx, 1);
 
@@ -277,7 +273,7 @@ router.post("/api/sync-teachers", async (req, res) => {
                             tags: calculatedTags,
                             updated_at: new Date()
                         });
-                        log(`🔗 [LINKED] ${logLabel}${profile.name} (via ${apiEmail})`);
+                        log(`${schoolLogPrefix} 🔗 [LINKED] ${logLabel}${profile.name} (via ${apiEmail})`);
                     } else {
                         insertsToSave.push({
                             trainer_id: userId,
@@ -292,14 +288,14 @@ router.post("/api/sync-teachers", async (req, res) => {
                             created_at: new Date(),
                             updated_at: new Date()
                         });
-                        log(`✨ [NEW] ${logLabel}${profile.name}`);
+                        log(`${schoolLogPrefix} ✨ [NEW] ${logLabel}${profile.name}`);
                     }
                 }
-            }
+            }, { concurrency: 5 }); // 5 requests at a time per school for new teachers
 
-            /* ================================================================================= */
-            /* PHASE 4: COMMIT (PER SCHOOL)                                                      */
-            /* ================================================================================= */
+            /* ------------------------------------------------------ */
+            /* PHASE 4: COMMIT (PER SCHOOL)                           */
+            /* ------------------------------------------------------ */
             if (updatesToSave.length > 0) {
                 const { error: upErr } = await supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' });
                 if (upErr) throw new Error(`Update Failed: ${upErr.message}`);
@@ -308,12 +304,13 @@ router.post("/api/sync-teachers", async (req, res) => {
                 const { error: inErr } = await supabase.from("teachers").insert(insertsToSave);
                 if (inErr) throw new Error(`Insert Failed: ${inErr.message}`);
             }
+            
+            log(`${schoolLogPrefix} ✅ Sync Done.`);
 
         } catch (schoolErr) {
-            log(`${schoolLogPrefix} ❌ ERROR: ${schoolErr.message}`);
-            // Continue to next school, don't crash whole sync
+            log(`${schoolLogPrefix} ❌ Error: ${schoolErr.message}`);
         }
-    }
+    }, { concurrency: 10 }); // Run 10 schools in parallel
 
     log(`🏁 Finished Full Sync in ${((Date.now() - startTime)/1000).toFixed(2)}s`);
     res.json({ success: true, logs });
