@@ -75,7 +75,6 @@ router.post("/api/sync-teachers", async (req, res) => {
     /* ================================================================================= */
     /* MASTER LOOP: PROCESS EACH SCHOOL (PARALLEL)                                       */
     /* ================================================================================= */
-    // Increased Concurrency to 15 schools at once
     await pMap(dbSchools, async (schoolRow) => {
         const targetOfficialCode = schoolRow.official_code;
         let targetCampusId = schoolRow.campus_id; 
@@ -85,7 +84,6 @@ router.post("/api/sync-teachers", async (req, res) => {
             /* ------------------------------------------------------ */
             /* PHASE 1: SCHOOL CONTAINER REPAIR                       */
             /* ------------------------------------------------------ */
-            // Optimization: Fetch API Campus & DB Teachers in parallel
             const [apiCResp, { data: schoolTeachers }] = await Promise.all([
                 fetch(`https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/campuses/accessiblecampuses`, { headers: getHeaders(token) }),
                 supabase.from("teachers").select("*").eq("trainer_id", userId).eq("school_id", schoolRow.id)
@@ -106,7 +104,6 @@ router.post("/api/sync-teachers", async (req, res) => {
             }
 
             if (targetCampusId !== targetApiCamp.id) {
-                // Fire and forget update for speed
                 supabase.from("schools").update({ campus_id: targetApiCamp.id }).eq("id", schoolRow.id).then();
                 targetCampusId = targetApiCamp.id; 
             }
@@ -127,6 +124,16 @@ router.post("/api/sync-teachers", async (req, res) => {
             const classData = await classResp.json();
             const apiClasses = classData.schoolClasses || classData || [];
 
+            // >>>>>> 🟢 NEW: EMPTY CLASS CHECK (Start) <<<<<<
+            const hasEmptyClass = apiClasses.some(c => !c.teacherId);
+            // Fire-and-forget update to the school table
+            supabase.from("schools")
+              .update({ has_empty_class: hasEmptyClass })
+              .eq("id", schoolRow.id)
+              .then(() => { /* silent success */ })
+              .catch(err => console.error(`${schoolLogPrefix} Failed to update empty class status:`, err));
+            // >>>>>> 🟢 NEW: EMPTY CLASS CHECK (End) <<<<<<
+
             const apiActiveIds = new Set();
             apiClasses.forEach(c => {
                 if (c.teacherId) apiActiveIds.add(c.teacherId.toLowerCase());
@@ -141,7 +148,6 @@ router.post("/api/sync-teachers", async (req, res) => {
             const insertsToSave = [];
 
             // --- A. PROCESS EXISTING TEACHERS (PARALLELIZED) ---
-            // ⚡️ Changed from 'for..of' loop to 'pMap' with Concurrency 20
             const existingResults = await pMap(currentSandboxTeachers, async (t) => {
                 const gseedId = (t.grapeseed_id || "").toLowerCase();
                 const isActive = apiActiveIds.has(gseedId);
@@ -184,8 +190,6 @@ router.post("/api/sync-teachers", async (req, res) => {
                             logTagLabel = "[No tag] ";
                         }
                     }
-                    // Reduced logging slightly to speed up I/O
-                    // log(`${schoolLogPrefix} 🔗 [MATCH] ${logTagLabel}${t.name}`);
 
                 } else {
                     logTagLabel = "[INACTIVE] ";
@@ -214,9 +218,7 @@ router.post("/api/sync-teachers", async (req, res) => {
             const sandboxIds = new Set(currentSandboxTeachers.map(t => (t.grapeseed_id || "").toLowerCase()));
             const missingIds = [...apiActiveIds].filter(id => id && !sandboxIds.has(id));
 
-            // ⚡️ Parallel fetch for new teachers
             const newTeachers = await pMap(missingIds, async (id) => {
-                // Parallelize Profile & Tag Fetch
                 const [pResp, tagResp] = await Promise.all([
                     fetch(`https://services.grapeseed.com/account/v1/users?ids=${id}`, { headers: getHeaders(token) }),
                     fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) })
@@ -231,7 +233,6 @@ router.post("/api/sync-teachers", async (req, res) => {
                     
                     if (tagResp.ok) {
                         const tData = await tagResp.json();
-                        // UNIVERSAL PARSER
                         if (tData.tags) rawTagObjects = tData.tags;
                         else if (tData.entityTags) rawTagObjects = tData.entityTags;
                         else if (Array.isArray(tData)) {
@@ -305,8 +306,6 @@ router.post("/api/sync-teachers", async (req, res) => {
                 updatesToSave.length > 0 ? supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' }) : Promise.resolve(),
                 insertsToSave.length > 0 ? supabase.from("teachers").insert(insertsToSave) : Promise.resolve()
             ]);
-            
-            // log(`${schoolLogPrefix} ✅ Done.`);
 
         } catch (schoolErr) {
             log(`${schoolLogPrefix} ❌ Error: ${schoolErr.message}`);
