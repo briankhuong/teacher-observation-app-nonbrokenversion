@@ -497,27 +497,41 @@ export const TeachersScreen: React.FC = () => {
   accessorKey: "name",
   header: "Teacher",
   cell: (info) => {
-    const { is_active, tags } = info.row.original;
-    
-    const isInactive = is_active === false; 
-    const isMutual = Array.isArray(tags) && tags.includes("Mutual");
-    const isNoTag = Array.isArray(tags) && tags.includes("No tag");
+    const { tags } = info.row.original;
+    const safeTags = Array.isArray(tags) ? tags : [];
+
+    // 1. Detect Status
+    const isInactive = safeTags.some(t => t.toLowerCase() === "inactive");
+    const isNoTag = safeTags.includes("No tag");
+
+    // 2. Detect Other Trainers (Mutual)
+    // Filter out "Inactive" and "No tag" -> Whatever remains are Trainer Names
+    const otherTrainers = safeTags.filter(
+      t => t !== "No tag" && t.toLowerCase() !== "inactive"
+    );
+    const isMutual = otherTrainers.length > 0;
 
     return (
       <>
         <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          {info.getValue() as string}
+          <span style={{ fontWeight: 600, color: '#ffffffff' }}>
+            {info.getValue() as string}
+          </span>
 
-          {/* ⚡ FIXED: Using unique .tag-pill classes to protect the Header Badges */}
-          {isInactive && <span className="tag-pill tag-pill-inactive">Inactive</span>}
+          {/* BADGE: INACTIVE */}
+          {isInactive && (
+            <span className="tag-pill tag-pill-inactive">Inactive</span>
+          )}
 
+          {/* BADGE: MUTUAL (Shows Names!) */}
           {isMutual && (
-             <span className="tag-pill tag-pill-mutual" title="Shared with another trainer">
-               Mutual
+             <span className="tag-pill tag-pill-mutual" title={`Also tagged by: ${otherTrainers.join(", ")}`}>
+               {otherTrainers.join(" & ")}
              </span>
           )}
 
-          {isNoTag && (
+          {/* BADGE: NO TAG (Only show if active, otherwise redundant) */}
+          {isNoTag && !isInactive && (
              <span className="tag-pill tag-pill-notag" title="No trainer tags found in GrapeSEED">
                No tag
              </span>
