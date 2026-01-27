@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import readXlsxFile from 'read-excel-file';
 import { supabase } from '../supabaseClient'; 
+import { Download, Upload } from "lucide-react";
 
 export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplete: () => void }) {
   const [loading, setLoading] = useState(false);
@@ -74,37 +75,36 @@ export default function ImportSchoolsBtn({ onUploadComplete }: { onUploadComplet
     }
   };
 
-  return (
-    <div className="flex items-center gap-2">
-      {/* 1. Download Template Button */}
-      <a
-        href="/templates/schools_template.xlsx"
-        download
-        className="btn btn-outline"
-        style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-      >
-        <span>📥</span> Template
-      </a>
+// Inside your ImportSchoolsBtn return...
+return (
+  <>
+    {/* Download Template Icon */}
+    <a
+      href="/templates/schools_template.xlsx"
+      download
+      className="tm-pure-icon"
+      title="Download Template"
+    >
+      <Download size={18} strokeWidth={2} />
+    </a>
 
-      {/* 2. Import Button */}
-      <div>
-        <input
-          type="file"
-          id="file-upload-schools"
-          accept=".xlsx"
-          onChange={handleFileUpload}
-          style={{ display: 'none' }}
-          disabled={loading}
-        />
-        <label
-          htmlFor="file-upload-schools"
-          className="btn btn-primary"
-          style={{ cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <span>🏫</span>
-          {loading ? 'Processing...' : 'Import Schools'}
-        </label>
-      </div>
+    {/* Import Icon */}
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      <input
+        type="file"
+        id="file-upload-schools"
+        accept=".xlsx"
+        onChange={handleFileUpload}
+        style={{ display: 'none' }}
+      />
+      <label
+        htmlFor="file-upload-schools"
+        className="tm-pure-icon"
+        title="Import Schools"
+      >
+        <Upload size={18} strokeWidth={2} />
+      </label>
     </div>
-  );
+  </>
+);
 }

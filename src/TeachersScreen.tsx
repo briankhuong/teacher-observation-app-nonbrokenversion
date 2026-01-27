@@ -12,7 +12,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState } from "@tanstack/react-table";
-
+import { Search, RefreshCw, Plus } from "lucide-react";
 // 🟢 NEW: Server URL
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -1167,49 +1167,46 @@ const handleSync = async () => {
   return (
     <>
       <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Teachers</div>
-            <div className="card-subtitle">
-              Manage your teacher list and worksheet links.
-            </div>
-          </div>
+<div className="card-header tm-header-layout">
+  <div className="tm-title-section">
+    <div className="card-title">Teachers</div>
+    <div className="card-subtitle">Manage your roster and workbooks.</div>
+  </div>
 
-          <div className="toolbar">
-            <div className="toolbar-group">
-              <span>Search</span>
-              <input
-                className="input search-input"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Teacher, school, campus…"
-              />
-              <div className="toolbar-group">
-      {/* 2. THE BUTTON */}
-              <button 
-                type="button" 
-                className="btn" 
-                onClick={handleSync}
-                style={{ marginRight: '8px', backgroundColor: '#e0e7ff', color: '#3730a3' }}
-              >
-                🔄 Sync GS
-              </button>
+  <div className="tm-toolbar-row">
+    <div className="tm-search-wrapper">
+      <Search size={14} strokeWidth={2} className="tm-search-icon-svg" />
+      <input
+        className="tm-search-input"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search..."
+      />
+    </div>
 
-              <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
-          </div>
-            </div>
+    <div className="tm-actions-group">
+      <button 
+        type="button" 
+        className="tm-pure-icon" 
+        onClick={handleSync}
+        title="Sync with GrapeSEED"
+      >
+        <RefreshCw size={18} strokeWidth={2} />
+      </button>
 
-            <div className="toolbar-group">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={openCreate}
-              >
-                + New teacher
-              </button>
-            </div>
-          </div>
-        </div>
+      <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
+
+      <button
+        type="button"
+        className="tm-btn-primary"
+        onClick={openCreate}
+      >
+        <Plus size={18} strokeWidth={2.5} style={{ marginRight: '6px' }} />
+        New teacher
+      </button>
+    </div>
+  </div>
+</div>
 
         <div className="card-body" style={{ position: "relative" }}>
           {loading && <div>Loading teachers…</div>}

@@ -2800,3 +2800,152 @@ input[type="date"].input {
   background: #2563eb; /* Primary blue highlight */
   color: white; 
 }
+
+/* 🟢 UPDATED LAYOUT & LEVELING */
+.tm-header-layout { display: flex; flex-direction: column; gap: 20px; }
+
+.tm-toolbar-row { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  width: 100%;
+}
+
+/* 🟢 DECREASED GAP (16px) */
+.tm-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 16px; /* 🟢 Reduced from 30px to 16px */
+}
+
+/* 🟢 UNIFIED HEIGHT (36px) & WHITE ICONS */
+.tm-pure-icon {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: white !important; 
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 36px; /* 🟢 Matches new height */
+  height: 36px; /* 🟢 Reduced from 40px to 36px */
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.tm-pure-icon:hover { opacity: 0.6; }
+
+/* 🟢 REDUCED PRIMARY BUTTON HEIGHT */
+.tm-btn-primary { 
+  height: 36px; /* 🟢 Reduced from 40px to 36px */
+  padding: 0 16px;
+  border-radius: 8px;
+  background: #0d9488;
+  color: white;
+  border: none;
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.tm-btn-primary:hover { background: #14b8a6; }
+
+/* 🟢 SEARCH PILL (Matches 36px Height) */
+.tm-search-wrapper { position: relative; flex: 0 1 320px; }
+.tm-search-input { 
+  width: 100%; 
+  height: 36px !important; /* 🟢 Reduced from 40px to 36px */
+  padding-left: 36px !important; 
+  border-radius: 99px !important; 
+  border: 1px solid #334155 !important; 
+  background: rgba(30, 41, 59, 0.4) !important; 
+  color: white !important; 
+  font-size: 13px !important;
+}
+.tm-search-icon-svg { 
+  position: absolute; 
+  left: 12px; 
+  top: 50%; 
+  transform: translateY(-50%); 
+  color: white; 
+  opacity: 0.5; 
+}
+
+.tm-spin { animation: spin 2s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* 🟢 REFINED SCHOOLS TOOLBAR */
+.tm-header-layout { display: flex; flex-direction: column; gap: 20px; }
+
+.tm-toolbar-row { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  width: 100%;
+}
+
+.tm-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 16px; /* 🟢 Balanced 16px gap */
+}
+
+/* 🟢 PURE WHITE STROKE ICONS */
+.tm-pure-icon {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: white !important; 
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.tm-pure-icon:hover { opacity: 0.6; }
+
+/* 🟢 UNIFIED 36px HEIGHTS */
+.tm-btn-primary { 
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: #0d9488;
+  color: white;
+  border: none;
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tm-search-wrapper { position: relative; flex: 0 1 320px; }
+.tm-search-input { 
+  width: 100%; 
+  height: 36px !important; 
+  padding-left: 36px !important; 
+  border-radius: 99px !important; 
+  border: 1px solid #334155 !important; 
+  background: rgba(30, 41, 59, 0.4) !important; 
+  color: white !important; 
+  font-size: 13.5px !important;
+}
+
+.tm-search-icon-svg { 
+  position: absolute; 
+  left: 12px; 
+  top: 50%; 
+  transform: translateY(-50%); 
+  color: white; 
+  opacity: 0.5; 
+}
