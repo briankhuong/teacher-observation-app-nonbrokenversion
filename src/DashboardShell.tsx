@@ -3535,7 +3535,6 @@ export const ActionDashboardModal: React.FC<{
             )
           )}
 
-          {/* Section 5: Classless Classes */}
           {renderSection(
             "classlessClasses",
             "Missing Teacher Assignments",
@@ -3543,17 +3542,7 @@ export const ActionDashboardModal: React.FC<{
             "⚠️",
             "#d97706",
             (item) => (
-              <div
-                key={item.id}
-                className="detail-row"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  borderBottom: "1px solid #eee",
-                  paddingBottom: "8px",
-                  marginBottom: "8px",
-                }}
-              >
+              <div key={item.id} className="detail-row" style={{ display: "flex", alignItems: "center" /* ... existing styles */ }}>
                 <div style={{ flexGrow: 1 }}>
                   <div style={{ fontWeight: 600 }}>{item.name}</div>
                   <div style={{ fontSize: "11px", color: "#666" }}>
@@ -3562,12 +3551,13 @@ export const ActionDashboardModal: React.FC<{
                 </div>
                 <button
                   className="obs-pill-button"
-                  onClick={() =>
-                    window.open(
-                      "https://portal.grapeseed.com/admin/classes",
-                      "_blank"
-                    )
-                  }
+                  onClick={() => {
+                    // ✅ UPDATED DEEP LINK LOGIC:
+                    const regionId = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
+                    const url = `https://schools.grapeseed.com/regions/${regionId}/schools/${item.official_code}/campuses/${item.campus_id}/classes/${item.id}`;
+                    
+                    window.open(url, "_blank");
+                  }}
                 >
                   View in GS
                 </button>
