@@ -459,7 +459,9 @@ router.post("/api/pulse-audit", async (req, res) => {
               auditResults.classlessClasses.push({
                 ...cls,
                 school_name: schoolRow.school_name,
-                campus_name: schoolRow.campus_name
+                campus_name: schoolRow.campus_name,
+                official_code: targetOfficialCode, 
+                campus_id: targetCampusId
               });
             }
           });
