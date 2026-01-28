@@ -588,30 +588,51 @@ const [syncPulseResults, setSyncPulseResults] = useState<{
   teacherTagIssues: []
 });
 
-// ✅ NEW: Resolution Logic for Pulse Conflicts
+// ✅ CORRECTED: Writes strictly to the 'schools' table
 const handleResolveConflict = async (type: string, data: any) => {
   try {
+    if (!user?.id) return;
+
     if (type === 'newCampus') {
-      const { error } = await supabase.from("campuses").insert({
-        campus_name: data.name,
-        school_name: data.parent_school_name,
-        is_active: true
+      // 1. New Campus = New Row in 'schools' table
+      const { error } = await supabase.from("schools").insert({
+        school_name: data.parent_school_name, // Copy parent name
+        campus_name: data.name,               // The new campus name
+        campus_id: data.id,                   // The official GrapeSEED ID
+        official_code: data.official_code,    // Critical for future syncs
+        trainer_id: user.id,                  // Assign to YOU
+        disabled: false
       });
       if (error) throw error;
     } 
     else if (type === 'nameMismatch') {
-      const { error } = await supabase.from("campuses")
-        .update({ campus_name: data.api_name })
-        .eq("id", data.db_record.id);
+      // 2. Name Mismatch = Update existing row in 'schools'
+      const { error } = await supabase.from("schools")
+        .update({ campus_name: data.api_name }) // Update the text
+        .eq("id", data.db_record.id);           // Match the Row ID
       if (error) throw error;
     }
-    // Update local state to remove the resolved item
+    else if (type === 'deactivateCampus') {
+       // 3. Deactivate = Set disabled flag in 'schools'
+       const { error } = await supabase.from("schools")
+         .update({ disabled: true })
+         .eq("id", data.id);
+       if (error) throw error;
+    }
+
+    // Update UI state to remove the resolved item from the list
     setSyncPulseResults(prev => ({
       ...prev,
-      [type === 'newCampus' ? 'newCampuses' : 'nameMismatches']: 
-        (prev as any)[type === 'newCampus' ? 'newCampuses' : 'nameMismatches'].filter((i: any) => i.id !== data.id)
+      [type === 'newCampus' ? 'newCampuses' : type === 'deactivateCampus' ? 'disabledCampuses' : 'nameMismatches']: 
+        (prev as any)[type === 'newCampus' ? 'newCampuses' : type === 'deactivateCampus' ? 'disabledCampuses' : 'nameMismatches']
+        .filter((i: any) => i.id !== (data.id || data.db_record?.id))
     }));
+
+    // Optional: Refresh the dashboard list in background so the new/updated item appears
+    // triggerBackgroundRefresh(); 
+
   } catch (err) {
+    console.error("Resolution Error:", err);
     alert("Resolution failed: " + (err as any).message);
   }
 };
@@ -648,7 +669,7 @@ const runSyncPulse = async () => {
 };
   // State to hold the settings fetched from DB
 
-  const [trainerSettings, setTrainerSettings] = React.useState<{
+const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
     phone_number?: string;
   } | null>(null);
