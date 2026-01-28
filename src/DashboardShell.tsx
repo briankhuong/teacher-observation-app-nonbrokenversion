@@ -588,48 +588,94 @@ const [syncPulseResults, setSyncPulseResults] = useState<{
   teacherTagIssues: []
 });
 
-// ✅ CORRECTED: Writes strictly to the 'schools' table
+// ✅ FULL UPDATE: Unified Resolution Logic with Data Cloning & UI Cleanup
 const handleResolveConflict = async (type: string, data: any) => {
   try {
     if (!user?.id) return;
 
+    // --- 1. DATABASE UPDATES ---
+    
     if (type === 'newCampus') {
-      // 1. New Campus = New Row in 'schools' table
+      console.log("🛠 Cloning data for New Campus:", data.name);
+      
+      // FETCH TEMPLATE: Get parent school details from DB to clone AM/Workbook info
+      const { data: templateRows } = await supabase
+        .from("schools")
+        .select("am_name, am_email, admin_workbook_url, admin_workbook_view_url")
+        .eq("school_name", data.parent_school_name)
+        .eq("trainer_id", user.id)
+        .limit(1);
+
+      // Destructure with defaults (Ensures no 'undefined' properties hit Supabase)
+      const { 
+        am_name = null, 
+        am_email = null, 
+        admin_workbook_url = null, 
+        admin_workbook_view_url = null 
+      } = (templateRows?.[0] || {}) as any;
+
       const { error } = await supabase.from("schools").insert({
-        school_name: data.parent_school_name, // Copy parent name
-        campus_name: data.name,               // The new campus name
-        campus_id: data.id,                   // The official GrapeSEED ID
-        official_code: data.official_code,    // Critical for future syncs
-        trainer_id: user.id,                  // Assign to YOU
-        disabled: false
+        school_name: data.parent_school_name,
+        campus_name: data.name,
+        campus_id: data.id,
+        official_code: data.official_code,
+        trainer_id: user.id,
+        disabled: false,
+        // ✅ SOURCE: CLONED FROM DB
+        am_name,
+        am_email,
+        admin_workbook_url,
+        admin_workbook_view_url,
+        // ✅ SOURCE: MAPPED FROM API
+        address: data.fullAddress || null,
+        admin_phone: data.phone || null
       });
+
       if (error) throw error;
+      alert(`✨ Successfully added ${data.name} to ${data.parent_school_name}`);
     } 
+    
     else if (type === 'nameMismatch') {
-      // 2. Name Mismatch = Update existing row in 'schools'
       const { error } = await supabase.from("schools")
-        .update({ campus_name: data.api_name }) // Update the text
-        .eq("id", data.db_record.id);           // Match the Row ID
+        .update({ campus_name: data.api_name })
+        .eq("id", data.db_record.id);
+
       if (error) throw error;
+      alert(`✅ Updated name to: ${data.api_name}`);
     }
+
     else if (type === 'deactivateCampus') {
-       // 3. Deactivate = Set disabled flag in 'schools'
        const { error } = await supabase.from("schools")
          .update({ disabled: true })
          .eq("id", data.id);
+       
        if (error) throw error;
+       alert("🛑 Campus deactivated.");
     }
 
-    // Update UI state to remove the resolved item from the list
-    setSyncPulseResults(prev => ({
-      ...prev,
-      [type === 'newCampus' ? 'newCampuses' : type === 'deactivateCampus' ? 'disabledCampuses' : 'nameMismatches']: 
-        (prev as any)[type === 'newCampus' ? 'newCampuses' : type === 'deactivateCampus' ? 'disabledCampuses' : 'nameMismatches']
-        .filter((i: any) => i.id !== (data.id || data.db_record?.id))
-    }));
+    // --- 2. UI CLEANUP SECTION ---
+    
+    setSyncPulseResults(prev => {
+      // Map the resolve type to the correct array in our state
+      const listKey = 
+        type === 'newCampus' ? 'newCampuses' : 
+        type === 'deactivateCampus' ? 'disabledCampuses' : 
+        'nameMismatches';
 
-    // Optional: Refresh the dashboard list in background so the new/updated item appears
-    // triggerBackgroundRefresh(); 
+      return {
+        ...prev,
+        [listKey]: (prev as any)[listKey].filter((item: any) => {
+          /* 🛑 CRITICAL FIX FOR ISSUE #1:
+             Name mismatches nest the ID inside 'db_record'. 
+             New Campuses and Deactivations have the ID at the top level.
+          */
+          const itemId = type === 'nameMismatch' ? item.db_record.id : item.id;
+          const resolvedId = type === 'nameMismatch' ? data.db_record.id : data.id;
+          
+          return itemId !== resolvedId;
+        })
+      };
+    });
 
   } catch (err) {
     console.error("Resolution Error:", err);
