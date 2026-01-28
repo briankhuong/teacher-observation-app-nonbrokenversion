@@ -39,6 +39,8 @@ export interface SchoolRow {
   notes: string | null;
   admin_workbook_url: string | null;
   has_empty_class: boolean; // 🟢 NEW FIELD
+  official_code: string | null; // 🟢 Added
+  campus_id: string | null;     // 🟢 Added
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +52,8 @@ type SchoolFormState = {
   admin_email: string;
   admin_phone: string;
   am_name: string;
+  official_code: string; // 🟢 Added
+  campus_id: string;     // 🟢 Added
   am_email: string;
   address: string;
   district: string;
@@ -68,6 +72,8 @@ const emptyForm: SchoolFormState = {
   am_email: "",
   address: "",
   district: "",
+  official_code: "", // 🟢 Added
+  campus_id: "",     // 🟢 Added
   city: "",
   notes: "",
   admin_workbook_url: "",
@@ -540,10 +546,17 @@ export const SchoolsScreen: React.FC = () => {
   header: "School & Campus",
   cell: (info) => (
     <>
-      <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         {info.row.original.school_name}
         
-        {/* ⚡ FIXED: Using the unique Tinted Pill style */}
+        {/* ⚡ NEW: No ID Tag (Calculated logic) */}
+        {!info.row.original.campus_id && (
+          <span className="tag-pill tag-pill-warning" title="This campus has no API ID link">
+            No Campus ID
+          </span>
+        )}
+
+        {/* Existing No Teacher Tag */}
         {info.row.original.has_empty_class && (
           <span className="tag-pill tag-pill-notag" title="This school has classes with no teacher assigned">
             No Teacher
@@ -775,6 +788,8 @@ export const SchoolsScreen: React.FC = () => {
             trainer_id,
             school_name,
             campus_name,
+            official_code, 
+            campus_id,
             admin_name,
             admin_email,
             admin_phone,
@@ -958,6 +973,8 @@ export const SchoolsScreen: React.FC = () => {
       ? {
           school_name: editingRow.school_name,
           campus_name: editingRow.campus_name,
+          official_code: editingRow.official_code ?? "", // 🟢 Added
+          campus_id: editingRow.campus_id ?? "",         // 🟢 Added
           admin_name: editingRow.admin_name ?? "",
           admin_email: editingRow.admin_email ?? "",
           admin_phone: editingRow.admin_phone ?? "",
