@@ -11,7 +11,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 
-import { Search, Plus } from "lucide-react";
+import { Search, Plus, RefreshCw } from "lucide-react";
 import type {
   ColumnDef,
   SortingState,
@@ -612,6 +612,20 @@ export const SchoolsScreen: React.FC = () => {
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
   ]);
+
+  // 2. Add inside SchoolsScreen component
+const [isPulsing, setIsPulsing] = useState(false);
+const [pulseResults, setPulseResults] = useState<{
+  newCampuses: any[];
+  disabledCampuses: any[];
+  classlessClasses: any[];
+  nameMismatches: any[];
+}>({
+  newCampuses: [],
+  disabledCampuses: [],
+  classlessClasses: [],
+  nameMismatches: []
+});
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
     try {
       const saved = localStorage.getItem("schoolsColumnVisibility");
@@ -1129,6 +1143,56 @@ export const SchoolsScreen: React.FC = () => {
         }
       : undefined;
 
+const runPulseAudit = async () => {
+  if (isPulsing) return;
+
+  setIsPulsing(true);
+  console.log("🚀 Pulse Engine: Starting deep audit...");
+
+  try {
+    // 1. Call your new "Shadow Logic" backend route
+    const resp = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user?.id }),
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || "Pulse discovery failed.");
+    }
+
+    const results = await resp.json();
+
+    // 2. Store findings in our state (to be used by Item 3: Action Dashboard)
+    setPulseResults({
+      newCampuses: results.newCampuses || [],
+      disabledCampuses: results.disabledCampuses || [],
+      classlessClasses: results.classlessClasses || [],
+      nameMismatches: results.nameMismatches || []
+    });
+
+    // 3. Simple Feedback (We will improve this in Item 3)
+    const totalIssues = 
+      (results.newCampuses?.length || 0) + 
+      (results.disabledCampuses?.length || 0) + 
+      (results.classlessClasses?.length || 0) +
+      (results.nameMismatches?.length || 0);
+
+    if (totalIssues > 0) {
+      alert(`✅ Pulse Complete: ${totalIssues} sync issues found. Check the Action Dashboard.`);
+    } else {
+      alert("✅ Pulse Complete: Everything is perfectly in sync!");
+    }
+
+  } catch (err: any) {
+    console.error("Pulse Audit Error:", err);
+    alert(`❌ Pulse Error: ${err.message}`);
+  } finally {
+    setIsPulsing(false);
+  }
+};
+
   return (
     <>
       <div className="card">
@@ -1156,6 +1220,25 @@ export const SchoolsScreen: React.FC = () => {
 
           {/* Right: Icon Group + Primary Action */}
           <div className="tm-actions-group">
+            {/* 🟢 NEW: Pulse Sync Button */}
+            <button
+              type="button"
+              className="tm-pure-icon"
+              style={{ 
+                marginRight: '8px', 
+                color: isPulsing ? '#2563eb' : '#64748b',
+                cursor: isPulsing ? 'default' : 'pointer'
+              }}
+              onClick={runPulseAudit}
+              disabled={isPulsing}
+              title="Run Pulse Audit (Sync Discovery)"
+            >
+              <RefreshCw 
+                size={18} 
+                strokeWidth={2} 
+                className={isPulsing ? "tm-spin" : ""} 
+              />
+            </button>
             {/* Note: Ensure ImportSchoolsBtn is updated to use the same .tm-pure-icon 
                 style with Lucide Download/Upload icons as we did for Teachers. 
             */}
@@ -1166,7 +1249,7 @@ export const SchoolsScreen: React.FC = () => {
               className="tm-btn-primary"
               onClick={openCreate}
             >
-              <Plus size={18} strokeWidth={2.5} style={{ marginRight: '6px' }} />
+              <Plus size={18} strokeWidth={2} style={{ marginRight: '6px' }} />
               New school / campus
             </button>
           </div>

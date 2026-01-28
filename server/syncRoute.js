@@ -375,4 +375,110 @@ router.post("/api/lookup-campuses", async (req, res) => {
   }
 });
 
+/* -------------------------------------------------- */
+/* NEW: PULSE AUDIT ENGINE (Discovery Only)           */
+/* -------------------------------------------------- */
+router.post("/api/pulse-audit", async (req, res) => {
+  const { userId } = req.body;
+  const auditResults = {
+    newCampuses: [],
+    disabledCampuses: [],
+    classlessClasses: [],
+    nameMismatches: []
+  };
+
+  try {
+    // 1. Get Master Token for stable API access
+    const token = await getMasterToken();
+
+    // 2. Get local DB schools to compare against
+    const { data: dbSchools, error: schoolsErr } = await supabase
+      .from("schools")
+      .select("*")
+      .eq("trainer_id", userId)
+      .eq("disabled", false);
+
+    if (schoolsErr) throw new Error(`DB Error: ${schoolsErr.message}`);
+    if (!dbSchools || dbSchools.length === 0) return res.json(auditResults);
+
+    // 3. Run Parallel Audit using your existing pMap helper
+    await pMap(dbSchools, async (schoolRow) => {
+      const targetOfficialCode = schoolRow.official_code;
+      const targetCampusId = schoolRow.campus_id;
+
+      try {
+        // A. Fetch Live Campuses
+        const apiCResp = await fetch(
+          `https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/campuses/accessiblecampuses`, 
+          { headers: getHeaders(token) }
+        );
+        
+        if (!apiCResp.ok) return; // Skip if school code is invalid
+        const apiCampuses = await apiCResp.json();
+
+        // B. Check for New or Disabled Campuses
+        apiCampuses.forEach(apiC => {
+          const existsInDB = dbSchools.some(dbS => dbS.campus_id === apiC.id);
+          
+          // Rule: If it's in API but NOT in our DB and NOT disabled in API -> It's NEW
+          if (!existsInDB && !apiC.disabled) {
+            auditResults.newCampuses.push({
+              ...apiC,
+              official_code: targetOfficialCode,
+              parent_school_name: schoolRow.school_name
+            });
+          }
+        });
+
+        // C. Check Local Records for "Ghosts" or "Deactivations"
+        const liveMatch = apiCampuses.find(c => c.id === targetCampusId);
+        
+        if (liveMatch) {
+          // Rule: ID matches but Name changed? -> NAME_MISMATCH
+          if (clean(liveMatch.name) !== clean(schoolRow.campus_name)) {
+            auditResults.nameMismatches.push({
+              db_record: schoolRow,
+              api_name: liveMatch.name
+            });
+          }
+          // Rule: ID matches but API says Disabled? -> DISABLED_CAMPUS
+          if (liveMatch.disabled) {
+            auditResults.disabledCampuses.push(schoolRow);
+          }
+
+          // D. Classless Audit (Fetch classes for this linked campus)
+          const classResp = await fetch(
+            `https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`, 
+            { headers: getHeaders(token) }
+          );
+          const classData = await classResp.json();
+          const apiClasses = classData.schoolClasses || classData || [];
+
+          apiClasses.forEach(cls => {
+            if (!cls.teacherId) {
+              auditResults.classlessClasses.push({
+                ...cls,
+                school_name: schoolRow.school_name,
+                campus_name: schoolRow.campus_name
+              });
+            }
+          });
+        } else if (targetCampusId) {
+          // Rule: We have an ID but the API doesn't return it anymore? -> DISABLED_CAMPUS
+          auditResults.disabledCampuses.push(schoolRow);
+        }
+
+      } catch (err) {
+        console.error(`Audit failed for ${schoolRow.school_name}:`, err);
+      }
+    }, { concurrency: 10 });
+
+    res.json(auditResults);
+
+  } catch (err) {
+    console.error("Pulse Audit Fatal Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
