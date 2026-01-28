@@ -398,7 +398,7 @@ return (
   
   let labelSuffix = "";
   if (status === "linked") labelSuffix = " (✓ Already Linked)";
-  if (status === "repairable") labelSuffix = " (⚠️ Link Missing ID)";
+  if (status === "repairable") labelSuffix = " (⚠️ Campus Missing ID)";
 
   return (
     <option 
