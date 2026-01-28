@@ -570,7 +570,84 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 
    const [loading, setLoading] = useState(true); // 🟢 Tracks initial cache load
 
+// 🟢 NEW: State for the Sync Action Dashboard
+const [isActionDashboardOpen, setIsActionDashboardOpen] = useState(false);
+const [syncPulseResults, setSyncPulseResults] = useState<{
+  newCampuses: any[];
+  disabledCampuses: any[];
+  classlessClasses: any[];
+  nameMismatches: any[];
+  newTeachers: any[];       // Placeholder for Teacher Sync
+  teacherTagIssues: any[];  // Placeholder for Teacher Sync
+}>({
+  newCampuses: [],
+  disabledCampuses: [],
+  classlessClasses: [],
+  nameMismatches: [],
+  newTeachers: [],
+  teacherTagIssues: []
+});
+
+// ✅ NEW: Resolution Logic for Pulse Conflicts
+const handleResolveConflict = async (type: string, data: any) => {
+  try {
+    if (type === 'newCampus') {
+      const { error } = await supabase.from("campuses").insert({
+        campus_name: data.name,
+        school_name: data.parent_school_name,
+        is_active: true
+      });
+      if (error) throw error;
+    } 
+    else if (type === 'nameMismatch') {
+      const { error } = await supabase.from("campuses")
+        .update({ campus_name: data.api_name })
+        .eq("id", data.db_record.id);
+      if (error) throw error;
+    }
+    // Update local state to remove the resolved item
+    setSyncPulseResults(prev => ({
+      ...prev,
+      [type === 'newCampus' ? 'newCampuses' : 'nameMismatches']: 
+        (prev as any)[type === 'newCampus' ? 'newCampuses' : 'nameMismatches'].filter((i: any) => i.id !== data.id)
+    }));
+  } catch (err) {
+    alert("Resolution failed: " + (err as any).message);
+  }
+};
+
+// ✅ BRIDGE: Calls your existing server-side Pulse Engine
+const runSyncPulse = async () => {
+  if (!user?.id) return;
+
+  try {
+    // 1. Show the user something is happening
+    console.log("📡 Calling /api/pulse-audit...");
+    
+    // 2. Call the endpoint you ALREADY HAVE in your server file
+    const response = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id }),
+    });
+
+    if (!response.ok) throw new Error("Audit failed");
+
+    // 3. Get the results (newCampuses, nameMismatches, etc.)
+    const auditData = await response.json();
+    console.log("✅ Pulse Results:", auditData);
+
+    // 4. Load the gun (State) and pull the trigger (Modal)
+    setSyncPulseResults(auditData);
+    setIsActionDashboardOpen(true);
+
+  } catch (err) {
+    console.error("Pulse Check Failed:", err);
+    alert("Could not run Pulse Audit. Check console.");
+  }
+};
   // State to hold the settings fetched from DB
+
   const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
     phone_number?: string;
@@ -2658,6 +2735,26 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
                 AM Summary…
               </button>
             </div>
+
+           {/* ✅ NEW: Pulse Sync Trigger */}
+              <div className="toolbar-group">
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ 
+                    backgroundColor: '#0d9488', 
+                    color: 'white',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  onClick={runSyncPulse}
+                >
+                  <span>✨</span>
+                  Check Sync Pulse
+                </button>
+              </div> 
           </div>
         </div>
 
@@ -3174,6 +3271,350 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
          localData={conflictLocalData}
          serverData={conflictServerData}
       />
+        {/* ✅ VERIFY: This must be at the end of your return fragment */}
+        <ActionDashboardModal
+          isOpen={isActionDashboardOpen}
+          onClose={() => setIsActionDashboardOpen(false)}
+          results={syncPulseResults} // 👈 Passes the state we populated in Step 1
+          onResolve={handleResolveConflict}
+        />
     </>
+  );
+};
+
+/* -------------------------------------------------- */
+/* ACTION DASHBOARD MODAL (Sync v2 - Fully Revised)   */
+/* -------------------------------------------------- */
+export const ActionDashboardModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  results: {
+    newCampuses: any[];
+    disabledCampuses: any[];
+    classlessClasses: any[];
+    nameMismatches: any[];
+    newTeachers: any[];
+    teacherTagIssues: any[];
+  };
+  onResolve: (type: string, data: any) => Promise<void>;
+}> = ({ isOpen, onClose, results, onResolve }) => {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    newCampuses: true,
+    newTeachers: true, // Default open the "New" categories
+  });
+
+  if (!isOpen) return null;
+
+  const toggle = (key: string) =>
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  // Helper to render accordion sections
+  const renderSection = (
+    key: string,
+    title: string,
+    items: any[],
+    icon: string,
+    color: string,
+    renderItem: (item: any) => React.ReactNode
+  ) => {
+    if (!items || items.length === 0) return null;
+    const isExpanded = expanded[key];
+
+    return (
+      <div
+        className="obs-group"
+        style={{ marginBottom: "12px", border: `1px solid ${color}33` }}
+      >
+        <button
+          type="button"
+          className="obs-group-header"
+          onClick={() => toggle(key)}
+          style={{ background: isExpanded ? `${color}08` : "transparent" }}
+        >
+          <div className="obs-group-header-main">
+            <div className="obs-group-title" style={{ color }}>
+              {icon} {title}
+            </div>
+            <div className="obs-group-meta">{items.length} issues</div>
+          </div>
+          <div className="obs-group-chevron">{isExpanded ? "▾" : "▸"}</div>
+        </button>
+        {isExpanded && (
+          <div className="obs-group-body" style={{ padding: "8px" }}>
+            {items.map(renderItem)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
+      <div
+        className="modal-panel"
+        style={{ width: "600px", maxHeight: "85vh" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div className="modal-title">✨ Sync Action Dashboard</div>
+          <button type="button" className="btn" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ overflowY: "auto" }}>
+          {/* Section 1: New Campuses */}
+          {renderSection(
+            "newCampuses",
+            "New Campuses Found",
+            results.newCampuses,
+            "✨",
+            "#0d9488",
+            (item) => (
+              <div
+                key={item.id || item.name}
+                className="detail-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  borderBottom: "1px solid #eee",
+                  paddingBottom: "8px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ flexGrow: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{item.name}</div>
+                  <div style={{ fontSize: "11px", color: "#666" }}>
+                    Found in school: {item.parent_school_name}
+                  </div>
+                </div>
+                <button
+                  className="obs-pill-button"
+                  style={{ color: "#0d9488", borderColor: "#0d9488" }}
+                  onClick={() => onResolve("newCampus", item)}
+                >
+                  Add to DB
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Section 2: Name Mismatches */}
+          {renderSection(
+            "nameMismatches",
+            "Campus Name Mismatches",
+            results.nameMismatches,
+            "🔗",
+            "#2563eb",
+            (item) => (
+              <div
+                key={item.db_record.id}
+                className="detail-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  borderBottom: "1px solid #eee",
+                  paddingBottom: "8px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ flexGrow: 1 }}>
+                  <div style={{ fontSize: "11px", color: "#666" }}>
+                    DB: {item.db_record.campus_name}
+                  </div>
+                  <div style={{ fontWeight: 600, color: "#2563eb" }}>
+                    API: {item.api_name}
+                  </div>
+                </div>
+                <button
+                  className="obs-pill-button"
+                  style={{ color: "#2563eb", borderColor: "#2563eb" }}
+                  onClick={() => onResolve("nameMismatch", item)}
+                >
+                  Update Name
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Section 3: New Teachers (Phase D logic) */}
+          {renderSection(
+            "newTeachers",
+            "New Teachers Found",
+            results.newTeachers,
+            "👤",
+            "#8b5cf6",
+            (item) => (
+              <div
+                key={item.email}
+                className="detail-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  borderBottom: "1px solid #eee",
+                  paddingBottom: "8px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ flexGrow: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{item.name}</div>
+                  <div style={{ fontSize: "11px", color: "#666" }}>
+                    {item.email}
+                  </div>
+                </div>
+                <button
+                  className="obs-pill-button"
+                  style={{ color: "#8b5cf6", borderColor: "#8b5cf6" }}
+                  onClick={() => onResolve("newTeacher", item)}
+                >
+                  Import
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Section 4: Teacher Tag Issues (Phase E logic) */}
+          {renderSection(
+            "teacherTagIssues",
+            "Missing GrapeSEED Tags",
+            results.teacherTagIssues,
+            "🏷️",
+            "#ec4899",
+            (item) => (
+              <div
+                key={item.id}
+                className="detail-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  borderBottom: "1px solid #eee",
+                  paddingBottom: "8px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ flexGrow: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{item.name}</div>
+                  <div style={{ fontSize: "11px", color: "#ec4899" }}>
+                    Needs "Teacher" tag in GS Portal
+                  </div>
+                </div>
+                <button
+                  className="obs-pill-button"
+                  style={{ color: "#ec4899", borderColor: "#ec4899" }}
+                  onClick={() =>
+                    window.open(
+                      "https://portal.grapeseed.com/admin/users",
+                      "_blank"
+                    )
+                  }
+                >
+                  Fix in Portal
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Section 5: Classless Classes */}
+          {renderSection(
+            "classlessClasses",
+            "Missing Teacher Assignments",
+            results.classlessClasses,
+            "⚠️",
+            "#d97706",
+            (item) => (
+              <div
+                key={item.id}
+                className="detail-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  borderBottom: "1px solid #eee",
+                  paddingBottom: "8px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ flexGrow: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{item.name}</div>
+                  <div style={{ fontSize: "11px", color: "#666" }}>
+                    {item.school_name} - {item.campus_name}
+                  </div>
+                </div>
+                <button
+                  className="obs-pill-button"
+                  onClick={() =>
+                    window.open(
+                      "https://portal.grapeseed.com/admin/classes",
+                      "_blank"
+                    )
+                  }
+                >
+                  View in GS
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Section 6: Deactivations */}
+          {renderSection(
+            "disabledCampuses",
+            "Campuses to Deactivate",
+            results.disabledCampuses,
+            "🛑",
+            "#dc2626",
+            (item) => (
+              <div
+                key={item.id}
+                className="detail-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  borderBottom: "1px solid #eee",
+                  paddingBottom: "8px",
+                  marginBottom: "8px",
+                }}
+              >
+                <div style={{ flexGrow: 1 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {item.school_name} - {item.campus_name}
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#dc2626" }}>
+                    Marked as Disabled in GrapeSEED
+                  </div>
+                </div>
+                <button
+                  className="obs-pill-button"
+                  style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                  onClick={() => onResolve("deactivateCampus", item)}
+                >
+                  Deactivate
+                </button>
+              </div>
+            )
+          )}
+
+          {/* Info Footer */}
+          <div
+            style={{
+              padding: "16px",
+              textAlign: "center",
+              color: "#666",
+              fontSize: "11px",
+              background: "#f9fafb",
+              borderRadius: "8px",
+              marginTop: "16px",
+            }}
+          >
+            <strong>Note:</strong> Resolving these issues updates your Supabase
+            database to match the official GrapeSEED Portal data.
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="btn" onClick={onClose}>
+            Close Dashboard
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
