@@ -307,12 +307,15 @@ const handleLookupCampuses = async () => {
     }
 };
 
-// 🟢 Helper to determine if a campus is already in the DB
-const isAlreadyInDB = (apiCampusId: string, apiCampusName: string) => {
-  return existingSchools.some(s => 
-    s.campus_id === apiCampusId || 
-    (cleanName(s.campus_name) === cleanName(apiCampusName) && s.official_code === form.official_code)
+const getCampusStatus = (apiId: string, apiName: string) => {
+  const match = existingSchools.find(s => 
+    s.campus_id === apiId || 
+    (cleanName(s.campus_name) === cleanName(apiName) && s.official_code === form.official_code)
   );
+
+  if (!match) return "selectable"; // New campus
+  if (!match.campus_id) return "repairable"; // Name match but ID is missing
+  return "linked"; // ID match (already healthy)
 };
 
 return (
@@ -388,18 +391,29 @@ return (
     >
       <option value="">-- Choose a Campus from GrapeSEED --</option>
       {apiCampuses.map((c) => {
-        const duplicate = isAlreadyInDB(c.id, c.name);
-        return (
-          <option 
-            key={c.id} 
-            value={c.id} 
-            disabled={duplicate}
-            style={{ color: duplicate ? '#64748b' : 'inherit' }}
-          >
-            {c.name} {duplicate ? " (✓ Already in Roster)" : ""}
-          </option>
-        );
-      })}
+  const status = getCampusStatus(c.id, c.name);
+  
+  // Logic: Disable ONLY if it's already linked with an ID
+  const isDisabled = status === "linked";
+  
+  let labelSuffix = "";
+  if (status === "linked") labelSuffix = " (✓ Already Linked)";
+  if (status === "repairable") labelSuffix = " (⚠️ Link Missing ID)";
+
+  return (
+    <option 
+      key={c.id} 
+      value={c.id} 
+      disabled={isDisabled}
+      style={{ 
+        color: isDisabled ? '#64748b' : (status === 'repairable' ? '#2563eb' : 'inherit'),
+        fontWeight: status === 'repairable' ? 600 : 400
+      }}
+    >
+      {c.name}{labelSuffix}
+    </option>
+  );
+})}
     </select>
   ) : (
     <div style={{ position: 'relative' }}>
