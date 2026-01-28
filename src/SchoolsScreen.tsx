@@ -203,14 +203,20 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   open,
   mode,
   initial,
+  existingSchools, // 🟢 ADD THIS LINE
   onCancel,
   onSubmit,
 }) => {
   const [form, setForm] = useState<SchoolFormState>(initial ?? emptyForm);
   const [submitting, setSubmitting] = useState(false);
-  
-  // 🟢 NEW: Auto-create state
   const [autoCreate, setAutoCreate] = useState(false);
+
+  const [isSearching, setIsSearching] = useState(false);
+  const [apiCampuses, setApiCampuses] = useState<any[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
+
+  // Clean name helper for matching logic in Phase B
+  const cleanName = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
 
   useEffect(() => {
     if (open) {
@@ -227,6 +233,47 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
+
+const handleLookupCampuses = async () => {
+  if (!form.official_code.trim()) {
+    alert("Please enter an Official Code (School ID) first.");
+    return;
+  }
+
+  setIsSearching(true);
+  try {
+    // 🟢 NO MORE getGraphAccessToken() call here!
+    
+    const resp = await fetch(`${MERGE_SERVER_BASE}/api/lookup-campuses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schoolCode: form.official_code.trim(),
+        // 🟢 token is no longer sent
+      }),
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || "Could not find school. Check the code.");
+    }
+    
+    const data = await resp.json();
+    const campusList = Array.isArray(data) ? data : [];
+    
+    if (campusList.length === 0) {
+      alert("No campuses found for this code.");
+    }
+
+    setApiCampuses(campusList);
+    setHasSearched(true);
+  } catch (err: any) {
+    console.error("Lookup Error:", err);
+    alert(err.message || "Failed to fetch campuses.");
+  } finally {
+    setIsSearching(false);
+  }
+};
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -258,7 +305,15 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
     } finally {
       setSubmitting(false);
     }
-  };
+};
+
+// 🟢 Helper to determine if a campus is already in the DB
+const isAlreadyInDB = (apiCampusId: string, apiCampusName: string) => {
+  return existingSchools.some(s => 
+    s.campus_id === apiCampusId || 
+    (cleanName(s.campus_name) === cleanName(apiCampusName) && s.official_code === form.official_code)
+  );
+};
 
 return (
     <div className="modal-backdrop">
@@ -274,6 +329,32 @@ return (
 
         {/* 🟢 FIX 1: Changed <form> to <div> and removed onSubmit */}
         <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
+         
+          {/* Row 1: Official Code + Search */}
+          <div className="form-row">
+            <label>Official Code (School ID) *</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                className="input"
+                type="text"
+                value={form.official_code}
+                onChange={handleChange("official_code")}
+                placeholder="e.g., 49c384f1-..."
+                style={{ flexGrow: 1 }}
+              />
+              <button
+                type="button"
+                className="tm-pure-icon"
+                style={{ color: '#0d9488', border: '1px solid #334155', borderRadius: '8px', background: 'rgba(30, 41, 59, 0.4)' }}
+                onClick={handleLookupCampuses}
+                disabled={isSearching}
+                title="Search Campuses"
+              >
+                <Search size={18} className={isSearching ? "tm-spin" : ""} />
+              </button>
+            </div>
+          </div>
+          {/* Row 2: School Name */}
           <div className="form-row">
             <label>School name *</label>
             <input
@@ -284,17 +365,59 @@ return (
               placeholder="e.g. VSK Sunshine"
             />
           </div>
-
-          <div className="form-row">
-            <label>Campus name *</label>
-            <input
-              className="input"
-              type="text"
-              value={form.campus_name}
-              onChange={handleChange("campus_name")}
-              placeholder="e.g. Cơ sở 1, Campus A…"
-            />
-          </div>
+          {/* Row: Campus Name (Smart Dropdown) */}
+<div className="form-row">
+  <label>Campus name *</label>
+  {hasSearched && apiCampuses.length > 0 ? (
+    <select
+      className="input"
+      value={form.campus_id}
+      style={{ border: '1px solid #0d9488', backgroundColor: 'rgba(13, 148, 136, 0.05)' }}
+      onChange={(e) => {
+        const selected = apiCampuses.find(c => c.id === e.target.value);
+        if (selected) {
+          setForm(prev => ({ 
+            ...prev, 
+            campus_id: selected.id, 
+            campus_name: selected.name,
+            // 🟢 Set school name if empty
+            school_name: prev.school_name || selected.schoolName || "" 
+          }));
+        }
+      }}
+    >
+      <option value="">-- Choose a Campus from GrapeSEED --</option>
+      {apiCampuses.map((c) => {
+        const duplicate = isAlreadyInDB(c.id, c.name);
+        return (
+          <option 
+            key={c.id} 
+            value={c.id} 
+            disabled={duplicate}
+            style={{ color: duplicate ? '#64748b' : 'inherit' }}
+          >
+            {c.name} {duplicate ? " (✓ Already in Roster)" : ""}
+          </option>
+        );
+      })}
+    </select>
+  ) : (
+    <div style={{ position: 'relative' }}>
+       <input
+        className="input"
+        type="text"
+        value={form.campus_name}
+        onChange={handleChange("campus_name")}
+        placeholder={hasSearched ? "No campuses found. Type manually..." : "Search code to see campuses..."}
+      />
+      {hasSearched && apiCampuses.length === 0 && (
+         <small style={{ color: '#64748b', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+           No API matches found. You can still type manually if needed.
+         </small>
+      )}
+    </div>
+  )}
+</div>
 
           <div className="form-row">
             <label>Admin name</label>
@@ -892,6 +1015,8 @@ export const SchoolsScreen: React.FC = () => {
           trainer_id: user.id,
           school_name: values.school_name.trim(),
           campus_name: values.campus_name.trim(),
+          official_code: values.official_code.trim() || null, // 🟢 Added
+          campus_id: values.campus_id.trim() || null,         // 🟢 Added
           admin_name: values.admin_name.trim() || null,
           admin_email: values.admin_email.trim() || null,
           admin_phone: values.admin_phone.trim() || null,
@@ -931,6 +1056,8 @@ export const SchoolsScreen: React.FC = () => {
       .update({
         school_name: values.school_name.trim(),
         campus_name: values.campus_name.trim(),
+        official_code: values.official_code.trim() || null, // 🟢 Added
+        campus_id: values.campus_id.trim() || null,         // 🟢 Added
         admin_name: values.admin_name.trim() || null,
         admin_email: values.admin_email.trim() || null,
         admin_phone: values.admin_phone.trim() || null,

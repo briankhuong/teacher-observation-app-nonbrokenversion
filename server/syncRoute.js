@@ -321,5 +321,58 @@ router.post("/api/sync-teachers", async (req, res) => {
     res.json({ success: false, error: err.message, logs });
   }
 });
+/* -------------------------------------------------- */
+/* INTERNAL HELPER: Fetch GrapeSEED Master Token      */
+/* -------------------------------------------------- */
+async function getMasterToken() {
+  const url = "https://account.grapeseed.com/connect/token";
+  const authHeader = (process.env.GRAPESEED_AUTH_HEADER || "").trim();
+  const username = (process.env.GRAPESEED_USERNAME || "").trim();
+  const password = (process.env.GRAPESEED_PASSWORD || "").trim();
+
+  const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": authHeader,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: bodyString,
+  });
+
+  if (!response.ok) throw new Error(`Master Token Failed: ${response.status}`);
+  const data = await response.json();
+  return data.access_token;
+}
+
+/* -------------------------------------------------- */
+/* UPDATED: CAMPUS SEARCH PROXY                       */
+/* -------------------------------------------------- */
+router.post("/api/lookup-campuses", async (req, res) => {
+  const { schoolCode } = req.body; // 🟢 NO token required from frontend
+
+  if (!schoolCode) return res.status(400).json({ error: "Missing schoolCode" });
+
+  try {
+    // 🟢 Step 1: Backend gets its own Master Token silently
+    const masterToken = await getMasterToken();
+
+    // 🟢 Step 2: Use that token to call GrapeSEED
+    const url = `https://services.grapeseed.com/admin/v1/schools/${schoolCode}/campuses/accessiblecampuses`;
+    const response = await fetch(url, { headers: getHeaders(masterToken) });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({ error: "GrapeSEED API Error", details: errorText });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error("[Lookup] Server Error:", error);
+    res.status(500).json({ error: "Internal Server Error", details: error.message });
+  }
+});
 
 export default router;
