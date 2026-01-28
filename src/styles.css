@@ -2949,3 +2949,28 @@ input[type="date"].input {
   color: white; 
   opacity: 0.5; 
 }
+
+/* 🟢 Pulse Animation */
+.tm-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Ensure tm-pure-icon button doesn't have default borders */
+.tm-pure-icon {
+  background: none;
+  border: none;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.tm-pure-icon:hover:not(:disabled) {
+  color: #2563eb;
+}
