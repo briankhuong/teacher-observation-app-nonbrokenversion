@@ -578,14 +578,16 @@ const [syncPulseResults, setSyncPulseResults] = useState<{
   classlessClasses: any[];
   nameMismatches: any[];
   newTeachers: any[];       // Placeholder for Teacher Sync
-  teacherTagIssues: any[];  // Placeholder for Teacher Sync
+  teacherTagIssues: any[]; 
+  disconnectedCampuses: any[]; // Placeholder for Teacher Sync
 }>({
   newCampuses: [],
   disabledCampuses: [],
   classlessClasses: [],
   nameMismatches: [],
   newTeachers: [],
-  teacherTagIssues: []
+  teacherTagIssues: [],
+  disconnectedCampuses: []
 });
 
 // ✅ FULL UPDATE: Unified Resolution Logic with Data Cloning & UI Cleanup
@@ -635,14 +637,27 @@ const handleResolveConflict = async (type: string, data: any) => {
       alert(`✨ Successfully added ${data.name} to ${data.parent_school_name}`);
     } 
     
-    else if (type === 'nameMismatch') {
-      const { error } = await supabase.from("schools")
-        .update({ campus_name: data.api_name })
-        .eq("id", data.db_record.id);
+    /* --- FIND THIS BLOCK --- */
+else if (type === 'nameMismatch') {
+  // 🟢 ENHANCED LOGIC: Check if we also need to "Heal" the ID
+  const updatePayload: any = { campus_name: data.api_name };
+  
+  if (data.needs_id) {
+    updatePayload.campus_id = data.needs_id;
+  }
 
-      if (error) throw error;
-      alert(`✅ Updated name to: ${data.api_name}`);
-    }
+  const { error } = await supabase.from("schools")
+    .update(updatePayload)
+    .eq("id", data.db_record.id);
+
+  if (error) throw error;
+  
+  const msg = data.needs_id 
+    ? `✅ Repaired Legacy Record! Name updated to ${data.api_name} and ID stamped.`
+    : `✅ Updated name to: ${data.api_name}`;
+    
+  alert(msg);
+}
 
     else if (type === 'deactivateCampus') {
        const { error } = await supabase.from("schools")
@@ -653,6 +668,71 @@ const handleResolveConflict = async (type: string, data: any) => {
        alert("🛑 Campus deactivated.");
     }
 
+   else if (type === 'linkCampus') {
+  console.log("🔗 Attempting to Link Legacy Record...");
+
+  // 1. Try the update first
+  const { error } = await supabase.from("schools")
+    .update({ 
+      campus_id: data.api_item.id,
+      campus_name: data.api_item.name, 
+      address: data.api_item.fullAddress || null, 
+      admin_phone: data.api_item.phone || null,
+      disabled: false                      
+    })
+    .eq("id", data.db_id);
+
+  if (error) {
+    // 2. Handle Unique Constraint Conflict (Test 1)
+    if (error.code === '23505') {
+      const confirmDelete = window.confirm(
+        `A campus named "${data.api_item.name}" already exists.\n\n` +
+        `To link this record, the existing duplicate must be removed. ` +
+        `Would you like to DELETE the old record and proceed?`
+      );
+
+      if (confirmDelete) {
+        // User said YES: Delete the duplicate and try again
+        await supabase.from("schools")
+          .delete()
+          .eq("trainer_id", user.id) // 👈 Changed from userId to user.id
+          .eq("campus_name", data.api_item.name);
+
+        // Retry the update now that the path is clear
+        await supabase.from("schools")
+          .update({ 
+            campus_id: data.api_item.id,
+            campus_name: data.api_item.name,
+            disabled: false 
+          })
+          .eq("id", data.db_id);
+
+        alert("✅ Duplicate removed and record linked successfully!");
+      } else {
+        return; // User said NO: Exit safely
+      }
+    } else {
+      throw error;
+    }
+  } else {
+    alert(`🔗 Linked successfully! Record updated to ${data.api_item.name}`);
+  }
+}
+
+// --- ADD THIS CASE TO YOUR handleResolveConflict ---
+else if (type === 'deactivateCampus') {
+  console.log("🗑️ Deactivating Ghost Campus...");
+  
+  // We simply set disabled to true in the DB
+  const { error } = await supabase
+    .from("schools")
+    .update({ disabled: true })
+    .eq("id", data.id);
+
+  if (error) throw error;
+  alert(`🗑️ "${data.campus_name}" has been deactivated.`);
+}
+
     // --- 2. UI CLEANUP SECTION ---
     
     setSyncPulseResults(prev => {
@@ -660,17 +740,28 @@ const handleResolveConflict = async (type: string, data: any) => {
       const listKey = 
         type === 'newCampus' ? 'newCampuses' : 
         type === 'deactivateCampus' ? 'disabledCampuses' : 
+        type === 'linkCampus' ? 'disconnectedCampuses' : // ✅ Added mapping for cleanup
         'nameMismatches';
 
       return {
         ...prev,
         [listKey]: (prev as any)[listKey].filter((item: any) => {
           /* 🛑 CRITICAL FIX FOR ISSUE #1:
-             Name mismatches nest the ID inside 'db_record'. 
+             Name mismatches and Disconnected items nest the ID differently.
              New Campuses and Deactivations have the ID at the top level.
           */
-          const itemId = type === 'nameMismatch' ? item.db_record.id : item.id;
-          const resolvedId = type === 'nameMismatch' ? data.db_record.id : data.id;
+          let itemId, resolvedId;
+          
+          if (type === 'nameMismatch') {
+            itemId = item.db_record.id;
+            resolvedId = data.db_record.id;
+          } else if (type === 'linkCampus') {
+            itemId = item.db_record.id;
+            resolvedId = data.db_id;
+          } else {
+            itemId = item.id;
+            resolvedId = data.id;
+          }
           
           return itemId !== resolvedId;
         })
@@ -3362,6 +3453,7 @@ export const ActionDashboardModal: React.FC<{
     nameMismatches: any[];
     newTeachers: any[];
     teacherTagIssues: any[];
+    disconnectedCampuses: any[];
   };
   onResolve: (type: string, data: any) => Promise<void>;
 }> = ({ isOpen, onClose, results, onResolve }) => {
@@ -3498,7 +3590,7 @@ export const ActionDashboardModal: React.FC<{
                   style={{ color: "#2563eb", borderColor: "#2563eb" }}
                   onClick={() => onResolve("nameMismatch", item)}
                 >
-                  Update Name
+                  {item.mismatch_type === 'id_mismatch' ? 'Update Connection/ID' : 'Update Name'}
                 </button>
               </div>
             )
@@ -3611,36 +3703,100 @@ export const ActionDashboardModal: React.FC<{
             )
           )}
 
-          {/* Section 6: Deactivations */}
+          {/* Section: Disconnected Campuses (The "Fuzzy" Case) */}
+          {renderSection(
+            "disconnectedCampuses",
+            "Disconnected Campuses (ID or Name Mismatch)", // Updated header for accuracy
+            results.disconnectedCampuses || [],
+            "📡",
+            "#f59e0b",
+            (item) => (
+              <div key={item.db_record.id} className="detail-row" style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: '1px solid #eee', paddingBottom: '12px', marginBottom: '12px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#666' }}>
+                    {/* PATCH: Dynamic ID Label Logic */}
+                    Found in your DB {item.db_record.campus_id ? `(Invalid ID: ${item.db_record.campus_id})` : '(No ID)'}:
+                  </div>
+                  <div style={{ fontWeight: 600 }}>{item.db_record.campus_name}</div>
+                </div>
+
+                {/* Logic: Suggestion vs Dropdown */}
+                {item.suggestions && item.suggestions.length > 0 ? (
+                  <div style={{ background: '#fffbeb', padding: '8px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#b45309', marginBottom: '4px' }}>
+                      {item.suggestions.length === 1 ? "💡 Suggestion:" : "❓ Multiple potential matches:"}
+                    </div>
+                    
+                    {item.suggestions.length === 1 ? (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '13px' }}>Link to <strong>{item.suggestions[0].name}</strong>?</span>
+                        <button 
+                          className="obs-pill-button" 
+                          style={{ color: '#b45309', borderColor: '#b45309' }}
+                          onClick={() => onResolve("linkCampus", { db_id: item.db_record.id, api_item: item.suggestions[0] })}
+                        >
+                          Link & Fix
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <select 
+                          className="select select-compact" 
+                          id={`select-${item.db_record.id}`}
+                          style={{ flexGrow: 1 }}
+                        >
+                          {item.suggestions.map((s: any) => (
+                            <option key={s.id} value={JSON.stringify(s)}>{s.name}</option>
+                          ))}
+                        </select>
+                        <button 
+                          className="obs-pill-button"
+                          onClick={() => {
+                            const el = document.getElementById(`select-${item.db_record.id}`) as HTMLSelectElement;
+                            onResolve("linkCampus", { db_id: item.db_record.id, api_item: JSON.parse(el.value) });
+                          }}
+                        >
+                          Link
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '11px', color: '#dc2626', fontStyle: 'italic' }}>
+                    No similar names found in GrapeSEED.
+                  </div>
+                )}
+                
+                <button 
+                  style={{ alignSelf: 'flex-start', fontSize: '10px', color: '#dc2626', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+                  onClick={() => onResolve("deactivateCampus", item.db_record)}
+                >
+                  I'm sure this is a ghost - Deactivate
+                </button>
+              </div>
+            )
+          )}
           {renderSection(
             "disabledCampuses",
-            "Campuses to Deactivate",
-            results.disabledCampuses,
-            "🛑",
-            "#dc2626",
+            "Ghost / Disabled Campuses (Not in GrapeSEED)",
+            results.disabledCampuses || [],
+            "🗑️",
+            "#dc2626", // Red for deletion/deactivation
             (item) => (
-              <div
-                key={item.id}
-                className="detail-row"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  borderBottom: "1px solid #eee",
-                  paddingBottom: "8px",
-                  marginBottom: "8px",
-                }}
+              <div 
+                key={item.id} 
+                className="detail-row" 
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #eee' }}
               >
-                <div style={{ flexGrow: 1 }}>
-                  <div style={{ fontWeight: 600 }}>
-                    {item.school_name} - {item.campus_name}
-                  </div>
-                  <div style={{ fontSize: "11px", color: "#dc2626" }}>
-                    Marked as Disabled in GrapeSEED
+                <div>
+                  <div style={{ fontWeight: 600 }}>{item.campus_name}</div>
+                  <div style={{ fontSize: '10px', color: '#666' }}>
+                    ID: {item.campus_id || 'No ID'} | Code: {item.official_code}
                   </div>
                 </div>
-                <button
+                <button 
                   className="obs-pill-button"
-                  style={{ color: "#dc2626", borderColor: "#dc2626" }}
+                  style={{ color: '#dc2626', borderColor: '#dc2626' }}
                   onClick={() => onResolve("deactivateCampus", item)}
                 >
                   Deactivate
@@ -3648,7 +3804,6 @@ export const ActionDashboardModal: React.FC<{
               </div>
             )
           )}
-
           {/* Info Footer */}
           <div
             style={{
