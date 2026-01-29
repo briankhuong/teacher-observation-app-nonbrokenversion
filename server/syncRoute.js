@@ -347,18 +347,44 @@ async function getMasterToken() {
 }
 
 /* -------------------------------------------------- */
+/* HELPERS                                            */
+/* -------------------------------------------------- */
+// ✅ NEW: Simple Levenshtein-based similarity helper (0.0 to 1.0)
+function getSimilarity(s1, s2) {
+  let longer = s1.toLowerCase(), shorter = s2.toLowerCase();
+  if (s1.length < s2.length) { longer = s2; shorter = s1; }
+  const longerLength = longer.length;
+  if (longerLength === 0) return 1.0;
+  return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
+}
+function editDistance(s1, s2) {
+  const costs = [];
+  for (let i = 0; i <= s1.length; i++) {
+    let lastValue = i;
+    for (let j = 0; j <= s2.length; j++) {
+      if (i === 0) costs[j] = j;
+      else if (j > 0) {
+        let newValue = costs[j - 1];
+        if (s1.charAt(i - 1) !== s2.charAt(j - 1)) newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+        costs[j - 1] = lastValue;
+        lastValue = newValue;
+      }
+    }
+    if (i > 0) costs[s2.length] = lastValue;
+  }
+  return costs[s2.length];
+}
+
+/* -------------------------------------------------- */
 /* UPDATED: CAMPUS SEARCH PROXY                       */
 /* -------------------------------------------------- */
 router.post("/api/lookup-campuses", async (req, res) => {
-  const { schoolCode } = req.body; // 🟢 NO token required from frontend
+  const { schoolCode } = req.body; 
 
   if (!schoolCode) return res.status(400).json({ error: "Missing schoolCode" });
 
   try {
-    // 🟢 Step 1: Backend gets its own Master Token silently
     const masterToken = await getMasterToken();
-
-    // 🟢 Step 2: Use that token to call GrapeSEED
     const url = `https://services.grapeseed.com/admin/v1/schools/${schoolCode}/campuses/accessiblecampuses`;
     const response = await fetch(url, { headers: getHeaders(masterToken) });
 
@@ -384,14 +410,13 @@ router.post("/api/pulse-audit", async (req, res) => {
     newCampuses: [],
     disabledCampuses: [],
     classlessClasses: [],
-    nameMismatches: []
+    nameMismatches: [],
+    disconnectedCampuses: [] // ✅ ADDED
   };
 
   try {
-    // 1. Get Master Token for stable API access
     const token = await getMasterToken();
 
-    // 2. Get local DB schools to compare against
     const { data: dbSchools, error: schoolsErr } = await supabase
       .from("schools")
       .select("*")
@@ -401,77 +426,168 @@ router.post("/api/pulse-audit", async (req, res) => {
     if (schoolsErr) throw new Error(`DB Error: ${schoolsErr.message}`);
     if (!dbSchools || dbSchools.length === 0) return res.json(auditResults);
 
-    // 3. Run Parallel Audit using your existing pMap helper
-    await pMap(dbSchools, async (schoolRow) => {
-      const targetOfficialCode = schoolRow.official_code;
-      const targetCampusId = schoolRow.campus_id;
+    // Group DB schools by official_code to process "Symmetrically" per school
+    const schoolsByCode = {};
+    dbSchools.forEach(s => {
+      if (!schoolsByCode[s.official_code]) schoolsByCode[s.official_code] = [];
+      schoolsByCode[s.official_code].push(s);
+    });
 
+    const schoolCodes = Object.keys(schoolsByCode);
+
+    await pMap(schoolCodes, async (code) => {
       try {
-        // A. Fetch Live Campuses
+        const myLocalSchools = schoolsByCode[code];
         const apiCResp = await fetch(
-          `https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/campuses/accessiblecampuses`, 
+          `https://services.grapeseed.com/admin/v1/schools/${code}/campuses/accessiblecampuses`, 
           { headers: getHeaders(token) }
         );
         
-        if (!apiCResp.ok) return; // Skip if school code is invalid
+        if (!apiCResp.ok) return;
         const apiCampuses = await apiCResp.json();
 
-        // B. Check for New or Disabled Campuses
+        // TRACKERS
+        const matchedApiIds = new Set();
+        const matchedDbIds = new Set();
+
+        // --- PHASE 1: EXACT MATCHES (ID or Name) ---
+// --- PHASE 1: EXACT MATCHES (ID or Name) ---
         apiCampuses.forEach(apiC => {
-          const existsInDB = dbSchools.some(dbS => dbS.campus_id === apiC.id);
+          // A. Try ID Match
+          const idMatch = myLocalSchools.find(dbS => dbS.campus_id === apiC.id);
           
-          // Rule: If it's in API but NOT in our DB and NOT disabled in API -> It's NEW
-          if (!existsInDB && !apiC.disabled) {
-            auditResults.newCampuses.push({
-              ...apiC,
-              official_code: targetOfficialCode,
-              parent_school_name: schoolRow.school_name
-            });
+          if (idMatch) {
+            // Lock both IDs so they aren't treated as "Orphans"
+            matchedApiIds.add(apiC.id);
+            matchedDbIds.add(idMatch.id);
+
+            // Rule: ID matches but Name changed? -> NAME_MISMATCH
+            if (clean(apiC.name) !== clean(idMatch.campus_name)) {
+              auditResults.nameMismatches.push({ db_record: idMatch, api_name: apiC.name });
+            }
+            // Rule: ID matches but API says Disabled? -> DISABLED_CAMPUS
+            if (apiC.disabled) {
+              auditResults.disabledCampuses.push(idMatch);
+            }
+          } 
+          else {
+            // B. Try Exact Name Match (For records with missing or mistyped IDs)
+            const nameMatch = myLocalSchools.find(dbS => 
+              !matchedDbIds.has(dbS.id) && 
+              clean(dbS.campus_name) === clean(apiC.name)
+            );
+
+                if (nameMatch) {
+                matchedApiIds.add(apiC.id);
+                matchedDbIds.add(nameMatch.id);
+
+                auditResults.nameMismatches.push({ 
+                    db_record: nameMatch, 
+                    api_name: apiC.name, 
+                    needs_id: apiC.id,
+                    mismatch_type: 'id_mismatch' // 👈 Add this flag
+                });
+
+              if (apiC.disabled) {
+                auditResults.disabledCampuses.push(nameMatch);
+              }
+            }
           }
         });
 
-        // C. Check Local Records for "Ghosts" or "Deactivations"
-        const liveMatch = apiCampuses.find(c => c.id === targetCampusId);
-        
-        if (liveMatch) {
-          // Rule: ID matches but Name changed? -> NAME_MISMATCH
-          if (clean(liveMatch.name) !== clean(schoolRow.campus_name)) {
-            auditResults.nameMismatches.push({
-              db_record: schoolRow,
-              api_name: liveMatch.name
+        // --- PHASE 2: FUZZY MATCHING (Disconnected Records) ---
+        const apiOrphans = apiCampuses.filter(apiC => !apiC.disabled); 
+        const dbOrphans = myLocalSchools.filter(dbS => !matchedDbIds.has(dbS.id));
+
+        dbOrphans.forEach(dbS => {
+          const suggestions = apiOrphans
+            .map(apiC => ({ ...apiC, score: getSimilarity(clean(apiC.name), clean(dbS.campus_name)) }))
+            .filter(apiC => apiC.score > 0.6) // 60% similarity threshold
+            .sort((a, b) => b.score - a.score);
+
+          if (suggestions.length > 0) {
+            auditResults.disconnectedCampuses.push({
+              db_record: dbS,
+              suggestions: suggestions.map(s => ({ id: s.id, name: s.name, fullAddress: s.fullAddress, phone: s.phone }))
             });
+            // Mark API items as "potentially claimed" so they aren't called purely NEW
+            suggestions.forEach(s => matchedApiIds.add(s.id));
+            matchedDbIds.add(dbS.id);
           }
-          // Rule: ID matches but API says Disabled? -> DISABLED_CAMPUS
-          if (liveMatch.disabled) {
-            auditResults.disabledCampuses.push(schoolRow);
+        });
+
+        // --- PHASE 3: FINAL CATEGORIZATION ---
+        // [A] Truly New Campuses
+                apiCampuses.forEach(apiC => {
+                    const isSuggestedAsLink = auditResults.disconnectedCampuses.some(d => d.suggestions.some(s => s.id === apiC.id));
+                    if (!matchedApiIds.has(apiC.id) && !apiC.disabled && !isSuggestedAsLink) {
+                        auditResults.newCampuses.push({
+                            ...apiC,
+                            official_code: code,
+                            parent_school_name: myLocalSchools[0]?.school_name || "Unknown School"
+                        });
+                    }
+                });
+        // [B] THE SCOPED SAFETY NET (Fixes Test 4 & The Global Leak)
+                // Only run this if we successfully fetched campuses for THIS specific code.
+                if (Array.isArray(apiCampuses)) {
+                    myLocalSchools.forEach(dbS => {
+                        // Check if this specific DB record was "Claimed" by Phase 1, 2, or 3
+                        const isAccountedFor = 
+                            matchedDbIds.has(dbS.id) || 
+                            auditResults.disconnectedCampuses.some(d => d.db_record.id === dbS.id) ||
+                            auditResults.nameMismatches.some(m => m.db_record.id === dbS.id);
+
+                        // If NOT accounted for, and we KNOW the API for this school code is active:
+                        if (!isAccountedFor) {
+                            auditResults.disabledCampuses.push(dbS);
+                        }
+                    });
+                }
+
+// --- PHASE 4: CLASSLESS AUDIT (Only for Synced IDs) ---
+        // We let ALL records with a campus_id through because the loop below is now bulletproof.
+        // This ensures "Ghost" records are audited without crashing the server.
+        const syncedLocalIds = myLocalSchools.filter(s => s.campus_id);
+
+        await Promise.all(syncedLocalIds.map(async (schoolRow) => {
+          try {
+            const classResp = await fetch(
+              `https://services.grapeseed.com/admin/v1/schools/${code}/classes?campusId=${schoolRow.campus_id}&offset=0&limit=100&disabled=false`, 
+              { headers: getHeaders(token) }
+            );
+            
+            // If the API returns a 404 or 401 for a Ghost ID, we skip gracefully
+            if (!classResp.ok) return; 
+
+            const classData = await classResp.json();
+
+            // 🛡️ THE BULLETPROOF FIX: 
+            // Normalize the response. If the API returns an error object, fallback to [].
+            const apiClasses = Array.isArray(classData.schoolClasses) 
+              ? classData.schoolClasses 
+              : (Array.isArray(classData) ? classData : []);
+
+            // Loop through the array safely
+            apiClasses.forEach(cls => {
+              if (cls && !cls.teacherId) {
+                auditResults.classlessClasses.push({
+                  ...cls,
+                  school_name: schoolRow.school_name,
+                  campus_name: schoolRow.campus_name,
+                  official_code: code, 
+                  campus_id: schoolRow.campus_id
+                });
+              }
+            });
+          } catch (fetchErr) {
+            // Silently log network errors to keep the process running
+            console.error(`Class audit failed for campus ${schoolRow.campus_id}:`, fetchErr.message);
           }
-
-          // D. Classless Audit (Fetch classes for this linked campus)
-          const classResp = await fetch(
-            `https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`, 
-            { headers: getHeaders(token) }
-          );
-          const classData = await classResp.json();
-          const apiClasses = classData.schoolClasses || classData || [];
-
-          apiClasses.forEach(cls => {
-            if (!cls.teacherId) {
-              auditResults.classlessClasses.push({
-                ...cls,
-                school_name: schoolRow.school_name,
-                campus_name: schoolRow.campus_name,
-                official_code: targetOfficialCode, 
-                campus_id: targetCampusId
-              });
-            }
-          });
-        } else if (targetCampusId) {
-          // Rule: We have an ID but the API doesn't return it anymore? -> DISABLED_CAMPUS
-          auditResults.disabledCampuses.push(schoolRow);
-        }
+        }));
 
       } catch (err) {
-        console.error(`Audit failed for ${schoolRow.school_name}:`, err);
+        console.error(`Audit failed for code ${code}:`, err);
       }
     }, { concurrency: 10 });
 
