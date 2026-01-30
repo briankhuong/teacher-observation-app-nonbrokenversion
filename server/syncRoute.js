@@ -677,6 +677,8 @@ router.post("/api/pulse-audit", async (req, res) => {
                         gseed_id: t.grapeseed_id,
                         name: t.name,
                         school_name: schoolRow.school_name,
+                        official_code: code, // 🟢 Added for Link generation
+                        current_tags: currentTags, // 🟢 ADD THIS LINE
                         school_id: schoolRow.id,
                         issue: "Incorrect Tags",
                         expected: expectedTags
@@ -736,12 +738,12 @@ router.post("/api/sync-surgical", async (req, res) => {
   try {
     const token = await getMasterToken();
 
-    // 1. Get Trainer Identity (For Tag Filtering)
+    // 1. Get Trainer Identity
     const { data: { user: trainerUser }, error: userErr } = await supabase.auth.admin.getUserById(userId);
     if (userErr || !trainerUser) throw new Error("Trainer not found");
     const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0];
 
-    // 2. Fetch Fresh Data from API (Source of Truth)
+    // 2. Fetch Fresh Data (Source of Truth)
     const [pResp, tagResp] = await Promise.all([
       fetch(`https://services.grapeseed.com/account/v1/users?ids=${teacherData.grapeseed_id}`, { headers: getHeaders(token) }),
       fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${teacherData.grapeseed_id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) })
@@ -753,7 +755,7 @@ router.post("/api/sync-surgical", async (req, res) => {
     
     if (!profile) throw new Error("Teacher profile not found in GrapeSEED");
 
-    // 3. Process Tags (Standard Logic)
+    // 3. Process Tags
     let finalTags = ["No tag"];
     let rawTagObjects = [];
     if (tagResp.ok) {
@@ -777,8 +779,8 @@ router.post("/api/sync-surgical", async (req, res) => {
     if (others.length > 0) finalTags = others;
     else if (hasMe) finalTags = [];
 
-    // 4. PREPARE DB PAYLOAD
-    // We need the school info to fill in the text fields
+    // 4. PREPARE STRICT PAYLOAD (Golden Record)
+    // We query the DB for the target school to ensure names/IDs are 100% correct
     const { data: schoolRow } = await supabase
       .from("schools")
       .select("school_name, campus_name, id, campus_id")
@@ -792,18 +794,17 @@ router.post("/api/sync-surgical", async (req, res) => {
         name: profile.name,
         email: (profile.email || "").toLowerCase().trim(),
         grapeseed_id: teacherData.grapeseed_id,
-        school_id: schoolRow.id,
-        school_name: schoolRow.school_name,
-        campus_id: schoolRow.campus_id, // Ensure we align with the DB School
+        school_id: schoolRow.id,              // 🟢 REPAIRED: Enforce correct school_id
+        school_name: schoolRow.school_name,   // 🟢 REPAIRED: Enforce correct school_name
+        campus_id: schoolRow.campus_id,
         campus: schoolRow.campus_name,
         tags: finalTags,
         updated_at: new Date()
     };
 
-    // 5. EXECUTE DATABASE OPERATION
+    // 5. EXECUTE OPERATION
     
     // [A] CHECK FOR HANDSHAKE (Placeholder in same school)
-    // Matches Email + No ID + Same School
     const { data: handshakeCandidate } = await supabase
         .from("teachers")
         .select("id")
@@ -814,38 +815,29 @@ router.post("/api/sync-surgical", async (req, res) => {
 
     if (handshakeCandidate) {
         console.log(`[Surgical] 🔗 Linking placeholder ${handshakeCandidate.id} to ${profile.name}`);
-        await supabase
-            .from("teachers")
-            .update(payload)
-            .eq("id", handshakeCandidate.id);
-            
+        await supabase.from("teachers").update(payload).eq("id", handshakeCandidate.id);
         return res.json({ success: true, action: "linked" });
     }
 
-    // [B] CHECK FOR EXISTING RECORD IN *THIS* CAMPUS (Tag Refresh)
+    // [B] CHECK FOR EXISTING RECORD IN THIS CAMPUS (Full Repair)
+    // Note: We check specifically for this campus_id to avoid moving teachers from other campuses
     const { data: existingInCampus } = await supabase
         .from("teachers")
         .select("id")
         .eq("grapeseed_id", payload.grapeseed_id)
-        .eq("campus_id", schoolRow.campus_id) // Strict Campus Scope
+        .eq("campus_id", schoolRow.campus_id) 
         .maybeSingle();
 
     if (existingInCampus) {
-        console.log(`[Surgical] 🔄 Updating tags for ${profile.name}`);
-        await supabase
-            .from("teachers")
-            .update({ tags: finalTags, updated_at: new Date(), name: profile.name })
-            .eq("id", existingInCampus.id);
-
-        return res.json({ success: true, action: "updated" });
+        console.log(`[Surgical] 🔄 Performing Full Repair for ${profile.name}`);
+        // 🟢 FIX: Update ALL fields (Payload), not just tags, to fix missing school_id
+        await supabase.from("teachers").update(payload).eq("id", existingInCampus.id);
+        return res.json({ success: true, action: "repaired" });
     }
 
-    // [C] INSERT NEW RECORD (If not found in this campus)
+    // [C] INSERT NEW RECORD
     console.log(`[Surgical] ✨ Inserting new record for ${profile.name}`);
-    await supabase.from("teachers").insert({
-        ...payload,
-        created_at: new Date()
-    });
+    await supabase.from("teachers").insert({ ...payload, created_at: new Date() });
 
     res.json({ success: true, action: "inserted" });
 
@@ -854,5 +846,4 @@ router.post("/api/sync-surgical", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 export default router;
