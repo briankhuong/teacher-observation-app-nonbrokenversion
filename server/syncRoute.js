@@ -575,7 +575,8 @@ router.post("/api/pulse-audit", async (req, res) => {
                   school_name: schoolRow.school_name,
                   campus_name: schoolRow.campus_name,
                   official_code: code, 
-                  campus_id: schoolRow.campus_id
+                  campus_id: schoolRow.campus_id,
+                  teacherUrl: `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${code}/teachers`
                 });
               }
             });
@@ -717,6 +718,139 @@ router.post("/api/pulse-audit", async (req, res) => {
 
   } catch (err) {
     console.error("Pulse Audit Fatal Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* -------------------------------------------------- */
+/* NEW: SURGICAL SYNC (Single Teacher Operation)      */
+/* -------------------------------------------------- */
+router.post("/api/sync-surgical", async (req, res) => {
+  const { userId, teacherData } = req.body;
+  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
+
+  if (!teacherData || !teacherData.grapeseed_id) {
+    return res.status(400).json({ error: "Missing teacher data" });
+  }
+
+  try {
+    const token = await getMasterToken();
+
+    // 1. Get Trainer Identity (For Tag Filtering)
+    const { data: { user: trainerUser }, error: userErr } = await supabase.auth.admin.getUserById(userId);
+    if (userErr || !trainerUser) throw new Error("Trainer not found");
+    const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0];
+
+    // 2. Fetch Fresh Data from API (Source of Truth)
+    const [pResp, tagResp] = await Promise.all([
+      fetch(`https://services.grapeseed.com/account/v1/users?ids=${teacherData.grapeseed_id}`, { headers: getHeaders(token) }),
+      fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${teacherData.grapeseed_id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) })
+    ]);
+
+    if (!pResp.ok) throw new Error(`API Error: ${pResp.status}`);
+    const profiles = await pResp.json();
+    const profile = Array.isArray(profiles) ? profiles[0] : profiles;
+    
+    if (!profile) throw new Error("Teacher profile not found in GrapeSEED");
+
+    // 3. Process Tags (Standard Logic)
+    let finalTags = ["No tag"];
+    let rawTagObjects = [];
+    if (tagResp.ok) {
+        const tData = await tagResp.json();
+        if (tData.tags) rawTagObjects = tData.tags;
+        else if (tData.entityTags) rawTagObjects = tData.entityTags;
+        else if (Array.isArray(tData)) {
+            if (tData[0] && (tData[0].tags || tData[0].entityTags)) rawTagObjects = tData[0].tags || tData[0].entityTags;
+            else rawTagObjects = tData;
+        }
+    }
+
+    const rawNames = rawTagObjects
+        .map(tag => (tag.name || "").trim())
+        .filter(name => isNaN(Number(name)))
+        .map(name => clean(name).split(" ")[0]);
+
+    const hasMe = rawNames.some(n => n === myName);
+    const others = [...new Set(rawNames.filter(n => n !== myName))];
+
+    if (others.length > 0) finalTags = others;
+    else if (hasMe) finalTags = [];
+
+    // 4. PREPARE DB PAYLOAD
+    // We need the school info to fill in the text fields
+    const { data: schoolRow } = await supabase
+      .from("schools")
+      .select("school_name, campus_name, id, campus_id")
+      .eq("id", teacherData.school_id)
+      .single();
+
+    if (!schoolRow) throw new Error("Associated school record not found");
+
+    const payload = {
+        trainer_id: userId,
+        name: profile.name,
+        email: (profile.email || "").toLowerCase().trim(),
+        grapeseed_id: teacherData.grapeseed_id,
+        school_id: schoolRow.id,
+        school_name: schoolRow.school_name,
+        campus_id: schoolRow.campus_id, // Ensure we align with the DB School
+        campus: schoolRow.campus_name,
+        tags: finalTags,
+        updated_at: new Date()
+    };
+
+    // 5. EXECUTE DATABASE OPERATION
+    
+    // [A] CHECK FOR HANDSHAKE (Placeholder in same school)
+    // Matches Email + No ID + Same School
+    const { data: handshakeCandidate } = await supabase
+        .from("teachers")
+        .select("id")
+        .eq("school_id", schoolRow.id)
+        .eq("email", payload.email)
+        .is("grapeseed_id", null)
+        .maybeSingle();
+
+    if (handshakeCandidate) {
+        console.log(`[Surgical] 🔗 Linking placeholder ${handshakeCandidate.id} to ${profile.name}`);
+        await supabase
+            .from("teachers")
+            .update(payload)
+            .eq("id", handshakeCandidate.id);
+            
+        return res.json({ success: true, action: "linked" });
+    }
+
+    // [B] CHECK FOR EXISTING RECORD IN *THIS* CAMPUS (Tag Refresh)
+    const { data: existingInCampus } = await supabase
+        .from("teachers")
+        .select("id")
+        .eq("grapeseed_id", payload.grapeseed_id)
+        .eq("campus_id", schoolRow.campus_id) // Strict Campus Scope
+        .maybeSingle();
+
+    if (existingInCampus) {
+        console.log(`[Surgical] 🔄 Updating tags for ${profile.name}`);
+        await supabase
+            .from("teachers")
+            .update({ tags: finalTags, updated_at: new Date(), name: profile.name })
+            .eq("id", existingInCampus.id);
+
+        return res.json({ success: true, action: "updated" });
+    }
+
+    // [C] INSERT NEW RECORD (If not found in this campus)
+    console.log(`[Surgical] ✨ Inserting new record for ${profile.name}`);
+    await supabase.from("teachers").insert({
+        ...payload,
+        created_at: new Date()
+    });
+
+    res.json({ success: true, action: "inserted" });
+
+  } catch (err) {
+    console.error("Surgical Sync Failed:", err);
     res.status(500).json({ error: err.message });
   }
 });
