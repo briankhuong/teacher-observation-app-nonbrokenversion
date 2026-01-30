@@ -3735,41 +3735,52 @@ export const ActionDashboardModal: React.FC<{
           )}
 
           {/* Section 4: Teacher Tag Issues (Comparison Mode) */}
-          {renderSection(
+            {renderSection(
             "teacherTagIssues",
             "Teacher Tag Mismatches",
             results.teacherTagIssues,
             "🏷️",
             "#ec4899",
-            (item) => (
-  <div key={item.id} className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "8px" }}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-      <div>
-        <div style={{ fontWeight: 600 }}>{item.name}</div>
-        <div style={{ fontSize: "11px", color: "#666" }}>{item.school_name}</div>
-      </div>
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <button
-          className="obs-pill-button"
-          style={{ color: "#666", borderColor: "#ccc" }}
-          onClick={() => window.open("https://portal.grapeseed.com/admin/users", "_blank")}
-        >
-          Portal ⧉
-        </button>
-        <button
-          className="obs-pill-button"
-          style={{ color: "#ec4899", borderColor: "#ec4899" }}
-          onClick={() => onResolve("teacherTagIssue", item)}
-        >
-          Sync & Clear
-        </button>
-      </div>
-    </div>
-    {/* Comparison Badges... */}
-  </div>
-)
+            (item) => {
+              // 🟢 FIX: Generate URL dynamically using the VIETNAM_REGION_ID
+              // (If item.teacherUrl exists from backend use it, otherwise build it)
+              const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
+              const portalUrl = item.teacherUrl || `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${item.official_code || "unknown"}/teachers`;
+              
+              return (
+                <div key={item.id} className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "8px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{item.name}</div>
+                      <div style={{ fontSize: "11px", color: "#666" }}>{item.school_name}</div>
+                      
+                      {/* 🟢 NEW: Show WHY it is mismatching */}
+                      <div style={{ fontSize: "10px", marginTop: "4px", color: "#dc2626" }}>
+                         Current: {JSON.stringify(item.current_tags || "Unknown")} <br/>
+                         Expected: {JSON.stringify(item.expected || "Unknown")}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        className="obs-pill-button"
+                        style={{ color: "#666", borderColor: "#ccc" }}
+                        onClick={() => window.open(portalUrl, "_blank")}
+                      >
+                        Portal ⧉
+                      </button>
+                      <button
+                        className="obs-pill-button"
+                        style={{ color: "#ec4899", borderColor: "#ec4899" }}
+                        onClick={() => onResolve("teacherTagIssue", item)}
+                      >
+                        Sync & Clear
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
           )}
-
 
           {renderSection(
             "classlessClasses",
@@ -3787,13 +3798,7 @@ export const ActionDashboardModal: React.FC<{
                 </div>
                 <button
                   className="obs-pill-button"
-                  onClick={() => {
-                    // ✅ UPDATED DEEP LINK LOGIC:
-                    const regionId = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
-                    const url = `https://schools.grapeseed.com/regions/${regionId}/schools/${item.official_code}/campuses/${item.campus_id}/classes/${item.id}`;
-                    
-                    window.open(url, "_blank");
-                  }}
+                  onClick={() => window.open(item.teacherUrl, "_blank")}
                 >
                   View in GS
                 </button>
