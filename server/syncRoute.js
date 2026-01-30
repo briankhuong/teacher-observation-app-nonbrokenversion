@@ -636,6 +636,7 @@ router.post("/api/pulse-audit", async (req, res) => {
             // [D] AUDIT TAGS (Active & Inactive)
             
             // 1. Check Active Teachers for Bad Tags
+          // 1. Check Active Teachers for Bad Tags
             const activeDbTeachers = currentCampusTeachers.filter(t => apiActiveIds.has((t.grapeseed_id || "").toLowerCase()));
             
             await pMap(activeDbTeachers, async (t) => {
@@ -653,23 +654,28 @@ router.post("/api/pulse-audit", async (req, res) => {
                     }
                 }
 
-                // Calculate Ideal Tags (Remove Numbers, Remove My Name)
-                const rawNames = rawTagObjects
+                // 🟢 1. CALCULATE DISPLAY TAGS (Show the Truth: "Quinn", "OtherTrainer")
+                const displayTags = rawTagObjects
                     .map(tag => (tag.name || "").trim())
                     .filter(name => isNaN(Number(name))) 
                     .map(name => clean(name).split(" ")[0]); 
 
-                const hasMe = rawNames.some(n => n === myName);
-                const others = [...new Set(rawNames.filter(n => n !== myName))];
+                if (displayTags.length === 0) displayTags.push("No tag");
 
-                let expectedTags = [];
-                if (others.length > 0) expectedTags = others;
-                else if (hasMe) expectedTags = []; // Clean "No tag" logic
-                else expectedTags = ["No tag"];
+                // 🟢 2. CALCULATE DB LOGIC (The Cleaning Rule)
+                const hasMe = displayTags.some(n => n === myName);
+                const others = [...new Set(displayTags.filter(n => n !== myName && n !== "no tag"))];
 
-                // Compare Sets
+                let targetDbTags = [];
+                if (others.length > 0) targetDbTags = others;    // Case: Tagged by others -> ["Other"]
+                else if (hasMe) targetDbTags = [];               // Case: Tagged by only me -> []
+                else targetDbTags = ["No tag"];                  // Case: No tags at all -> ["No tag"]
+
+                // 🟢 3. COMPARE DB vs TARGET
                 const currentTags = Array.isArray(t.tags) ? t.tags : [];
-                const isDiff = JSON.stringify(expectedTags.sort()) !== JSON.stringify(currentTags.sort());
+                
+                // Sort both to ensure order doesn't cause false mismatch
+                const isDiff = JSON.stringify(targetDbTags.sort()) !== JSON.stringify(currentTags.sort());
 
                 if (isDiff) {
                     auditResults.teacherTagIssues.push({
@@ -677,11 +683,11 @@ router.post("/api/pulse-audit", async (req, res) => {
                         gseed_id: t.grapeseed_id,
                         name: t.name,
                         school_name: schoolRow.school_name,
-                        official_code: code, // 🟢 Added for Link generation
-                        current_tags: currentTags, // 🟢 ADD THIS LINE
+                        official_code: code,
                         school_id: schoolRow.id,
                         issue: "Incorrect Tags",
-                        expected: expectedTags
+                        expected: displayTags,  // 🟢 UI sees the Real API tags (e.g. "Quinn")
+                        current_tags: currentTags 
                     });
                 }
             }, { concurrency: 5 });
