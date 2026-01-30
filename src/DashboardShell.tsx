@@ -3670,7 +3670,6 @@ export const ActionDashboardModal: React.FC<{
               </div>
             )
           )}
-
           {/* Section 2: Name Mismatches */}
           {renderSection(
             "nameMismatches",
@@ -3708,7 +3707,6 @@ export const ActionDashboardModal: React.FC<{
               </div>
             )
           )}
-
           {renderSection(
             "newTeachers",
             "New Teachers Found",
@@ -3719,10 +3717,17 @@ export const ActionDashboardModal: React.FC<{
               <div key={item.grapeseed_id} className="detail-row" style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: "8px", marginBottom: "8px" }}>
                 <div style={{ flexGrow: 1 }}>
                   <div style={{ fontWeight: 600 }}>
-                    {item.name} {item.is_handshake && <span style={{fontSize:'10px', color:'#2563eb', marginLeft: '6px'}}>🔗 Match Found</span>}
+                    {item.name} {item.is_handshake && <span style={{fontSize:'10px', color:'#2563eb', marginLeft: '6px', background:'#eff6ff', padding:'1px 4px', borderRadius:'4px'}}>🔗 Linked by Email</span>}
                   </div>
                   <div style={{ fontSize: "11px", color: "#666" }}>{item.email}</div>
+                  
+                  {/* 🟢 ADDED: DESTINATION SCHOOL INFO */}
+                  <div style={{ fontSize: "10px", color: "#8b5cf6", marginTop: "2px", fontWeight: 500 }}>
+                    📍 {item.parent_school_name || "Unknown School"} 
+                    {item.campus_name ? ` — ${item.campus_name}` : ""}
+                  </div>
                 </div>
+                
                 <button
                   className="obs-pill-button"
                   style={{ color: "#8b5cf6", borderColor: "#8b5cf6" }}
@@ -3734,6 +3739,7 @@ export const ActionDashboardModal: React.FC<{
             )
           )}
 
+
           {/* Section 4: Teacher Tag Issues (Comparison Mode) */}
             {renderSection(
             "teacherTagIssues",
@@ -3742,11 +3748,9 @@ export const ActionDashboardModal: React.FC<{
             "🏷️",
             "#ec4899",
             (item) => {
-              // 🟢 FIX: Generate URL dynamically using the VIETNAM_REGION_ID
-              // (If item.teacherUrl exists from backend use it, otherwise build it)
               const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
               const portalUrl = item.teacherUrl || `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${item.official_code || "unknown"}/teachers`;
-              
+
               return (
                 <div key={item.id} className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "8px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -3754,16 +3758,21 @@ export const ActionDashboardModal: React.FC<{
                       <div style={{ fontWeight: 600 }}>{item.name}</div>
                       <div style={{ fontSize: "11px", color: "#666" }}>{item.school_name}</div>
                       
-                      {/* 🟢 NEW: Show WHY it is mismatching */}
-                      <div style={{ fontSize: "10px", marginTop: "4px", color: "#dc2626" }}>
-                         Current: {JSON.stringify(item.current_tags || "Unknown")} <br/>
-                         Expected: {JSON.stringify(item.expected || "Unknown")}
+                      {/* 🟢 VISUAL COMPARISON BLOCK */}
+                      <div style={{ fontSize: "11px", marginTop: "6px", padding: "6px", background: "#f8fafc", borderRadius: "4px", border: "1px solid #e2e8f0" }}>
+                         <div style={{ marginBottom: '2px', color: "#64748b" }}>
+                           <strong>My teacher list:</strong> {Array.isArray(item.current_tags) && item.current_tags.length > 0 ? item.current_tags.join(", ") : <em>(Empty)</em>}
+                         </div>
+                         <div style={{ color: "#dc2626" }}>
+                           <strong>GrapeSEED portal:</strong> {Array.isArray(item.expected) ? item.expected.join(", ") : "No tag"}
+                         </div>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
+
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <button
                         className="obs-pill-button"
-                        style={{ color: "#666", borderColor: "#ccc" }}
+                        style={{ color: "#666", borderColor: "#ccc", padding: "4px 8px", fontSize: "10px" }}
                         onClick={() => window.open(portalUrl, "_blank")}
                       >
                         Portal ⧉
@@ -3781,6 +3790,8 @@ export const ActionDashboardModal: React.FC<{
               );
             }
           )}
+
+
 
           {renderSection(
             "classlessClasses",
@@ -3805,7 +3816,6 @@ export const ActionDashboardModal: React.FC<{
               </div>
             )
           )}
-
           {/* Section: Disconnected Campuses (The "Fuzzy" Case) */}
           {renderSection(
             "disconnectedCampuses",
