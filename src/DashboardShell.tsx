@@ -571,15 +571,18 @@ export const DashboardShell: React.FC<DashboardProps> = ({
    const [loading, setLoading] = useState(true); // 🟢 Tracks initial cache load
 
 // 🟢 NEW: State for the Sync Action Dashboard
+// --- DashboardShell.tsx (Approx Line 420) ---
 const [isActionDashboardOpen, setIsActionDashboardOpen] = useState(false);
+const [isPulseLoading, setIsPulseLoading] = useState(false); // 🆕 Track background loading
+const [lastPulseTime, setLastPulseTime] = useState<number | null>(null); // 🆕 Session gate
 const [syncPulseResults, setSyncPulseResults] = useState<{
   newCampuses: any[];
   disabledCampuses: any[];
   classlessClasses: any[];
   nameMismatches: any[];
-  newTeachers: any[];       // Placeholder for Teacher Sync
-  teacherTagIssues: any[]; 
-  disconnectedCampuses: any[]; // Placeholder for Teacher Sync
+  newTeachers: any[];       // 🆕 Discovery results
+  teacherTagIssues: any[];  // 🆕 Tag issues
+  disconnectedCampuses: any[];
 }>({
   newCampuses: [],
   disabledCampuses: [],
@@ -589,6 +592,8 @@ const [syncPulseResults, setSyncPulseResults] = useState<{
   teacherTagIssues: [],
   disconnectedCampuses: []
 });
+
+
 
 // ✅ FULL UPDATE: Unified Resolution Logic with Data Cloning & UI Cleanup
 const handleResolveConflict = async (type: string, data: any) => {
@@ -637,7 +642,6 @@ const handleResolveConflict = async (type: string, data: any) => {
       alert(`✨ Successfully added ${data.name} to ${data.parent_school_name}`);
     } 
     
-    /* --- FIND THIS BLOCK --- */
 else if (type === 'nameMismatch') {
   // 🟢 ENHANCED LOGIC: Check if we also need to "Heal" the ID
   const updatePayload: any = { campus_name: data.api_name };
@@ -719,7 +723,6 @@ else if (type === 'nameMismatch') {
   }
 }
 
-// --- ADD THIS CASE TO YOUR handleResolveConflict ---
 else if (type === 'deactivateCampus') {
   console.log("🗑️ Deactivating Ghost Campus...");
   
@@ -733,15 +736,58 @@ else if (type === 'deactivateCampus') {
   alert(`🗑️ "${data.campus_name}" has been deactivated.`);
 }
 
+// --- DashboardShell.tsx (Inside handleResolveConflict) ---
+
+// --- DashboardShell.tsx (Approx Line 520) ---
+else if (type === 'newTeacher') {
+  console.log("👤 Surgically Syncing Teacher:", data.name);
+  
+  const response = await fetch(`${MERGE_SERVER_BASE}/api/sync-surgical`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      userId: user.id, 
+      teacherData: data
+      // 🆕 Token is no longer passed from here!
+    })
+  });
+
+  if (!response.ok) throw new Error("Surgical Sync failed");
+  alert(`👤 ${data.name} has been added to the database!`);
+}
+
+// Inside handleResolveConflict...
+else if (type === 'teacherTagIssue') {
+  console.log("🏷️ Fixing tags for:", data.name);
+  const response = await fetch(`${MERGE_SERVER_BASE}/api/sync-surgical`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      userId: user.id, 
+      teacherData: {
+        grapeseed_id: data.gseed_id, // Ensure server sends gseed_id
+        name: data.name,
+        school_id: data.school_id, // Needed for surgical sync
+        // ... include other necessary fields
+      }
+    })
+  });
+  if (!response.ok) throw new Error("Tag Re-Sync failed");
+  alert(`🏷️ Tags for ${data.name} have been updated!`);
+}
+
+
     // --- 2. UI CLEANUP SECTION ---
     
     setSyncPulseResults(prev => {
       // Map the resolve type to the correct array in our state
-      const listKey = 
-        type === 'newCampus' ? 'newCampuses' : 
-        type === 'deactivateCampus' ? 'disabledCampuses' : 
-        type === 'linkCampus' ? 'disconnectedCampuses' : // ✅ Added mapping for cleanup
-        'nameMismatches';
+    const listKey = 
+    type === 'newCampus' ? 'newCampuses' : 
+    type === 'deactivateCampus' ? 'disabledCampuses' : 
+    type === 'linkCampus' ? 'disconnectedCampuses' : 
+    type === 'newTeacher' ? 'newTeachers' : 
+    type === 'teacherTagIssue' ? 'teacherTagIssues' : // 🆕 Added
+    'nameMismatches';
 
       return {
         ...prev,
@@ -752,16 +798,20 @@ else if (type === 'deactivateCampus') {
           */
           let itemId, resolvedId;
           
-          if (type === 'nameMismatch') {
-            itemId = item.db_record.id;
-            resolvedId = data.db_record.id;
-          } else if (type === 'linkCampus') {
-            itemId = item.db_record.id;
-            resolvedId = data.db_id;
-          } else {
-            itemId = item.id;
-            resolvedId = data.id;
-          }
+        if (type === 'nameMismatch') {
+              itemId = item.db_record.id;
+              resolvedId = data.db_record.id;
+            } else if (type === 'linkCampus') {
+              itemId = item.db_record.id;
+              resolvedId = data.db_id;
+            } else if (type === 'newTeacher') {
+              // 🆕 TEACHER CLEANUP FIX
+              itemId = item.grapeseed_id;
+              resolvedId = data.grapeseed_id;
+            } else {
+              itemId = item.id;
+              resolvedId = data.id;
+            }
           
           return itemId !== resolvedId;
         })
@@ -804,7 +854,45 @@ const runSyncPulse = async () => {
     alert("Could not run Pulse Audit. Check console.");
   }
 };
-  // State to hold the settings fetched from DB
+
+// --- DashboardShell.tsx (Approx Line 720) ---
+
+const handleCheckPulseSilent = useCallback(async () => {
+  // 🛑 THE GATE: 
+  // 1. Don't run if offline or no user
+  // 2. Don't run if it already ran in the last 60 minutes (3600000 ms)
+  const isFresh = lastPulseTime && (Date.now() - lastPulseTime < 3600000);
+  if (!user?.id || !navigator.onLine || isFresh || isPulseLoading) return;
+
+  setIsPulseLoading(true);
+  console.log("🕵️ Background Watchman: Starting scheduled audit...");
+
+  try {
+    const response = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id })
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      setSyncPulseResults(data);
+      setLastPulseTime(Date.now()); // 🔒 Lock the gate
+      console.log("🕵️ Background Watchman: Audit complete. Results cached.");
+    }
+  } catch (err) {
+    // We stay silent on background errors to avoid annoying the user
+    console.warn("Silent Pulse failed:", err);
+  } finally {
+    setIsPulseLoading(false);
+  }
+}, [user?.id, lastPulseTime, isPulseLoading]);
+
+// The Auto-Trigger
+React.useEffect(() => {
+  handleCheckPulseSilent();
+}, [handleCheckPulseSilent]);
+
 
 const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
@@ -882,7 +970,7 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
   }, [user?.id]); 
   // 🟢 END BLOCK 🟢
 
-
+  
 // NEW: State for tracking Merge process status (Add these two lines)
 const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
 const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
@@ -2893,6 +2981,31 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
                 AM Summary…
               </button>
             </div>
+            {/* --- Bell Icon with Red Dot next to Online Badge --- */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setIsActionDashboardOpen(true)}>
+                <span style={{ fontSize: '20px' }}>🔔</span>
+                
+                {/* Logic for the Red Dot: Show if ANY array has items */}
+                {(syncPulseResults.newCampuses.length > 0 || 
+                  syncPulseResults.disabledCampuses.length > 0 || 
+                  syncPulseResults.newTeachers.length > 0 || 
+                  syncPulseResults.nameMismatches.length > 0 ||
+                  syncPulseResults.disconnectedCampuses.length > 0 ||
+                  syncPulseResults.teacherTagIssues.length > 0) && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-2px',
+                    right: '-2px',
+                    height: '10px',
+                    width: '10px',
+                    backgroundColor: '#dc2626', // Red
+                    borderRadius: '50%',
+                    border: '2px solid white'
+                  }} />
+                )}
+              </div>
+            </div>
 
            {/* ✅ NEW: Pulse Sync Trigger */}
               <div className="toolbar-group">
@@ -3596,7 +3709,6 @@ export const ActionDashboardModal: React.FC<{
             )
           )}
 
-          {/* Section 3: New Teachers (Phase D logic) */}
           {renderSection(
             "newTeachers",
             "New Teachers Found",
@@ -3604,74 +3716,60 @@ export const ActionDashboardModal: React.FC<{
             "👤",
             "#8b5cf6",
             (item) => (
-              <div
-                key={item.email}
-                className="detail-row"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  borderBottom: "1px solid #eee",
-                  paddingBottom: "8px",
-                  marginBottom: "8px",
-                }}
-              >
+              <div key={item.grapeseed_id} className="detail-row" style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: "8px", marginBottom: "8px" }}>
                 <div style={{ flexGrow: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{item.name}</div>
-                  <div style={{ fontSize: "11px", color: "#666" }}>
-                    {item.email}
+                  <div style={{ fontWeight: 600 }}>
+                    {item.name} {item.is_handshake && <span style={{fontSize:'10px', color:'#2563eb', marginLeft: '6px'}}>🔗 Match Found</span>}
                   </div>
+                  <div style={{ fontSize: "11px", color: "#666" }}>{item.email}</div>
                 </div>
                 <button
                   className="obs-pill-button"
                   style={{ color: "#8b5cf6", borderColor: "#8b5cf6" }}
                   onClick={() => onResolve("newTeacher", item)}
                 >
-                  Import
+                  {item.is_handshake ? "Link Record" : "Import"}
                 </button>
               </div>
             )
           )}
 
-          {/* Section 4: Teacher Tag Issues (Phase E logic) */}
+          {/* Section 4: Teacher Tag Issues (Comparison Mode) */}
           {renderSection(
             "teacherTagIssues",
-            "Missing GrapeSEED Tags",
+            "Teacher Tag Mismatches",
             results.teacherTagIssues,
             "🏷️",
             "#ec4899",
             (item) => (
-              <div
-                key={item.id}
-                className="detail-row"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  borderBottom: "1px solid #eee",
-                  paddingBottom: "8px",
-                  marginBottom: "8px",
-                }}
-              >
-                <div style={{ flexGrow: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{item.name}</div>
-                  <div style={{ fontSize: "11px", color: "#ec4899" }}>
-                    Needs "Teacher" tag in GS Portal
-                  </div>
-                </div>
-                <button
-                  className="obs-pill-button"
-                  style={{ color: "#ec4899", borderColor: "#ec4899" }}
-                  onClick={() =>
-                    window.open(
-                      "https://portal.grapeseed.com/admin/users",
-                      "_blank"
-                    )
-                  }
-                >
-                  Fix in Portal
-                </button>
-              </div>
-            )
+  <div key={item.id} className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "8px" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div>
+        <div style={{ fontWeight: 600 }}>{item.name}</div>
+        <div style={{ fontSize: "11px", color: "#666" }}>{item.school_name}</div>
+      </div>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button
+          className="obs-pill-button"
+          style={{ color: "#666", borderColor: "#ccc" }}
+          onClick={() => window.open("https://portal.grapeseed.com/admin/users", "_blank")}
+        >
+          Portal ⧉
+        </button>
+        <button
+          className="obs-pill-button"
+          style={{ color: "#ec4899", borderColor: "#ec4899" }}
+          onClick={() => onResolve("teacherTagIssue", item)}
+        >
+          Sync & Clear
+        </button>
+      </div>
+    </div>
+    {/* Comparison Badges... */}
+  </div>
+)
           )}
+
 
           {renderSection(
             "classlessClasses",
@@ -3804,6 +3902,7 @@ export const ActionDashboardModal: React.FC<{
               </div>
             )
           )}
+
           {/* Info Footer */}
           <div
             style={{

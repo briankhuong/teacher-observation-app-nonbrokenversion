@@ -411,11 +411,19 @@ router.post("/api/pulse-audit", async (req, res) => {
     disabledCampuses: [],
     classlessClasses: [],
     nameMismatches: [],
-    disconnectedCampuses: [] // ✅ ADDED
+    disconnectedCampuses: [],
+    newTeachers: [],       // 🟢 NEW: Container for discovered teachers
+    teacherTagIssues: []   // 🟢 NEW: Container for tag mismatches
   };
 
   try {
     const token = await getMasterToken();
+    const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5"; // 🟢 ADDED: Constant for Tag Check
+
+    // 🟢 ADDED: Trainer Identity (Needed for Tag Logic)
+    const { data: { user: trainerUser }, error: userErr } = await supabase.auth.admin.getUserById(userId);
+    if (userErr || !trainerUser) throw new Error("Trainer not found");
+    const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0];
 
     const { data: dbSchools, error: schoolsErr } = await supabase
       .from("schools")
@@ -451,7 +459,6 @@ router.post("/api/pulse-audit", async (req, res) => {
         const matchedDbIds = new Set();
 
         // --- PHASE 1: EXACT MATCHES (ID or Name) ---
-// --- PHASE 1: EXACT MATCHES (ID or Name) ---
         apiCampuses.forEach(apiC => {
           // A. Try ID Match
           const idMatch = myLocalSchools.find(dbS => dbS.campus_id === apiC.id);
@@ -485,7 +492,7 @@ router.post("/api/pulse-audit", async (req, res) => {
                     db_record: nameMatch, 
                     api_name: apiC.name, 
                     needs_id: apiC.id,
-                    mismatch_type: 'id_mismatch' // 👈 Add this flag
+                    mismatch_type: 'id_mismatch'
                 });
 
               if (apiC.disabled) {
@@ -518,57 +525,49 @@ router.post("/api/pulse-audit", async (req, res) => {
 
         // --- PHASE 3: FINAL CATEGORIZATION ---
         // [A] Truly New Campuses
-                apiCampuses.forEach(apiC => {
-                    const isSuggestedAsLink = auditResults.disconnectedCampuses.some(d => d.suggestions.some(s => s.id === apiC.id));
-                    if (!matchedApiIds.has(apiC.id) && !apiC.disabled && !isSuggestedAsLink) {
-                        auditResults.newCampuses.push({
-                            ...apiC,
-                            official_code: code,
-                            parent_school_name: myLocalSchools[0]?.school_name || "Unknown School"
-                        });
-                    }
+        apiCampuses.forEach(apiC => {
+            const isSuggestedAsLink = auditResults.disconnectedCampuses.some(d => d.suggestions.some(s => s.id === apiC.id));
+            if (!matchedApiIds.has(apiC.id) && !apiC.disabled && !isSuggestedAsLink) {
+                auditResults.newCampuses.push({
+                    ...apiC,
+                    official_code: code,
+                    parent_school_name: myLocalSchools[0]?.school_name || "Unknown School"
                 });
-        // [B] THE SCOPED SAFETY NET (Fixes Test 4 & The Global Leak)
-                // Only run this if we successfully fetched campuses for THIS specific code.
-                if (Array.isArray(apiCampuses)) {
-                    myLocalSchools.forEach(dbS => {
-                        // Check if this specific DB record was "Claimed" by Phase 1, 2, or 3
-                        const isAccountedFor = 
-                            matchedDbIds.has(dbS.id) || 
-                            auditResults.disconnectedCampuses.some(d => d.db_record.id === dbS.id) ||
-                            auditResults.nameMismatches.some(m => m.db_record.id === dbS.id);
+            }
+        });
+        // [B] THE SCOPED SAFETY NET
+        if (Array.isArray(apiCampuses)) {
+            myLocalSchools.forEach(dbS => {
+                const isAccountedFor = 
+                    matchedDbIds.has(dbS.id) || 
+                    auditResults.disconnectedCampuses.some(d => d.db_record.id === dbS.id) ||
+                    auditResults.nameMismatches.some(m => m.db_record.id === dbS.id);
 
-                        // If NOT accounted for, and we KNOW the API for this school code is active:
-                        if (!isAccountedFor) {
-                            auditResults.disabledCampuses.push(dbS);
-                        }
-                    });
+                if (!isAccountedFor) {
+                    auditResults.disabledCampuses.push(dbS);
                 }
+            });
+        }
 
-// --- PHASE 4: CLASSLESS AUDIT (Only for Synced IDs) ---
-        // We let ALL records with a campus_id through because the loop below is now bulletproof.
-        // This ensures "Ghost" records are audited without crashing the server.
+        // --- PHASE 4: TEACHER & CLASS AUDIT (Scoped to Campus) ---
+        // 🟢 INJECTED LOGIC STARTS HERE
         const syncedLocalIds = myLocalSchools.filter(s => s.campus_id);
 
-        await Promise.all(syncedLocalIds.map(async (schoolRow) => {
+        await pMap(syncedLocalIds, async (schoolRow) => {
           try {
             const classResp = await fetch(
               `https://services.grapeseed.com/admin/v1/schools/${code}/classes?campusId=${schoolRow.campus_id}&offset=0&limit=100&disabled=false`, 
               { headers: getHeaders(token) }
             );
             
-            // If the API returns a 404 or 401 for a Ghost ID, we skip gracefully
             if (!classResp.ok) return; 
 
             const classData = await classResp.json();
-
-            // 🛡️ THE BULLETPROOF FIX: 
-            // Normalize the response. If the API returns an error object, fallback to [].
             const apiClasses = Array.isArray(classData.schoolClasses) 
               ? classData.schoolClasses 
               : (Array.isArray(classData) ? classData : []);
 
-            // Loop through the array safely
+            // [A] CHECK FOR CLASSLESS CLASSES (Existing Logic)
             apiClasses.forEach(cls => {
               if (cls && !cls.teacherId) {
                 auditResults.classlessClasses.push({
@@ -580,11 +579,134 @@ router.post("/api/pulse-audit", async (req, res) => {
                 });
               }
             });
+
+            // [B] PREPARE TEACHER LISTS (Discovery Logic)
+            const apiActiveIds = new Set();
+            apiClasses.forEach(c => {
+                if (c.teacherId) apiActiveIds.add(c.teacherId.toLowerCase());
+                if (c.substituteTeacherIds) c.substituteTeacherIds.forEach(id => apiActiveIds.add(id.toLowerCase()));
+            });
+
+            // Fetch DB Teachers (SCHOOL scope for Handshake, CAMPUS scope for Diffing)
+            const { data: allSchoolTeachers } = await supabase
+                .from("teachers")
+                .select("*")
+                .eq("school_id", schoolRow.id);
+
+            // Filter for THIS specific campus loop
+            const currentCampusTeachers = (allSchoolTeachers || []).filter(t => t.campus_id === schoolRow.campus_id);
+            const dbCampusIds = new Set(currentCampusTeachers.map(t => (t.grapeseed_id || "").toLowerCase()));
+
+            // [C] IDENTIFY NEW TEACHERS
+            // Logic: Present in API (Campus X) but missing in DB (Campus X)
+            const missingIds = [...apiActiveIds].filter(id => id && !dbCampusIds.has(id));
+
+            if (missingIds.length > 0) {
+                // Enrich data to get Name/Email
+                const profiles = await pMap(missingIds, async (id) => {
+                    const r = await fetch(`https://services.grapeseed.com/account/v1/users?ids=${id}`, { headers: getHeaders(token) });
+                    const d = await r.json();
+                    return Array.isArray(d) ? d[0] : d;
+                }, { concurrency: 5 });
+
+                profiles.forEach((profile, idx) => {
+                    if (!profile) return;
+                    const apiEmail = (profile.email || "").toLowerCase().trim();
+                    const gseedId = missingIds[idx];
+
+                    // HANDSHAKE LOGIC: Check SCHOOL level for email match + NULL ID
+                    const isHandshake = (allSchoolTeachers || []).some(t => 
+                        (t.email || "").toLowerCase().trim() === apiEmail && 
+                        !t.grapeseed_id
+                    );
+
+                    auditResults.newTeachers.push({
+                        name: profile.name,
+                        email: profile.email,
+                        grapeseed_id: gseedId,
+                        school_id: schoolRow.id,
+                        campus_id: schoolRow.campus_id,
+                        parent_school_name: schoolRow.school_name,
+                        is_handshake: isHandshake // UI will show "🔗 Match Found"
+                    });
+                });
+            }
+
+            // [D] AUDIT TAGS (Active & Inactive)
+            
+            // 1. Check Active Teachers for Bad Tags
+            const activeDbTeachers = currentCampusTeachers.filter(t => apiActiveIds.has((t.grapeseed_id || "").toLowerCase()));
+            
+            await pMap(activeDbTeachers, async (t) => {
+                const gseedId = t.grapeseed_id;
+                // Fetch Live Tags
+                const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+                let rawTagObjects = [];
+                if (tagResp.ok) {
+                    const tData = await tagResp.json();
+                    if (tData.tags) rawTagObjects = tData.tags; 
+                    else if (tData.entityTags) rawTagObjects = tData.entityTags; 
+                    else if (Array.isArray(tData)) {
+                         if (tData[0] && (tData[0].tags || tData[0].entityTags)) rawTagObjects = tData[0].tags || tData[0].entityTags;
+                         else rawTagObjects = tData;
+                    }
+                }
+
+                // Calculate Ideal Tags (Remove Numbers, Remove My Name)
+                const rawNames = rawTagObjects
+                    .map(tag => (tag.name || "").trim())
+                    .filter(name => isNaN(Number(name))) 
+                    .map(name => clean(name).split(" ")[0]); 
+
+                const hasMe = rawNames.some(n => n === myName);
+                const others = [...new Set(rawNames.filter(n => n !== myName))];
+
+                let expectedTags = [];
+                if (others.length > 0) expectedTags = others;
+                else if (hasMe) expectedTags = []; // Clean "No tag" logic
+                else expectedTags = ["No tag"];
+
+                // Compare Sets
+                const currentTags = Array.isArray(t.tags) ? t.tags : [];
+                const isDiff = JSON.stringify(expectedTags.sort()) !== JSON.stringify(currentTags.sort());
+
+                if (isDiff) {
+                    auditResults.teacherTagIssues.push({
+                        id: t.id,
+                        gseed_id: t.grapeseed_id,
+                        name: t.name,
+                        school_name: schoolRow.school_name,
+                        school_id: schoolRow.id,
+                        issue: "Incorrect Tags",
+                        expected: expectedTags
+                    });
+                }
+            }, { concurrency: 5 });
+
+            // 2. Check Inactive Teachers (Should have "Inactive")
+            const inactiveDbTeachers = currentCampusTeachers.filter(t => !apiActiveIds.has((t.grapeseed_id || "").toLowerCase()));
+            inactiveDbTeachers.forEach(t => {
+                const currentTags = Array.isArray(t.tags) ? t.tags : [];
+                const hasInactive = currentTags.some(tag => tag.toLowerCase() === "inactive");
+                
+                if (!hasInactive) {
+                    auditResults.teacherTagIssues.push({
+                        id: t.id,
+                        gseed_id: t.grapeseed_id,
+                        name: t.name,
+                        school_name: schoolRow.school_name,
+                        school_id: schoolRow.id,
+                        issue: "Missing 'Inactive' Tag",
+                        expected: [...currentTags, "Inactive"]
+                    });
+                }
+            });
+
           } catch (fetchErr) {
-            // Silently log network errors to keep the process running
-            console.error(`Class audit failed for campus ${schoolRow.campus_id}:`, fetchErr.message);
+            console.error(`Class/Teacher audit failed for campus ${schoolRow.campus_id}:`, fetchErr.message);
           }
-        }));
+        }, { concurrency: 10 });
+        // 🟢 INJECTED LOGIC ENDS HERE
 
       } catch (err) {
         console.error(`Audit failed for code ${code}:`, err);
