@@ -636,7 +636,7 @@ const handleResolveConflict = async (type: string, data: any) => {
         // ✅ SOURCE: MAPPED FROM API
         address: data.fullAddress || null,
         admin_phone: data.phone || null
-      });
+      }).select('id');
 
       if (error) throw error;
       alert(`✨ Successfully added ${data.name} to ${data.parent_school_name}`);
@@ -652,7 +652,7 @@ else if (type === 'nameMismatch') {
 
   const { error } = await supabase.from("schools")
     .update(updatePayload)
-    .eq("id", data.db_record.id);
+    .eq("id", data.db_record.id).select('id');
 
   if (error) throw error;
   
@@ -1187,7 +1187,7 @@ async function getMergedDashboardData(userId: string) {
         admin_summary_vn: localData.adminSummaryVN,
       };
 
-      const { error } = await supabase.from("observations").upsert(payload);
+      const { error } = await supabase.from("observations").upsert(payload).select('id');
       
       if (error) {
         console.error("Supabase Error Details:", error);
@@ -1265,7 +1265,7 @@ const handleConflictResolved = async (mergedData: any) => {
       // 2. Fetch FULL data from Supabase
       const { data, error } = await supabase
         .from("observations")
-        .select("*") // Get everything (indicators, meta, etc)
+        .select("id, status, meta, indicators, updated_at, observation_date, admin_summary_vn")
         .eq("id", obsId)
         .single();
 
@@ -2398,7 +2398,8 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       const { error } = await supabase
         .from("observations") 
         .delete()
-        .eq("id", obs.id);
+        .eq("id", obs.id)
+        .select('id');
 
       if (error) throw error;
 
