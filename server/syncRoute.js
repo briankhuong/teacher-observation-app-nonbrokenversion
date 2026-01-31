@@ -60,7 +60,7 @@ router.post("/api/sync-teachers", async (req, res) => {
     /* 2. GET ALL ACTIVE SCHOOLS */
     const { data: dbSchools, error: schoolsErr } = await supabase
       .from("schools")
-      .select("*")
+      .select("id, school_name, campus_name, official_code, campus_id")
       .eq("trainer_id", userId)
       .eq("disabled", false);
 
@@ -86,7 +86,7 @@ router.post("/api/sync-teachers", async (req, res) => {
             /* ------------------------------------------------------ */
             const [apiCResp, { data: schoolTeachers }] = await Promise.all([
                 fetch(`https://services.grapeseed.com/admin/v1/schools/${targetOfficialCode}/campuses/accessiblecampuses`, { headers: getHeaders(token) }),
-                supabase.from("teachers").select("*").eq("trainer_id", userId).eq("school_id", schoolRow.id)
+                supabase.from("teachers").select("id, email, campus_id, grapeseed_id").eq("trainer_id", userId).eq("school_id", schoolRow.id)
             ]);
 
             if (!apiCResp.ok) {
@@ -104,7 +104,7 @@ router.post("/api/sync-teachers", async (req, res) => {
             }
 
             if (targetCampusId !== targetApiCamp.id) {
-                supabase.from("schools").update({ campus_id: targetApiCamp.id }).eq("id", schoolRow.id).then();
+                supabase.from("schools").update({ campus_id: targetApiCamp.id }).eq("id", schoolRow.id).select('id').then();
                 targetCampusId = targetApiCamp.id; 
             }
 
@@ -114,7 +114,7 @@ router.post("/api/sync-teachers", async (req, res) => {
             const moveQueue = schoolTeachers.filter(t => t.campus_id !== targetCampusId);
             if (moveQueue.length > 0) {
                 const idsToMove = moveQueue.map(t => t.id);
-                await supabase.from("teachers").update({ campus_id: targetCampusId }).in("id", idsToMove);
+                await supabase.from("teachers").update({ campus_id: targetCampusId }).in("id", idsToMove).select('id');
             }
 
             /* ------------------------------------------------------ */
@@ -141,7 +141,7 @@ router.post("/api/sync-teachers", async (req, res) => {
             });
 
             // Re-fetch Snapshot (Scoped)
-            const { data: updatedSnapshot } = await supabase.from("teachers").select("*").eq("trainer_id", userId).eq("school_id", schoolRow.id);
+            const { data: updatedSnapshot } = await supabase.from("teachers").select("id, grapeseed_id, email, tags, campus_id").eq("trainer_id", userId).eq("school_id", schoolRow.id);
             const currentSandboxTeachers = updatedSnapshot.filter(t => t.campus_id === targetCampusId);
 
             const updatesToSave = [];
@@ -303,8 +303,8 @@ router.post("/api/sync-teachers", async (req, res) => {
             /* PHASE 4: COMMIT (PER SCHOOL)                           */
             /* ------------------------------------------------------ */
             await Promise.all([
-                updatesToSave.length > 0 ? supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' }) : Promise.resolve(),
-                insertsToSave.length > 0 ? supabase.from("teachers").insert(insertsToSave) : Promise.resolve()
+                updatesToSave.length > 0 ? supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' }).select('id') : Promise.resolve(),
+                insertsToSave.length > 0 ? supabase.from("teachers").insert(insertsToSave).select('id') : Promise.resolve()
             ]);
 
         } catch (schoolErr) {
@@ -427,7 +427,7 @@ router.post("/api/pulse-audit", async (req, res) => {
 
     const { data: dbSchools, error: schoolsErr } = await supabase
       .from("schools")
-      .select("*")
+      .select("id, official_code, school_name, campus_name, campus_id")
       .eq("trainer_id", userId)
       .eq("disabled", false);
 
@@ -591,7 +591,7 @@ router.post("/api/pulse-audit", async (req, res) => {
             // Fetch DB Teachers (SCHOOL scope for Handshake, CAMPUS scope for Diffing)
             const { data: allSchoolTeachers } = await supabase
                 .from("teachers")
-                .select("*")
+               .select("id, email, grapeseed_id, tags, campus_id, campus, school_id, name")
                 .eq("school_id", schoolRow.id);
 
             // Filter for THIS specific campus loop
@@ -848,7 +848,7 @@ router.post("/api/sync-surgical", async (req, res) => {
 
     if (handshakeCandidate) {
         console.log(`[Surgical] 🔗 Linking placeholder ${handshakeCandidate.id} to ${profile.name}`);
-        await supabase.from("teachers").update(payload).eq("id", handshakeCandidate.id);
+        await supabase.from("teachers").update(payload).eq("id", handshakeCandidate.id).select('id');
         return res.json({ success: true, action: "linked" });
     }
 
@@ -864,13 +864,13 @@ router.post("/api/sync-surgical", async (req, res) => {
     if (existingInCampus) {
         console.log(`[Surgical] 🔄 Performing Full Repair for ${profile.name}`);
         // 🟢 FIX: Update ALL fields (Payload), not just tags, to fix missing school_id
-        await supabase.from("teachers").update(payload).eq("id", existingInCampus.id);
+        await supabase.from("teachers").update(payload).eq("id", existingInCampus.id).select('id');
         return res.json({ success: true, action: "repaired" });
     }
 
     // [C] INSERT NEW RECORD
     console.log(`[Surgical] ✨ Inserting new record for ${profile.name}`);
-    await supabase.from("teachers").insert({ ...payload, created_at: new Date() });
+    await supabase.from("teachers").insert({ ...payload, created_at: new Date() }).select('id');
 
     res.json({ success: true, action: "inserted" });
 
