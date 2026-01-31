@@ -22,6 +22,7 @@ import { get, set, keys, del } from 'idb-keyval';
 import { SyncStatusBadge } from './components/SyncStatusBadge';
 import { ConflictResolutionModal } from "./components/ConflictResolutionModal";
 import { loadObservationFromDb, saveObservationToDb } from "./db/observations";
+import { Bell, Activity, RefreshCw } from "lucide-react";
 
 // ✅ CORRECT (Matches your screenshots & Vercel settings)
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
@@ -580,17 +581,31 @@ const [syncPulseResults, setSyncPulseResults] = useState<{
   disabledCampuses: any[];
   classlessClasses: any[];
   nameMismatches: any[];
-  newTeachers: any[];       // 🆕 Discovery results
-  teacherTagIssues: any[];  // 🆕 Tag issues
+  newTeachers: any[];
+  teacherTagIssues: any[];
   disconnectedCampuses: any[];
-}>({
-  newCampuses: [],
-  disabledCampuses: [],
-  classlessClasses: [],
-  nameMismatches: [],
-  newTeachers: [],
-  teacherTagIssues: [],
-  disconnectedCampuses: []
+}>(() => {
+  // 🟢 PERSISTENT INITIALIZER
+  // This runs exactly once when the component first loads
+  const cached = localStorage.getItem("syncPulseResults");
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      console.error("Failed to parse cached sync pulse results:", e);
+    }
+  }
+
+  // Fallback to empty arrays if no cache exists
+  return {
+    newCampuses: [],
+    disabledCampuses: [],
+    classlessClasses: [],
+    nameMismatches: [],
+    newTeachers: [],
+    teacherTagIssues: [],
+    disconnectedCampuses: []
+  };
 });
 
 
@@ -843,11 +858,11 @@ const runSyncPulse = async () => {
 
     // 3. Get the results (newCampuses, nameMismatches, etc.)
     const auditData = await response.json();
-    console.log("✅ Pulse Results:", auditData);
-
     // 4. Load the gun (State) and pull the trigger (Modal)
     setSyncPulseResults(auditData);
     setIsActionDashboardOpen(true);
+    // 🟢 NEW: Manual trigger also updates the cache
+  localStorage.setItem("syncPulseResults", JSON.stringify(auditData));
 
   } catch (err) {
     console.error("Pulse Check Failed:", err);
@@ -855,17 +870,26 @@ const runSyncPulse = async () => {
   }
 };
 
-// --- DashboardShell.tsx (Approx Line 720) ---
 
 const handleCheckPulseSilent = useCallback(async () => {
-  // 🛑 THE GATE: 
-  // 1. Don't run if offline or no user
-  // 2. Don't run if it already ran in the last 60 minutes (3600000 ms)
-  const isFresh = lastPulseTime && (Date.now() - lastPulseTime < 3600000);
-  if (!user?.id || !navigator.onLine || isFresh || isPulseLoading) return;
+  const storedPulse = localStorage.getItem("lastPulseTime");
+  const lastPulseTs = storedPulse ? parseInt(storedPulse) : 0;
+  const timeSinceLastPulse = Date.now() - lastPulseTs;
+  const pulseInterval = 3600000; // 60 minutes
+  
+  const isFresh = timeSinceLastPulse < pulseInterval;
+
+  if (!user?.id || !navigator.onLine || isFresh || isPulseLoading) {
+    if (isFresh && !isPulseLoading) {
+        // 🟢 DEBUG LOG: Tells you exactly why it's NOT running
+        const minsRemaining = Math.ceil((pulseInterval - timeSinceLastPulse) / 60000);
+        console.log(`🕵️ Watchman: Audit is fresh. Next background check in ~${minsRemaining} mins. Skipping fetch.`);
+    }
+    return;
+  }
 
   setIsPulseLoading(true);
-  console.log("🕵️ Background Watchman: Starting scheduled audit...");
+  console.log("🕵️ Background Watchman: Persistent gate open. Starting scheduled audit...");
 
   try {
     const response = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
@@ -876,18 +900,23 @@ const handleCheckPulseSilent = useCallback(async () => {
     
     if (response.ok) {
       const data = await response.json();
+      const now = Date.now();
+
       setSyncPulseResults(data);
-      setLastPulseTime(Date.now()); // 🔒 Lock the gate
-      console.log("🕵️ Background Watchman: Audit complete. Results cached.");
+      setLastPulseTime(now); 
+
+    // 🟢 NEW: Save BOTH the time and the results
+      localStorage.setItem("lastPulseTime", now.toString()); 
+      localStorage.setItem("syncPulseResults", JSON.stringify(data));
+      
+      console.log("🕵️ Background Watchman: Audit complete. Persistence locked for 60 mins.");
     }
   } catch (err) {
-    // We stay silent on background errors to avoid annoying the user
     console.warn("Silent Pulse failed:", err);
   } finally {
     setIsPulseLoading(false);
   }
-}, [user?.id, lastPulseTime, isPulseLoading]);
-
+}, [user?.id, isPulseLoading]);
 // The Auto-Trigger
 React.useEffect(() => {
   handleCheckPulseSilent();
@@ -2983,50 +3012,49 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
               </button>
             </div>
             {/* --- Bell Icon with Red Dot next to Online Badge --- */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setIsActionDashboardOpen(true)}>
-                <span style={{ fontSize: '20px' }}>🔔</span>
-                
-                {/* Logic for the Red Dot: Show if ANY array has items */}
-                {(syncPulseResults.newCampuses.length > 0 || 
-                  syncPulseResults.disabledCampuses.length > 0 || 
-                  syncPulseResults.newTeachers.length > 0 || 
-                  syncPulseResults.nameMismatches.length > 0 ||
-                  syncPulseResults.disconnectedCampuses.length > 0 ||
-                  syncPulseResults.teacherTagIssues.length > 0) && (
-                  <span style={{
-                    position: 'absolute',
-                    top: '-2px',
-                    right: '-2px',
-                    height: '10px',
-                    width: '10px',
-                    backgroundColor: '#dc2626', // Red
-                    borderRadius: '50%',
-                    border: '2px solid white'
-                  }} />
-                )}
-              </div>
-            </div>
+                {/* 🔔 LUCIDE NOTIFICATION BELL */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginLeft: '8px' }}>
+                  <div 
+                    style={{ position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center' }} 
+                    onClick={() => setIsActionDashboardOpen(true)}
+                  >
+                    <Bell size={20} color={Object.values(syncPulseResults).some(arr => arr.length > 0) ? "#dc2626" : "#64748b"} />
+                    
+                    {/* Red Dot Logic */}
+                    {Object.values(syncPulseResults).some(arr => arr.length > 0) && (
+                      <span style={{
+                        position: 'absolute',
+                        top: '-2px',
+                        right: '-2px',
+                        height: '8px',
+                        width: '8px',
+                        backgroundColor: '#dc2626',
+                        borderRadius: '50%',
+                        border: '1px solid white'
+                      }} />
+                    )}
+                  </div>
+                </div>
 
-           {/* ✅ NEW: Pulse Sync Trigger */}
-              <div className="toolbar-group">
+              {/* ⚡️ MINIMALIST PULSE TRIGGER */}
+              <div className="toolbar-group" style={{ marginLeft: '4px' }}>
                 <button
                   type="button"
-                  className="btn"
+                  title="Force Sync Pulse"
                   style={{ 
-                    backgroundColor: '#0d9488', 
-                    color: 'white',
+                    background: 'none',
                     border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px'
+                    color: '#0d9488'
                   }}
                   onClick={runSyncPulse}
                 >
-                  <span>✨</span>
-                  Check Sync Pulse
+                  <Activity size={20} />
                 </button>
-              </div> 
+              </div>
           </div>
         </div>
 
