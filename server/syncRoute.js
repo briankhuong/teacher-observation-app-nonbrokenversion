@@ -610,16 +610,27 @@ router.post("/api/pulse-audit", async (req, res) => {
                     return Array.isArray(d) ? d[0] : d;
                 }, { concurrency: 5 });
 
-                profiles.forEach((profile, idx) => {
+                    profiles.forEach((profile, idx) => {
                     if (!profile) return;
                     const apiEmail = (profile.email || "").toLowerCase().trim();
                     const gseedId = missingIds[idx];
 
-                    // HANDSHAKE LOGIC: Check SCHOOL level for email match + NULL ID
+                    // 1. Check for Handshake (Email match, no ID)
                     const isHandshake = (allSchoolTeachers || []).some(t => 
-                        (t.email || "").toLowerCase().trim() === apiEmail && 
-                        !t.grapeseed_id
+                        (t.email || "").toLowerCase().trim() === apiEmail && !t.grapeseed_id
                     );
+
+                    // 2. Check for "Ghost Campus" (Teacher exists in DB school, but different campus_id)
+                    const existsInDifferentCampus = (allSchoolTeachers || []).find(t => 
+                        (t.grapeseed_id || "").toLowerCase() === gseedId.toLowerCase()
+                    );
+
+                    // 🟢 Determine Reason
+                    let reason = "Truly New (Not in DB)";
+                    if (isHandshake) reason = "Handshake: Link Manual Record";
+                    else if (existsInDifferentCampus) {
+                        reason = `Mismatched: Found in campus "${existsInDifferentCampus.campus || 'Unknown'}"`;
+                    }
 
                     auditResults.newTeachers.push({
                         name: profile.name,
@@ -628,66 +639,82 @@ router.post("/api/pulse-audit", async (req, res) => {
                         school_id: schoolRow.id,
                         campus_id: schoolRow.campus_id,
                         parent_school_name: schoolRow.school_name,
-                        is_handshake: isHandshake // UI will show "🔗 Match Found"
+                        campus_name: schoolRow.campus_name, // 🟢 Official target campus name
+                        is_handshake: isHandshake,
+                        reason: reason // 🟢 Pass reason to UI
                     });
                 });
             }
 
             // [D] AUDIT TAGS (Active & Inactive)
-            
             // 1. Check Active Teachers for Bad Tags
-          // 1. Check Active Teachers for Bad Tags
             const activeDbTeachers = currentCampusTeachers.filter(t => apiActiveIds.has((t.grapeseed_id || "").toLowerCase()));
             
             await pMap(activeDbTeachers, async (t) => {
-                const gseedId = t.grapeseed_id;
-                // Fetch Live Tags
-                const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
-                let rawTagObjects = [];
-                if (tagResp.ok) {
+                try {
+                    const gseedId = t.grapeseed_id;
+                    const tagUrl = `https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`;
+                    
+                    const tagResp = await fetch(tagUrl, { 
+                        headers: getHeaders(token, VIETNAM_REGION_ID),
+                        signal: AbortSignal.timeout(5000) 
+                    }).catch(err => { throw new Error(`Network Error: ${err.message}`); });
+
+                    if (!tagResp.ok) throw new Error(`API Error: ${tagResp.status}`);
+
                     const tData = await tagResp.json();
+                    let rawTagObjects = [];
                     if (tData.tags) rawTagObjects = tData.tags; 
                     else if (tData.entityTags) rawTagObjects = tData.entityTags; 
                     else if (Array.isArray(tData)) {
                          if (tData[0] && (tData[0].tags || tData[0].entityTags)) rawTagObjects = tData[0].tags || tData[0].entityTags;
                          else rawTagObjects = tData;
                     }
-                }
 
-                // 🟢 1. CALCULATE DISPLAY TAGS (Show the Truth: "Quinn", "OtherTrainer")
-                const displayTags = rawTagObjects
-                    .map(tag => (tag.name || "").trim())
-                    .filter(name => isNaN(Number(name))) 
-                    .map(name => clean(name).split(" ")[0]); 
+                    // 🟢 1. CALCULATE DISPLAY TAGS (Match sync-teacher logic)
+                    const displayTags = rawTagObjects
+                        .map(tag => (tag.name || "").trim())
+                        .filter(name => isNaN(Number(name))) 
+                        .map(name => clean(name).split(" ")[0]); 
 
-                if (displayTags.length === 0) displayTags.push("No tag");
+                    // 🟢 2. CALCULATE DB LOGIC (The "Sync-Teacher" Cleaning Rule)
+                    const hasMe = displayTags.some(n => n === myName);
+                    const others = [...new Set(displayTags.filter(n => n !== myName))];
 
-                // 🟢 2. CALCULATE DB LOGIC (The Cleaning Rule)
-                const hasMe = displayTags.some(n => n === myName);
-                const others = [...new Set(displayTags.filter(n => n !== myName && n !== "no tag"))];
+                    let targetDbTags = [];
+                    if (others.length > 0) targetDbTags = others;
+                    else if (hasMe) targetDbTags = []; 
+                    else targetDbTags = ["No tag"];
 
-                let targetDbTags = [];
-                if (others.length > 0) targetDbTags = others;    // Case: Tagged by others -> ["Other"]
-                else if (hasMe) targetDbTags = [];               // Case: Tagged by only me -> []
-                else targetDbTags = ["No tag"];                  // Case: No tags at all -> ["No tag"]
+                    // 🟢 3. COMPARE & PUSH
+                    const currentTags = Array.isArray(t.tags) ? t.tags : [];
+                    const isDiff = JSON.stringify([...targetDbTags].sort()) !== JSON.stringify([...currentTags].sort());
 
-                // 🟢 3. COMPARE DB vs TARGET
-                const currentTags = Array.isArray(t.tags) ? t.tags : [];
-                
-                // Sort both to ensure order doesn't cause false mismatch
-                const isDiff = JSON.stringify(targetDbTags.sort()) !== JSON.stringify(currentTags.sort());
+                    if (isDiff) {
+                        auditResults.teacherTagIssues.push({
+                            id: t.id,
+                            gseed_id: t.grapeseed_id,
+                            name: t.name,
+                            school_name: schoolRow.school_name,
+                            official_code: code,
+                            school_id: schoolRow.id,
+                            issue: "Incorrect Tags",
+                            expected: displayTags.length > 0 ? displayTags : ["No tag"], // What shows in Portal
+                            current_tags: currentTags, // What shows in DB
+                            is_error: false
+                        });
+                    }
 
-                if (isDiff) {
+                } catch (tagErr) {
+                    console.error(`[Audit Failure] Teacher: ${t.name} | Error: ${tagErr.message}`);
                     auditResults.teacherTagIssues.push({
                         id: t.id,
-                        gseed_id: t.grapeseed_id,
                         name: t.name,
                         school_name: schoolRow.school_name,
-                        official_code: code,
-                        school_id: schoolRow.id,
-                        issue: "Incorrect Tags",
-                        expected: displayTags,  // 🟢 UI sees the Real API tags (e.g. "Quinn")
-                        current_tags: currentTags 
+                        issue: "🚨 Audit Failed",
+                        expected: [`Error: ${tagErr.message}`],
+                        current_tags: t.tags || [],
+                        is_error: true
                     });
                 }
             }, { concurrency: 5 });

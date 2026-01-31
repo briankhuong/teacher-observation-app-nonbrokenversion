@@ -3707,6 +3707,7 @@ export const ActionDashboardModal: React.FC<{
               </div>
             )
           )}
+
           {renderSection(
             "newTeachers",
             "New Teachers Found",
@@ -3714,26 +3715,31 @@ export const ActionDashboardModal: React.FC<{
             "👤",
             "#8b5cf6",
             (item) => (
-              <div key={item.grapeseed_id} className="detail-row" style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: "8px", marginBottom: "8px" }}>
+              <div key={item.grapeseed_id} className="detail-row" style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "12px" }}>
                 <div style={{ flexGrow: 1 }}>
-                  <div style={{ fontWeight: 600 }}>
-                    {item.name} {item.is_handshake && <span style={{fontSize:'10px', color:'#2563eb', marginLeft: '6px', background:'#eff6ff', padding:'1px 4px', borderRadius:'4px'}}>🔗 Linked by Email</span>}
+                  <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {item.name} 
+                    {item.is_handshake && <span style={{fontSize:'9px', color:'#2563eb', background:'#eff6ff', padding:'2px 6px', borderRadius:'10px', border:'1px solid #dbeafe'}}>LINK READY</span>}
                   </div>
                   <div style={{ fontSize: "11px", color: "#666" }}>{item.email}</div>
                   
-                  {/* 🟢 ADDED: DESTINATION SCHOOL INFO */}
-                  <div style={{ fontSize: "10px", color: "#8b5cf6", marginTop: "2px", fontWeight: 500 }}>
-                    📍 {item.parent_school_name || "Unknown School"} 
-                    {item.campus_name ? ` — ${item.campus_name}` : ""}
+                  {/* 🟢 THE REASON TAG */}
+                  <div style={{ fontSize: "10px", color: "#6d28d9", background: "#f5f3ff", padding: "2px 6px", borderRadius: "4px", display: "inline-block", marginTop: "4px", border: "1px solid #ddd6fe" }}>
+                    <strong>Reason:</strong> {item.reason}
+                  </div>
+
+                  {/* 🟢 TARGET DESTINATION */}
+                  <div style={{ fontSize: "10px", color: "#475569", marginTop: "4px" }}>
+                    📍 Destination: <strong>{item.parent_school_name}</strong> {item.campus_name ? `(${item.campus_name})` : ""}
                   </div>
                 </div>
                 
                 <button
                   className="obs-pill-button"
-                  style={{ color: "#8b5cf6", borderColor: "#8b5cf6" }}
+                  style={{ color: "#8b5cf6", borderColor: "#8b5cf6", fontWeight: "600" }}
                   onClick={() => onResolve("newTeacher", item)}
                 >
-                  {item.is_handshake ? "Link Record" : "Import"}
+                  {item.is_handshake ? "Link Now" : "Import"}
                 </button>
               </div>
             )
@@ -3741,7 +3747,7 @@ export const ActionDashboardModal: React.FC<{
 
 
           {/* Section 4: Teacher Tag Issues (Comparison Mode) */}
-            {renderSection(
+          {renderSection(
             "teacherTagIssues",
             "Teacher Tag Mismatches",
             results.teacherTagIssues,
@@ -3751,25 +3757,42 @@ export const ActionDashboardModal: React.FC<{
               const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
               const portalUrl = item.teacherUrl || `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${item.official_code || "unknown"}/teachers`;
 
+              // 🔴 Logic to handle error state styling
+              const isError = item.is_error === true;
+
               return (
                 <div key={item.id} className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "8px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
+                    <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600 }}>{item.name}</div>
                       <div style={{ fontSize: "11px", color: "#666" }}>{item.school_name}</div>
                       
                       {/* 🟢 VISUAL COMPARISON BLOCK */}
-                      <div style={{ fontSize: "11px", marginTop: "6px", padding: "6px", background: "#f8fafc", borderRadius: "4px", border: "1px solid #e2e8f0" }}>
-                         <div style={{ marginBottom: '2px', color: "#64748b" }}>
-                           <strong>My teacher list:</strong> {Array.isArray(item.current_tags) && item.current_tags.length > 0 ? item.current_tags.join(", ") : <em>(Empty)</em>}
-                         </div>
-                         <div style={{ color: "#dc2626" }}>
-                           <strong>GrapeSEED portal:</strong> {Array.isArray(item.expected) ? item.expected.join(", ") : "No tag"}
-                         </div>
+                      <div style={{ 
+                        fontSize: "11px", 
+                        marginTop: "6px", 
+                        padding: "6px", 
+                        background: isError ? "#fff1f2" : "#f8fafc", 
+                        borderRadius: "4px", 
+                        border: isError ? "1px solid #fecdd3" : "1px solid #e2e8f0" 
+                      }}>
+                        <div style={{ marginBottom: '2px', color: isError ? "#991b1b" : "#64748b" }}>
+                          <strong>My teacher list:</strong> {Array.isArray(item.current_tags) && item.current_tags.length > 0 ? item.current_tags.join(", ") : <em>(Empty)</em>}
+                        </div>
+                        
+                        {isError ? (
+                          <div style={{ color: "#b91c1c", fontWeight: 600 }}>
+                            <strong>⚠️ Audit Failure:</strong> {item.expected[0]}
+                          </div>
+                        ) : (
+                          <div style={{ color: "#dc2626" }}>
+                            <strong>GrapeSEED portal:</strong> {Array.isArray(item.expected) ? item.expected.join(", ") : "No tag"}
+                          </div>
+                        )}
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: '12px' }}>
                       <button
                         className="obs-pill-button"
                         style={{ color: "#666", borderColor: "#ccc", padding: "4px 8px", fontSize: "10px" }}
@@ -3777,20 +3800,23 @@ export const ActionDashboardModal: React.FC<{
                       >
                         Portal ⧉
                       </button>
-                      <button
-                        className="obs-pill-button"
-                        style={{ color: "#ec4899", borderColor: "#ec4899" }}
-                        onClick={() => onResolve("teacherTagIssue", item)}
-                      >
-                        Sync & Clear
-                      </button>
+                      
+                      {/* Only show Sync & Clear if it's a real mismatch, not a network error */}
+                      {!isError && (
+                        <button
+                          className="obs-pill-button"
+                          style={{ color: "#ec4899", borderColor: "#ec4899" }}
+                          onClick={() => onResolve("teacherTagIssue", item)}
+                        >
+                          Sync & Clear
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
               );
             }
           )}
-
 
 
           {renderSection(
