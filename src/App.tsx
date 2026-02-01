@@ -27,6 +27,7 @@ interface NewObservationMeta {
   supportType: SupportType;
   date: string; // "YYYY-MM-DD"
   observationId?: string;
+  teacher_id?: string; 
 }
 
 interface SelectedObservationMeta extends NewObservationMeta {
@@ -493,7 +494,7 @@ useEffect(() => {
     setCampus("");
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!teacherName || !schoolName || !campus || !unit || !lesson || !date) {
@@ -507,12 +508,44 @@ useEffect(() => {
     }
 
     const currentUser = user as any;
-    let teacherId = selectedTeacherId;
-    const newObsId = crypto.randomUUID();
+    const newObsId = crypto.randomUUID(); 
 
-    // 1. Handle Teacher Creation
-    if (!teacherId) {
+    // ---------------------------------------------------------
+    // 🌊 WATERFALL LOGIC: Determine finalTeacherId
+    // ---------------------------------------------------------
+    let finalTeacherId = selectedTeacherId;
+
+    // LEVEL 2: Memory Fallback 
+    if (!finalTeacherId) {
+      const foundInState = teachers.find(
+        (t) => t.name === teacherName.trim() && t.school_name === schoolName
+      );
+      if (foundInState) {
+        console.log("🌊 Level 2: Found teacher in State Array");
+        finalTeacherId = foundInState.id;
+      }
+    }
+
+    // LEVEL 3: Disk Fallback (Async)
+    if (!finalTeacherId) {
+      try {
+        const cachedTeachers = await get<TeacherOption[]>('offline_teachers');
+        const foundInCache = cachedTeachers?.find(
+          (t) => t.name === teacherName.trim() && t.school_name === schoolName
+        );
+        if (foundInCache) {
+          console.log("🌊 Level 3: Found teacher in IndexedDB");
+          finalTeacherId = foundInCache.id;
+        }
+      } catch (err) {
+        console.warn("Waterfall Level 3 failed:", err);
+      }
+    }
+
+    // LEVEL 4: Deterministic Generation (New Temp Teacher)
+    if (!finalTeacherId) {
       if (navigator.onLine) {
+        // ... (Online creation logic remains the same) ...
         try {
           const cleanUrl = worksheetUrl.trim() || null;
           const { data, error } = await supabase
@@ -528,61 +561,61 @@ useEffect(() => {
             .single();
 
           if (error) throw error;
+          finalTeacherId = data.id; 
 
-          teacherId = data.id;
+          // Update local cache
           const newTeacherObj = {
-            id: data.id,
-            name: teacherName.trim(),
-            email: null,
-            school_name: schoolName,
-            campus,
-            worksheet_url: data.worksheet_url ?? null,
+             id: data.id,
+             name: teacherName.trim(),
+             email: null,
+             school_name: schoolName,
+             campus,
+             worksheet_url: data.worksheet_url ?? null,
           };
-          
           setTeachers((prev) => [...prev, newTeacherObj]);
-          get('cache-teachers-list').then((list: any) => {
-             set('cache-teachers-list', [...(list || []), newTeacherObj]);
-          });
-
-          setSelectedTeacherId(data.id);
-          setWorksheetUrl(data.worksheet_url ?? "");
-          setAutoCreatedTeacherMsg(`New teacher saved: ${teacherName.trim()} — ${schoolName} (${campus})`);
-        
         } catch (err) {
-          alert("Unexpected error creating teacher.");
+          alert("Unexpected error creating teacher online.");
           return;
         }
       } else {
-        teacherId = `temp-teacher-${Date.now()}`;
+        // Offline Creation
+        console.log("🌊 Level 4: Generating Temp ID (Offline)");
+        finalTeacherId = `temp-teacher-${Date.now()}`;
+        
         const newTeacherObj = {
-            id: teacherId,
+            id: finalTeacherId,
             name: teacherName.trim(),
             email: null,
             school_name: schoolName,
             campus,
             worksheet_url: worksheetUrl || null,
         };
+        
         setTeachers((prev) => [...prev, newTeacherObj]);
-        get('cache-teachers-list').then((list: any) => {
-            set('cache-teachers-list', [...(list || []), newTeacherObj]);
-        });
-        setSelectedTeacherId(teacherId);
+        const currentCache = (await get<TeacherOption[]>('offline_teachers')) || [];
+        await set('offline_teachers', [...currentCache, newTeacherObj]);
       }
     }
+    // ---------------------------------------------------------
 
-    if (!teacherId) {
-      alert("Could not determine teacher record. Please try again.");
-      return;
-    }
+    // 🟢 CRITICAL FIX: Add teacher_id to meta so it survives the State Handover
+const meta: NewObservationMeta = { 
+        teacherName, 
+        schoolName, 
+        campus, 
+        unit, 
+        lesson, 
+        supportType, 
+        date,
+        teacher_id: finalTeacherId // 🟢 STAMP THE ID HERE
+    };
 
-    const meta = { teacherName, schoolName, campus, unit, lesson, supportType, date };
-
-    // 2. Create Obs (Offline)
-    if (!navigator.onLine) {
-        console.log("🟠 Offline: Initializing workspace in IndexedDB...");
+if (!navigator.onLine) {
         const offlinePayload = {
             id: newObsId,
-            meta: { ...meta, teacherWorkbookUrl: worksheetUrl || null },
+            teacher_id: finalTeacherId, 
+            // 🟢 Pass the updated meta here
+            meta: { ...meta, teacherWorkbookUrl: worksheetUrl || null }, 
             indicators: INITIAL_INDICATORS, 
             status: "draft",
             updatedAt: Date.now(),
@@ -592,22 +625,23 @@ useEffect(() => {
 
         try {
             await set(`obs-v1-${newObsId}`, offlinePayload);
-            onCreate({ observationId: newObsId, ...meta });
+            // 🟢 This passes the meta (with ID) to the Workspace state
+            onCreate({ observationId: newObsId, ...meta }); 
         } catch (err) {
-            alert("Storage full or error. Cannot create offline observation.");
+            alert("Storage full or error.");
         }
         return;
     }
 
-    // 3. Create Obs (Online)
+    // ONLINE SAVE LOGIC
     const { data: obs, error: obsError } = await supabase
       .from("observations")
       .insert({
         id: newObsId, 
         trainer_id: currentUser.id,
-        teacher_id: teacherId,
+        teacher_id: finalTeacherId,
         status: "draft",
-        meta,
+        meta, // Meta now includes teacher_id
         indicators: [],
         teacher_name: meta.teacherName,
         school_name: meta.schoolName,

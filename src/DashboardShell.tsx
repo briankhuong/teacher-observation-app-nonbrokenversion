@@ -1199,7 +1199,7 @@ async function getMergedDashboardData(userId: string) {
       const payload = {
         id: localData.id,
         trainer_id: user.id, 
-        
+        teacher_id: localData.teacher_id || localData.meta?.teacher_id,
         teacher_name: safeMeta.teacherName,
         school_name: safeMeta.schoolName,
         campus: safeMeta.campus,

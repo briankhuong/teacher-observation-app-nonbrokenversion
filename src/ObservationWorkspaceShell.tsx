@@ -177,7 +177,8 @@ interface ObservationWorkspaceProps {
     unit: string;
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
-    date: string; 
+    date: string;
+    teacher_id?: string; 
   };
   onBack: () => void;
   isOnline: boolean;
@@ -194,6 +195,7 @@ interface OcrResult {
 
 interface SavedObservationPayload {
   id: string;
+  teacher_id?: string;
   meta: {
     teacherName: string;
     schoolName: string;
@@ -202,6 +204,7 @@ interface SavedObservationPayload {
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
     date: string;
+    teacher_id?: string; // 🟢 ADD THIS LINE HERE
     teacherWorkbookUrl?: string | null;
     adminWorkbookUrl?: string | null;
     adminWorkbookViewUrl?: string | null;
@@ -358,8 +361,7 @@ export const ObservationWorkspaceShell: React.FC<
     user?.user_metadata?.name || 
     user?.user_metadata?.display_name || 
     (user?.email ? user.email.split('@')[0] : "GrapeSEED Trainer");
- const { teacherName, schoolName, campus, unit, lesson, supportType, date } =
-    observationMeta;
+const { teacherName, schoolName, campus, unit, lesson, supportType, date, teacher_id } = observationMeta;
 const [showBatchModal, setShowBatchModal] = useState(false);
 const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
 const [isAiPolishing, setIsAiPolishing] = useState(false);
@@ -964,7 +966,9 @@ const handleManualSave = async () => {
 
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      teacher_id: teacher_id || (observationMeta as any).teacher_id,
+      
+      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date, teacher_id: teacher_id || (observationMeta as any).teacher_id},
       indicators,
       status: observationStatus,
       updatedAt: Date.now(),
