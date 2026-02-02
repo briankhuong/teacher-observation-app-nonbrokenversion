@@ -18,29 +18,35 @@ router.use(express.json());
 // ---------------------------------------------------------
 // 0. SECURE TRANSCRIPTION PROXY (Fixed for Code-Switching)
 // ---------------------------------------------------------
+
+
+
 router.post("/api/transcribe", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No audio file provided" });
 
+    // 🔍 Debug Log: See what arrived at the server
+    console.log(`🎤 Received file: ${req.file.originalname} (${req.file.size} bytes)`);
+
     const formData = new FormData();
 
-    // 🟢 1. FORCE VIETNAMESE (MANDATORY)
-    // This ensures your Vietnamese is NEVER ignored, even if you speak quietly.
+    // 1. Config
+    // 🟢 MANDATORY: Force "vi" so Vietnamese is never ignored.
     formData.append("language", "vi"); 
-
-    // 🟢 2. THE "ANTI-TRANSLATION" PROMPT
-    // We explicitly feed it a pattern of "English Sentence + Vietnamese Sentence".
-    // This prevents it from thinking English needs to be translated.
+    
+    // 🟢 MANDATORY: The "Anchor" Prompt to allow English to pass through.
     formData.append("prompt", "GrapeSEED Teacher Observation. Checking indicators. Unit 5 Lesson 1. Học sinh phát âm tốt. OK so this is a test. Giáo viên làm mẫu.");
-
+    
     formData.append("model", "whisper-large-v3");
     formData.append("response_format", "json");
 
-    formData.append("file", req.file.buffer, {
-      filename: "recording.wav",
-      contentType: "audio/wav",
-    });
+    // 2. Append File (The Fix)
+    // ❌ OLD (Likely failed): formData.append("file", buffer, { filename: ... })
+    // ✅ NEW (Universal): formData.append("file", buffer, filenameString)
+    const filename = req.file.originalname || "recording.webm";
+    formData.append("file", req.file.buffer, filename);
 
+    // 3. Send to Groq
     const response = await axios.post("https://api.groq.com/openai/v1/audio/transcriptions", formData, {
       headers: {
         "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
@@ -48,11 +54,12 @@ router.post("/api/transcribe", upload.single("file"), async (req, res) => {
       },
     });
 
+    console.log("✅ Groq Response:", response.data); // See the result in your terminal
     res.json({ text: response.data.text });
 
   } catch (error) {
-    console.error("Transcription Proxy Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Transcription failed on server" });
+    console.error("❌ Transcription Failed:", error.response?.data || error.message);
+    res.status(500).json({ error: "Server transcription failed" });
   }
 });
 // ---------------------------------------------------------

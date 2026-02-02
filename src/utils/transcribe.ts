@@ -1,13 +1,16 @@
 // src/utils/transcribe.ts
 
-export async function transcribeWithGroq(audioBlob: Blob): Promise<string> {
+export async function transcribeWithGroq(audioBlob: Blob, mimeType: string): Promise<string> {
   const formData = new FormData();
-  // "file" matches upload.single("file") in your backend
-  formData.append("file", audioBlob, "recording.wav");
+  
+  // 🟢 DETERMINE EXTENSION
+  // If mime is 'audio/webm' -> use .webm
+  // If mime is 'audio/mp4' -> use .m4a (Safari)
+  const extension = mimeType.includes("mp4") ? "m4a" : "webm";
+  
+  formData.append("file", audioBlob, `recording.${extension}`);
+  formData.append("mimeType", mimeType); // Optional, but good for debugging
 
-  // 1. Determine URL based on environment
-  // If you are running locally, ensure this matches your Express Port (often 3000, 5000, or 8080)
-  // If you have a Vite Proxy set up, just "/api/transcribe" works best.
   const SERVER_URL = "/api/transcribe"; 
 
   const response = await fetch(SERVER_URL, {
@@ -21,5 +24,5 @@ export async function transcribeWithGroq(audioBlob: Blob): Promise<string> {
   }
 
   const data = await response.json();
-  return data.text; // Matches res.json({ text: ... }) in backend
+  return data.text;
 }
