@@ -107,7 +107,7 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
   // Tools
   const [mode, setMode] = usePersistedState<"pen" | "eraser">("canvas-tool-mode", "pen");
   const FIXED_COLOR = "#e5e7eb";
-  const FIXED_SIZE = 3;
+  const FIXED_SIZE = 2;
 
   // These are for the UI buttons only
   const [canUndo, setCanUndo] = useState(strokes.length > 0);

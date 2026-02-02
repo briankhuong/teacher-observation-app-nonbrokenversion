@@ -1583,73 +1583,106 @@ const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
 };
 
 
+const mimeTypeRef = useRef<string>("");
 const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    
+    // 🟢 DETECT SUPPORTED MIME TYPE
+    // Chrome uses 'audio/webm', Safari uses 'audio/mp4'
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm") 
+      ? "audio/webm" 
+      : "audio/mp4";
+    
+    mimeTypeRef.current = mimeType; // Save it for later
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-      
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Mic error", err);
-      alert("Could not access microphone.");
+    const recorder = new MediaRecorder(stream, { mimeType });
+    audioChunksRef.current = [];
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data);
+    };
+
+    mediaRecorderRef.current = recorder;
+    recorder.start(1000); // 🟢 Capture chunks every 1s (safer than waiting for stop)
+    setIsRecording(true);
+  } catch (err) {
+    console.error("Mic error", err);
+    alert("Could not access microphone.");
+  }
+};
+
+// Inside ObservationWorkspaceShell.tsx
+
+const stopRecording = async (target: 'indicator' | 'admin') => {
+  if (!mediaRecorderRef.current || !isRecording) return;
+
+  mediaRecorderRef.current.stop();
+  setIsRecording(false);
+  setIsTranscribing(true);
+
+  // Wait 1s to ensure the last chunk is captured
+  await new Promise(r => setTimeout(r, 1000));
+
+  // 🔍 Debug: Check if we actually recorded audio
+  const blobSize = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
+  console.log(`🎙️ Recording finished. Total Size: ${blobSize} bytes`);
+  
+  if (blobSize === 0) {
+    alert("❌ Microphone recorded silence (0 bytes). Please check your mic permissions.");
+    setIsTranscribing(false);
+    return;
+  }
+
+  // Use the stored mimeType or default to webm
+  const mimeType = mimeTypeRef.current || "audio/webm";
+  const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+
+  try {
+    const text = await transcribeWithGroq(audioBlob, mimeType);
+    
+    // 🔍 Debug: Alert exactly what came back
+    console.log("📝 Transcribed Text:", text);
+    if (!text || text.trim() === "") {
+        alert("⚠️ Server returned empty text. Check the terminal logs for errors.");
     }
-  };
 
-  const stopRecording = async (target: 'indicator' | 'admin') => {
-    if (!mediaRecorderRef.current || !isRecording) return;
-
-    mediaRecorderRef.current.stop();
-    setIsRecording(false);
-    setIsTranscribing(true); // Show spinner
-
-    // Wait for the last data chunk
-    await new Promise(r => setTimeout(r, 200));
-
-    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-
-    try {
-      console.log("🚀 Sending to Groq Cloud...");
-      
-      // CALL THE API
-      const text = await transcribeWithGroq(audioBlob);
-      console.log("🎯 Result:", text);
-
-      // UPDATE STATE
-      if (target === 'indicator') {
-          setIndicators(prev => {
+    // ... Update State (setIndicators etc) ...
+    if (target === 'indicator') {
+        setIndicators(prev => {
             const newInds = [...prev];
             if (!newInds[activeIndex]) return prev;
+            
             const existing = newInds[activeIndex].commentText || "";
-            newInds[activeIndex] = {
-              ...newInds[activeIndex],
-              commentText: existing ? `${existing}\n${text.trim()}` : text.trim()
-            };
+            // Append safely
+            const textToAdd = text.trim();
+            if (textToAdd) {
+                newInds[activeIndex] = {
+                    ...newInds[activeIndex],
+                    commentText: existing ? `${existing}\n${textToAdd}` : textToAdd
+                };
+            }
             return newInds;
-          });
-      } else {
-          setAdminPreview(prev => prev ? { 
-            ...prev, 
-            trainerSummary: (prev.trainerSummary || "") + "\n" + text.trim() 
-          } : prev);
-          setAdminSummaryVN(prev => (prev || "") + "\n" + text.trim());
-      }
-      
-      if (isDirtyRef.current === false) isDirtyRef.current = true; 
-
-    } catch (err: any) {
-      console.error("Transcription Error:", err);
-      alert("Transcription failed: " + err.message);
-    } finally {
-      setIsTranscribing(false);
+        });
+    } else {
+        // ... Admin Logic ...
+        const textToAdd = text.trim();
+        if (textToAdd) {
+            setAdminPreview(prev => prev ? { 
+                ...prev, 
+                trainerSummary: (prev.trainerSummary || "") + "\n" + textToAdd 
+            } : prev);
+            setAdminSummaryVN(prev => (prev || "") + "\n" + textToAdd);
+        }
     }
-  };
+
+  } catch (err: any) {
+    console.error("Transcription Logic Error:", err);
+    alert("Error: " + err.message);
+  } finally {
+    setIsTranscribing(false);
+  }
+};
 
 
 const handlePolishWithAi = async () => {
