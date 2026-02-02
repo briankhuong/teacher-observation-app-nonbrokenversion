@@ -1225,8 +1225,13 @@ const handleExportPreview = () => {
 
         lines.forEach(line => {
             const safeLine = line || "";
-            const isGrowth = safeLine.includes('(GA)');
+            // 1. Check for explicit (GA) marker
+            const hasGaMarker = safeLine.includes('(GA)');
             
+            // 2. NEW RULE: Fallback to checkbox state if no marker is present
+            // It goes to Growth if: marker is present OR (Growth is checked AND Good is NOT)
+            const shouldBeGrowth = hasGaMarker || (!ind.good && ind.growth);
+
             let clean = safeLine
                 .replace(/\[.*?\]/g, '') 
                 .replace(/\(GA\)/g, '')  
@@ -1235,10 +1240,12 @@ const handleExportPreview = () => {
 
             if (!clean) return;
 
-            if (isGrowth) gLines.push(clean);
-            else sLines.push(clean);
+            if (shouldBeGrowth) {
+                gLines.push(clean);
+            } else {
+                sLines.push(clean);
+            }
         });
-
         newEdits[ind.id] = {
             strengths: sLines.join('\n\n'),
             growths: gLines.join('\n\n')
