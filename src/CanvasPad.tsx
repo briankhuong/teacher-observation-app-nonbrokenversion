@@ -436,7 +436,6 @@ const handleClear = useCallback(() => {
 }, [onChange]);
   return (
     <div className="canvas-pad-wrapper">
-// Inside the return statement:
 <div className="canvas-pad-toolbar">
   <div className="canvas-pad-tools-left">
     <button 

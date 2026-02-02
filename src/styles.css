@@ -915,21 +915,24 @@ body {
   position: relative;
 }
 
-.indicator-desc.collapsed::after,
-.canvas-indicator-desc.collapsed::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 28px;
-  background: linear-gradient(
-    to bottom,
-    rgba(2, 6, 23, 0) 0%,
-    rgba(2, 6, 23, 1) 100%
-  );
+/* ✅ UPDATE THIS BLOCK */
+.indicator-desc.collapsed,
+.canvas-indicator-desc.collapsed {
+  /* Remove any fixed heights */
+  max-height: none; 
+  
+  /* Enable clean line-clamping */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  
+  /* Logic Fixes */
+  position: relative;
+  background: transparent;
+  opacity: 1;
 }
-
 .desc-toggle-btn {
   background: none;
   border: none;
@@ -2973,4 +2976,28 @@ input[type="date"].input {
 
 .tm-pure-icon:hover:not(:disabled) {
   color: #2563eb;
+}
+
+/* Update these classes in your CSS file */
+
+.canvas-indicator-desc.collapsed {
+  /* 2. Force a clean cut-off at 2 lines */
+display: -webkit-box;
+  -webkit-line-clamp: 2;        /* Number of lines to show before cutting off */
+  -webkit-box-orient: vertical;
+  overflow: hidden;             /* Physically hides the overflow */
+  text-overflow: ellipsis;      /* Adds the '...' */
+  
+  /* Ensure background is solid so nothing from behind bleeds through */
+  background: transparent;      /* It will use the solid background of the parent card */
+  position: relative;
+  opacity: 1;
+}
+
+.canvas-indicator-desc.expanded {
+  /* Ensure it expands fully without limits */
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  max-height: none;
 }
