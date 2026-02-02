@@ -414,24 +414,30 @@ export function buildTeacherExportModel(
 
     const lines = comment.split("\n").map(l => l.trim()).filter(Boolean);
 
-    lines.forEach(line => {
-      const gaRegex = /^\(\s*GA\s*\)/i; 
-      
-      if (gaRegex.test(line)) {
-        // GROWTH: Remove marker and any leading formatting
-        const cleanText = line
-            .replace(gaRegex, "") 
-            .replace(/^[\s\-\•]+/, "") 
-            .trim();
-        if (cleanText) growthSet.add(cleanText);
-      } else {
-        // STRENGTH: Remove leading formatting
-        const cleanText = line
-            .replace(/^[\s\-\•]+/, "") 
-            .trim();
-        if (cleanText) strengthSet.add(cleanText);
-      }
-    });
+// Proposed update for the parser section in src/exportTeacherModel.ts
+
+lines.forEach(line => {
+  const gaRegex = /^\(\s*GA\s*\)/i; 
+  
+  // 1. Check for explicit (GA) marker
+  if (gaRegex.test(line)) {
+    const cleanText = line
+        .replace(gaRegex, "") 
+        .replace(/^[\s\-\•]+/, "") 
+        .trim();
+    if (cleanText) growthSet.add(cleanText);
+  } 
+  // 2. NEW RULE: If no marker, check if ONLY 'Growth' checkbox is active
+  else if (!good && growth) {
+    const cleanText = line.replace(/^[\s\-\•]+/, "").trim();
+    if (cleanText) growthSet.add(cleanText);
+  }
+  // 3. Fallback to Strength (Good cell)
+  else {
+    const cleanText = line.replace(/^[\s\-\•]+/, "").trim();
+    if (cleanText) strengthSet.add(cleanText);
+  }
+});
 
     const strengthItems = Array.from(strengthSet);
     const growthItems = Array.from(growthSet);
