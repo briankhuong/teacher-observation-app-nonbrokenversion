@@ -2445,13 +2445,37 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   >
                     {active.description}
                   </div>
-
                   <button
                     type="button"
-                    className="desc-toggle-btn"
                     onClick={() => toggleDescription(active.id)}
+                    style={{ 
+                      background: "none", 
+                      border: "none", 
+                      padding: "4px 0",
+                      color: "var(--accent)", 
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4
+                    }}
                   >
-                    {expandedDesc[active.id] ? "Show less" : "Show more"}
+                    {expandedDesc[active.id] ? (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 15l-6-6-6 6"/>
+                        </svg>
+                        See less
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                        See more
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
