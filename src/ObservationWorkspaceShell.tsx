@@ -20,6 +20,7 @@ import type {
 
 // Add to imports
 import { stitchHandwritingBatches } from "./utils/imageStitcher";
+import { transcribeWithGroq } from "./utils/transcribe";
 
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
 const DEFAULT_CANVAS_HEIGHT = 300; 
@@ -782,10 +783,17 @@ const [adminSummaryVN, setAdminSummaryVN] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null); // 👈 Add this state
   // 🟢 NEW: Track if user has actually made changes
-  const isDirtyRef = useRef(false);
+// 1. Add these states near your other UI states
+const [isRecording, setIsRecording] = useState(false);
+const [isTranscribing, setIsTranscribing] = useState(false);
+const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+const audioChunksRef = useRef<Blob[]>([]);
 
 
-  useEffect(() => {
+const transcriptionTargetRef = useRef<'indicator' | 'admin'>('indicator');
+
+const isDirtyRef = useRef(false);
+useEffect(() => {
       if (indicators.length === 0) return;
 
       if (activeIndex >= indicators.length) {
@@ -1573,6 +1581,75 @@ const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
   updateIndicator(index, { strokes: newStrokes });
   setCanvasDirty(true);  
 };
+
+
+const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Mic error", err);
+      alert("Could not access microphone.");
+    }
+  };
+
+  const stopRecording = async (target: 'indicator' | 'admin') => {
+    if (!mediaRecorderRef.current || !isRecording) return;
+
+    mediaRecorderRef.current.stop();
+    setIsRecording(false);
+    setIsTranscribing(true); // Show spinner
+
+    // Wait for the last data chunk
+    await new Promise(r => setTimeout(r, 200));
+
+    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+
+    try {
+      console.log("🚀 Sending to Groq Cloud...");
+      
+      // CALL THE API
+      const text = await transcribeWithGroq(audioBlob);
+      console.log("🎯 Result:", text);
+
+      // UPDATE STATE
+      if (target === 'indicator') {
+          setIndicators(prev => {
+            const newInds = [...prev];
+            if (!newInds[activeIndex]) return prev;
+            const existing = newInds[activeIndex].commentText || "";
+            newInds[activeIndex] = {
+              ...newInds[activeIndex],
+              commentText: existing ? `${existing}\n${text.trim()}` : text.trim()
+            };
+            return newInds;
+          });
+      } else {
+          setAdminPreview(prev => prev ? { 
+            ...prev, 
+            trainerSummary: (prev.trainerSummary || "") + "\n" + text.trim() 
+          } : prev);
+          setAdminSummaryVN(prev => (prev || "") + "\n" + text.trim());
+      }
+      
+      if (isDirtyRef.current === false) isDirtyRef.current = true; 
+
+    } catch (err: any) {
+      console.error("Transcription Error:", err);
+      alert("Transcription failed: " + err.message);
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
 
 
 const handlePolishWithAi = async () => {
@@ -2741,7 +2818,22 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-
+                            <button
+                type="button"
+                className={`btn ${isRecording ? 'pulse-red' : ''}`}
+                onClick={() => isRecording ? stopRecording('indicator') : startRecording()}
+                disabled={isTranscribing || isAiPolishing}
+                style={{
+                  background: isRecording ? "#ef4444" : "var(--bg-card)",
+                  color: isRecording ? "white" : "var(--accent)",
+                  border: "1px solid var(--accent)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6
+                }}
+              >
+                {isTranscribing ? "⌛..." : isRecording ? "🛑 Stop" : "🎤 Rec"}
+              </button>
               <button
                 type="button"
                 className="btn"
@@ -3260,6 +3352,20 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   </div>
                  <div style={{ display: "flex", gap: "8px" }}>
                   {/* 🟢 NEW BUTTON: Runs the AI on demand */}
+                    <button
+                      type="button"
+                      className={`btn ${isRecording ? 'pulse-red' : ''}`}
+                      onClick={() => isRecording ? stopRecording('admin') : startRecording()}
+                      disabled={isTranscribing || isGeneratingSummary}
+                      style={{
+                        background: isRecording ? "#ef4444" : "transparent",
+                        border: "1px solid #f59e0b",
+                        color: isRecording ? "white" : "#f59e0b"
+                      }}
+                    >
+                      {isTranscribing ? "⌛ Transcribing..." : isRecording ? "🛑 Stop Recording" : "🎤 Record Summary"}
+                    </button>
+                    
                     <button
                       type="button"
                       className="btn"

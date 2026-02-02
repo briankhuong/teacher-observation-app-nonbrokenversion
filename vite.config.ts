@@ -54,6 +54,13 @@ export default defineConfig({
       }
     })
   ],
+  // 🟢 NEW: Optimization for Transformers.js and WebGPU/M4
+  optimizeDeps: {
+    exclude: ['@xenova/transformers']
+  },
+  build: {
+    target: 'esnext'
+  },
   server: {
     proxy: {
       '/api/ocr-azure': {
