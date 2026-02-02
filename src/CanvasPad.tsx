@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useRef, useState, useCallback } from "react";
 import { getStroke } from "perfect-freehand";
+import { Pencil, Eraser, Undo2, Redo2, Trash2, Lock, Unlock } from "lucide-react";
 
 const usePersistedState = <T,>(key: string, defaultValue: T) => {
   const [state, setState] = useState<T>(() => {
@@ -105,19 +106,29 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
   const isDrawing = useRef(false);
   // Tools
   const [mode, setMode] = usePersistedState<"pen" | "eraser">("canvas-tool-mode", "pen");
-  const [color, setColor] = usePersistedState<string>("canvas-tool-color", "#e5e7eb");
-  const [size, setSize] = usePersistedState<number>("canvas-tool-size", 3);
+  const FIXED_COLOR = "#e5e7eb";
+  const FIXED_SIZE = 3;
 
   // These are for the UI buttons only
   const [canUndo, setCanUndo] = useState(strokes.length > 0);
   const [redoStack, setRedoStack] = useState<Stroke[]>([]);
   // Refs for event listeners to access latest tools without re-binding
-  const toolsRef = useRef({ mode, color, size, readOnly });
+  const toolsRef = useRef({ 
+  mode, 
+  color: FIXED_COLOR, // Changed from state to constant
+  size: FIXED_SIZE,   // Changed from state to constant
+  readOnly 
+});
  
   // Keep tools refs updated
-  useLayoutEffect(() => {
-    toolsRef.current = { mode, color, size, readOnly };
-  }, [mode, color, size, readOnly]);
+useLayoutEffect(() => {
+  toolsRef.current = { 
+    mode, 
+    color: FIXED_COLOR, 
+    size: FIXED_SIZE, 
+    readOnly 
+  };
+}, [mode, readOnly]); // Removed color and size from dependency array
   // ----------------------------------------------------------------
   // 3. Drawing Logic (Retina Ready)
   // ----------------------------------------------------------------
@@ -407,63 +418,78 @@ export const CanvasPad = React.memo<CanvasPadProps>(({
     requestAnimationFrame(drawAll);
     onChange([...history.current]);
   }, [redoStack, onChange]);
-  const handleClear = useCallback(() => {
-    if (toolsRef.current.readOnly) return;
+// Update the handleClear function:
+const handleClear = useCallback(() => {
+  if (toolsRef.current.readOnly) return;
+
+  // Add confirmation warning
+  const confirmClear = window.confirm("Are you sure you want to clear all drawings? This cannot be undone.");
+  
+  if (confirmClear) {
     history.current = [];
     setCanUndo(false);
     setRedoStack([]);
     redrawAll();
     requestAnimationFrame(drawAll);
     onChange([]);
-  }, [onChange]);
+  }
+}, [onChange]);
   return (
     <div className="canvas-pad-wrapper">
-      <div className="canvas-pad-toolbar">
-        <div className="canvas-pad-tools-left">
-          <button type="button" className={`btn ${mode === "pen" ? "btn-primary" : ""}`} onClick={() => setMode("pen")}>✏️ Pencil</button>
-          <button type="button" className={`btn ${mode === "eraser" ? "btn-primary" : ""}`} onClick={() => setMode("eraser")}>🧽 Eraser</button>
-          <button type="button" className="btn" onClick={handleUndo} disabled={!canUndo}>⤺ Undo</button>
-          <button type="button" className="btn" onClick={handleRedo} disabled={redoStack.length === 0}>⤻ Redo</button>
-          <button type="button" className="btn" onClick={handleClear} disabled={!canUndo}>Clear</button>
-          {/* 🟢 NEW: Resize Lock Button */}
-              {onToggleResizeLock && (
-               <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={onToggleResizeLock}
-                title={isResizeLocked ? "Unlock Height" : "Lock Height"}
-                style={{
-                  width: 24,
-                  height: 24,
-                  padding: 0,
-                  marginLeft: 8, // Keep the spacing
-                  flexShrink: 0,
-                  display: "flex", 
-                  alignItems: "center", 
-                  justifyContent: "center",
-                  alignSelf: "center",
-                  // Visual feedback: Red if locked, muted if unlocked
-                  color: isResizeLocked ? "#f43f5e" : "var(--text-muted)",
-                  background: isResizeLocked ? "rgba(244, 63, 94, 0.1)" : "transparent",
-                  border: isResizeLocked ? "1px solid rgba(244, 63, 94, 0.3)" : "1px solid transparent",
-                  borderRadius: 4
-                }}
-              >
-                  {isResizeLocked ? (
-                    /* Lock Icon */
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                  ) : (
-                    /* Unlock Icon */
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>
-                  )}
-                </button>
-              )}
-        </div>
-        <div className="canvas-pad-tools-right">
-           <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-           <input type="range" min={1} max={16} value={size} onChange={(e) => setSize(Number(e.target.value))} />
-        </div>
-      </div>
+// Inside the return statement:
+<div className="canvas-pad-toolbar">
+  <div className="canvas-pad-tools-left">
+    <button 
+      type="button" 
+      className={`btn ${mode === "pen" ? "btn-primary" : ""}`} 
+      onClick={() => setMode("pen")}
+      title="Pencil"
+    >
+      <Pencil size={18} />
+    </button>
+
+    <button 
+      type="button" 
+      className={`btn ${mode === "eraser" ? "btn-primary" : ""}`} 
+      onClick={() => setMode("eraser")}
+      title="Eraser"
+    >
+      <Eraser size={18} />
+    </button>
+
+    <div className="toolbar-divider" style={{ width: '1px', height: '20px', background: '#334155', margin: '0 8px' }} />
+
+    <button type="button" className="btn" onClick={handleUndo} disabled={!canUndo} title="Undo">
+      <Undo2 size={18} />
+    </button>
+
+    <button type="button" className="btn" onClick={handleRedo} disabled={redoStack.length === 0} title="Redo">
+      <Redo2 size={18} />
+    </button>
+
+    <button type="button" className="btn" onClick={handleClear} disabled={!canUndo} title="Clear Canvas">
+      <Trash2 size={18} color={canUndo ? "#ef4444" : "#64748b"} />
+    </button>
+
+    {onToggleResizeLock && (
+      <button
+        type="button"
+        className="btn btn-ghost"
+        onClick={onToggleResizeLock}
+        title={isResizeLocked ? "Unlock Height" : "Lock Height"}
+        style={{
+          marginLeft: 8,
+          color: isResizeLocked ? "#f43f5e" : "var(--text-muted)",
+          background: isResizeLocked ? "rgba(244, 63, 94, 0.1)" : "transparent",
+        }}
+      >
+        {isResizeLocked ? <Lock size={16} /> : <Unlock size={16} />}
+      </button>
+    )}
+  </div>
+
+  {/* 🟢 DELETE the entire canvas-pad-tools-right div that was here */}
+</div>
       <div className="canvas-surface-wrapper" ref={containerRef} style={{ position: "relative", width: "100%", height: "100%", touchAction: "none" }}>
         <canvas
           ref={canvasStaticRef}
