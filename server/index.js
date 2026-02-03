@@ -2,14 +2,21 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch"; 
+import path from "path"; // 🟢 Added for serving frontend
+import { fileURLToPath } from "url"; // 🟢 Added for __dirname in ESM
+
+
 import mergeRoutes from "./mergeRoutes.js";
 // 👇 Import the new Gemini Route
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
 import polishGroqRoute from "./polishGroqRoute.js";
 import syncRoute from "./syncRoute.js";
+import transcriptionRoutes from "./routes.js";
 
 dotenv.config({ path: ".env.azure" });
-
+// Fix for __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 // -----------------------------------------------------------------
 // 1. Configuration & Checks
 // -----------------------------------------------------------------
@@ -61,6 +68,7 @@ app.use(express.json({ limit: "10mb" }));
 
 // 👇 A. Enable the Gemini Route (mounts /api/ocr-gemini)
 app.use(geminiOcrRoutes);
+app.use(transcriptionRoutes);
 
 
 // 👇 B. Azure OCR Endpoint (Kept for reference/backup)
@@ -245,7 +253,21 @@ app.use(syncRoute);
 // -----------------------------------------------------------------
 // 4. Start Server
 // -----------------------------------------------------------------
+// -----------------------------------------------------------------
+// 4. SERVE REACT FRONTEND (Fixes 404 on iPad/Windows)
+// -----------------------------------------------------------------
 
+// Serve the built React files
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Handle React Routing (Send everything else to index.html)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
+
+// -----------------------------------------------------------------
+// 5. Start Server
+// ... existing app.listen code ...
 const PORT = process.env.OCR_SERVER_PORT || 4000;
 
 app.listen(PORT, () => {
@@ -253,4 +275,5 @@ app.listen(PORT, () => {
   console.log(`   - Gemini OCR: /api/ocr-gemini`);
   console.log(`   - GSeed Token: /api/get-grapeseed-token`);
   console.log(`   - Azure OCR:  /api/ocr-azure (Backup)`);
+
 });
