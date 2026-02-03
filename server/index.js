@@ -4,15 +4,18 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch"; 
+import fs from 'fs'; // 🟢 FIXED: Imported at the top
+
+// Routes
 import mergeRoutes from "./mergeRoutes.js";
-// 👇 Import the new Gemini Route
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
-import polishGroqRoute from "./polishGroqRoute.js";
+import polishGroqRoute from "./polishGroqRoute.js"; // 🟢 Contains Transcribe + Polish
 import syncRoute from "./syncRoute.js";
 
 dotenv.config({ path: ".env.azure" });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 // -----------------------------------------------------------------
 // 1. Configuration & Checks
 // -----------------------------------------------------------------
@@ -20,13 +23,8 @@ const AZURE_OCR_ENDPOINT = process.env.AZURE_OCR_ENDPOINT;
 const AZURE_OCR_KEY = process.env.AZURE_OCR_KEY;
 const GEMINI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
 
-// Log warnings if keys are missing
 if (!GEMINI_KEY) {
-  console.warn("⚠️ GOOGLE_GENERATIVE_AI_KEY is missing in .env.azure. Gemini OCR will fail.");
-}
-
-if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
-  console.warn("⚠️ AZURE_OCR keys missing. The /api/ocr-azure route will fail if used.");
+  console.warn("⚠️ GOOGLE_GENERATIVE_AI_KEY is missing. Gemini OCR will fail.");
 }
 
 // -----------------------------------------------------------------
@@ -34,56 +32,43 @@ if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
 // -----------------------------------------------------------------
 const app = express();
 
-// 👇 PRODUCTION URL (Update this if your Vercel URL changes)
 const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
     ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
     : 'http://localhost:5173'; 
 
-// 🟢 ROBUST CORS SETUP
 app.use(cors({
   origin: function(origin, callback){
     if(!origin) return callback(null, true);
-    
-    // Allow Localhost, Local Network (192.168...), and Production
     if (origin.includes('localhost')) return callback(null, true);
     if (origin.includes('192.168')) return callback(null, true);
     if (origin === ALLOWED_ORIGIN) return callback(null, true);
-
-    console.log("🚫 Blocked CORS origin:", origin);
-    return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+    return callback(null, true);
   },
   credentials: false,
 }));
 
-// Increase limit for Base64 image payloads
 app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
 // 3. Register Routes
 // -----------------------------------------------------------------
 
-// 👇 A. Enable the Gemini Route (mounts /api/ocr-gemini)
 app.use(geminiOcrRoutes);
+app.use(mergeRoutes); 
+app.use(polishGroqRoute); // 🟢 This handles /api/transcribe AND /api/polish-text
+app.use(syncRoute);
 
-
-// 👇 B. Azure OCR Endpoint (Kept for reference/backup)
+// Azure OCR Endpoint (Backup)
 app.post("/api/ocr-azure", async (req, res) => {
   if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
-      return res.status(500).json({ error: "OCR keys are not configured on the server." });
+      return res.status(500).json({ error: "OCR keys are not configured." });
   }
-
   try {
     const { imageBase64 } = req.body || {};
-    if (!imageBase64) {
-      return res.status(400).json({ error: "Missing imageBase64" });
-    }
+    if (!imageBase64) return res.status(400).json({ error: "Missing imageBase64" });
 
     const imageBuffer = Buffer.from(imageBase64, "base64");
-
-    const url =
-      `${AZURE_OCR_ENDPOINT.replace(/\/+$/, "")}` +
-      `/computervision/imageanalysis:analyze` +
-      `?api-version=2023-10-01&features=read`;
+    const url = `${AZURE_OCR_ENDPOINT.replace(/\/+$/, "")}/computervision/imageanalysis:analyze?api-version=2023-10-01&features=read`;
 
     const azureResponse = await fetch(url, {
       method: "POST",
@@ -96,12 +81,10 @@ app.post("/api/ocr-azure", async (req, res) => {
 
     if (!azureResponse.ok) {
       const text = await azureResponse.text();
-      console.error("Azure error:", azureResponse.status, text);
       return res.status(azureResponse.status).json({ error: "Azure OCR error", details: text });
     }
 
     const result = await azureResponse.json();
-
     const blocks = result?.readResult?.blocks ?? [];
     const rawLines = [];
     const confidences = [];
@@ -110,31 +93,20 @@ app.post("/api/ocr-azure", async (req, res) => {
       for (const line of block.lines ?? []) {
         if (line.text) rawLines.push(line.text.trim());
         if (line.words && line.words.length) {
-          const avg =
-            line.words.reduce((sum, w) => sum + (w.confidence ?? 0), 0) /
-            line.words.length;
+          const avg = line.words.reduce((sum, w) => sum + (w.confidence ?? 0), 0) / line.words.length;
           confidences.push(avg);
         }
       }
     }
 
-    // Azure "Simple Glue" Logic
     const text = rawLines.reduce((acc, line) => {
       if (!line) return acc;
       const isNewItem = line.startsWith("-") || line.toUpperCase().startsWith("(GA)");
       if (acc.length === 0) return line;
-      if (isNewItem) {
-        return `${acc}\n${line}`; 
-      } else {
-        return `${acc} ${line}`; 
-      }
+      return isNewItem ? `${acc}\n${line}` : `${acc} ${line}`; 
     }, "");
 
-    const confidence =
-      confidences.length === 0
-        ? 0
-        : confidences.reduce((a, b) => a + b, 0) / confidences.length;
-
+    const confidence = confidences.length === 0 ? 0 : confidences.reduce((a, b) => a + b, 0) / confidences.length;
     return res.json({ text, confidence });
   } catch (err) {
     console.error("Server error during OCR:", err);
@@ -142,81 +114,50 @@ app.post("/api/ocr-azure", async (req, res) => {
   }
 });
 
-// 👇 D. NEW ROUTE: Secure Proxy for GrapeSEED Token
+// GrapeSEED Token
 app.post("/api/get-grapeseed-token", async (req, res) => {
-    console.log("🚀 Request received for GrapeSEED token");
-
-    // 1. Get Secrets
     const authHeader = (process.env.GRAPESEED_AUTH_HEADER || "").trim();
     const username = (process.env.GRAPESEED_USERNAME || "").trim();
     const password = (process.env.GRAPESEED_PASSWORD || "").trim();
 
     try {
-        // 🟢 FIX 1: The Correct URL
         const url = "https://account.grapeseed.com/connect/token";
+        if (!username || !password || !authHeader) return res.status(500).json({ error: "Server misconfiguration" });
 
-        // Validate secrets
-        if (!username || !password || !authHeader) {
-            console.error("Missing credentials in .env.azure");
-            return res.status(500).json({ error: "Server misconfiguration" });
-        }
-
-        // 🟢 FIX 2: Correct Body for 'connect/token' endpoints
-        // Usually 'connect/token' uses 'grant_type=password' standard OAuth
         const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-
         const response = await fetch(url, {
             method: "POST",
             headers: {
                 "Authorization": authHeader,
                 "Content-Type": "application/x-www-form-urlencoded",
-                // 🟢 FIX 3: Removed manual 'Host' header. 
-                // Fetch will automatically set Host to 'account.grapeseed.com'
             },
             body: bodyString,
         });
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error(`Upstream Error: ${response.status}`);
-            console.error("Details:", errorText);
-            return res.status(response.status).json({ 
-                error: "Token request failed", 
-                details: errorText 
-            });
+            return res.status(response.status).json({ error: "Token request failed", details: errorText });
         }
-
         const data = await response.json();
-        console.log("✅ Success! Token received.");
         res.json(data);
-
     } catch (error) {
         console.error("Server Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
-// 👇 E. NEW ROUTE: Fetch Class Data using the Token
+// GrapeSEED Classes
 app.post("/api/get-grapeseed-classes", async (req, res) => {
-    console.log("🚀 Request received for Class Data");
-    
-    // 1. Get the Token passed from the Frontend
     const { token } = req.body;
-
-    if (!token) {
-        return res.status(400).json({ error: "Missing Access Token" });
-    }
+    if (!token) return res.status(400).json({ error: "Missing Access Token" });
 
     try {
-        // ⚠️ PASTE YOUR FULL, REAL URL HERE (Replace the "..." parts)
         const dataUrl = "https://services.grapeseed.com/admin/v1/resources/users/b6133f96-5f21-47ca-9ab3-1b4205bf073f/landingresources/9?filterText=&sortBy=schoolName&sortBy=campusName&disabled=false&sortBy=schoolClassName"
-
         const response = await fetch(dataUrl, {
             method: "GET",
             headers: {
                 "Authorization": `Bearer ${token}`,
                 "Content-Type": "application/x-www-form-urlencoded",
-                // 🟢 CRITICAL HEADER (From your VBA)
                 "x-gl-origin": "https://schools.grapeseed.com/",
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             },
@@ -224,49 +165,54 @@ app.post("/api/get-grapeseed-classes", async (req, res) => {
 
         if (!response.ok) {
             const errorText = await response.text();
-            console.error(`Upstream Data Error: ${response.status}`);
             return res.status(response.status).json({ error: "Data fetch failed", details: errorText });
         }
-
         const data = await response.json();
-        console.log("✅ Class Data Retrieved Successfully!");
         res.json(data);
-
     } catch (error) {
         console.error("Server Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
+// -----------------------------------------------------------------
+// 4. SERVE REACT FRONTEND (Robust Fix)
+// -----------------------------------------------------------------
 
-// 👇 C. Merge Routes (Excel Logic)
-app.use(mergeRoutes); 
+// 🟢 Use process.cwd() to get the Project Root directly
+const DIST_PATH = path.join(process.cwd(), 'dist');
+const INDEX_PATH = path.join(DIST_PATH, 'index.html');
 
-// 👇 USE NEW ROUTE
-app.use(polishGroqRoute);
-app.use(syncRoute);
+console.log(`📂 Serving Frontend from: ${DIST_PATH}`);
+if (fs.existsSync(INDEX_PATH)) {
+    console.log("✅ index.html found!");
+} else {
+    console.error("❌ ERROR: index.html is MISSING at " + INDEX_PATH);
+    // 🔍 LIST FILES: See what is actually in the root folder
+    try {
+        console.log("📂 Files in Root:", fs.readdirSync(process.cwd()));
+    } catch (e) {
+        console.log("Could not list files.");
+    }
+}
 
+// Serve the Static Files
+app.use(express.static(DIST_PATH));
 
-app.use(express.static(path.join(__dirname, '../dist')));
-
+// Handle React Routing
 app.get(/(.*)/, (req, res) => {
-  res.sendFile(path.join(__dirname, '../dist/index.html'));
+  if (fs.existsSync(INDEX_PATH)) {
+    res.sendFile(INDEX_PATH);
+  } else {
+    res.status(404).send("404 Error: Frontend file (index.html) is missing on server. Check build logs.");
+  }
 });
-// -----------------------------------------------------------------
-// 4. Start Server
-// -----------------------------------------------------------------
-
-// ... (Your app.get(/(.*)/, ...) is here) ...
 
 // -----------------------------------------------------------------
 // 5. Start Server
 // -----------------------------------------------------------------
-
-// 🟢 DEFINE PORT (This was missing!)
-const PORT = process.env.PORT || 4000; // Use 'PORT' for Render, 'OCR_SERVER_PORT' for local
+const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
   console.log(`✅ Main server running on port ${PORT}`);
-  console.log(`   - Static Frontend: Serving ../dist`);
-  console.log(`   - API Routes: Loaded`);
 });
