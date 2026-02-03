@@ -1,3 +1,5 @@
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
@@ -9,7 +11,8 @@ import polishGroqRoute from "./polishGroqRoute.js";
 import syncRoute from "./syncRoute.js";
 
 dotenv.config({ path: ".env.azure" });
-
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 // -----------------------------------------------------------------
 // 1. Configuration & Checks
 // -----------------------------------------------------------------
@@ -242,15 +245,25 @@ app.use(mergeRoutes);
 // 👇 USE NEW ROUTE
 app.use(polishGroqRoute);
 app.use(syncRoute);
+
+// =========================================================
+// 🟢 THE FIX: SERVE FRONTEND FROM NODE (Replaces Vite Proxy)
+// =========================================================
+
+// 1. Serve the React Build Folder
+// This tells Express: "If they ask for a file (js, css, logo), look in ../dist"
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// 2. Handle React Routing (The Catch-All)
+// This tells Express: "If they ask for a page I don't know, give them index.html"
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
 // -----------------------------------------------------------------
 // 4. Start Server
 // -----------------------------------------------------------------
 
-const PORT = process.env.OCR_SERVER_PORT || 4000;
-
 app.listen(PORT, () => {
-  console.log(`✅ Main server (OCR/Merge) running at http://localhost:${PORT}`);
-  console.log(`   - Gemini OCR: /api/ocr-gemini`);
-  console.log(`   - GSeed Token: /api/get-grapeseed-token`);
-  console.log(`   - Azure OCR:  /api/ocr-azure (Backup)`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
+
