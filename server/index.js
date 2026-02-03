@@ -11,7 +11,7 @@ import mergeRoutes from "./mergeRoutes.js";
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
 import polishGroqRoute from "./polishGroqRoute.js";
 import syncRoute from "./syncRoute.js";
-import transcriptionRoutes from "./routes.js";
+import transcriptionRoutes from "./polishGroqRoute.js";
 
 dotenv.config({ path: ".env.azure" });
 // Fix for __dirname in ES modules
@@ -277,3 +277,4 @@ app.listen(PORT, () => {
   console.log(`   - Azure OCR:  /api/ocr-azure (Backup)`);
 
 });
+
