@@ -246,17 +246,10 @@ app.use(mergeRoutes);
 app.use(polishGroqRoute);
 app.use(syncRoute);
 
-// =========================================================
-// 🟢 THE FIX: SERVE FRONTEND FROM NODE (Replaces Vite Proxy)
-// =========================================================
 
-// 1. Serve the React Build Folder
-// This tells Express: "If they ask for a file (js, css, logo), look in ../dist"
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// 2. Handle React Routing (The Catch-All)
-// This tells Express: "If they ask for a page I don't know, give them index.html"
-app.get('*', (req, res) => {
+app.get(/(.*)/, (req, res) => {
   res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 // -----------------------------------------------------------------
