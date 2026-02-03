@@ -256,7 +256,17 @@ app.get(/(.*)/, (req, res) => {
 // 4. Start Server
 // -----------------------------------------------------------------
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+// ... (Your app.get(/(.*)/, ...) is here) ...
 
+// -----------------------------------------------------------------
+// 5. Start Server
+// -----------------------------------------------------------------
+
+// 🟢 DEFINE PORT (This was missing!)
+const PORT = process.env.PORT || 4000; // Use 'PORT' for Render, 'OCR_SERVER_PORT' for local
+
+app.listen(PORT, () => {
+  console.log(`✅ Main server running on port ${PORT}`);
+  console.log(`   - Static Frontend: Serving ../dist`);
+  console.log(`   - API Routes: Loaded`);
+});
