@@ -2,69 +2,62 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch"; 
+import path from "path";
+import { fileURLToPath } from "url";
 import mergeRoutes from "./mergeRoutes.js";
-// 👇 Import the new Gemini Route
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
 import polishGroqRoute from "./polishGroqRoute.js";
 import syncRoute from "./syncRoute.js";
 
 dotenv.config({ path: ".env.azure" });
 
-// -----------------------------------------------------------------
-// 1. Configuration & Checks
-// -----------------------------------------------------------------
-const AZURE_OCR_ENDPOINT = process.env.AZURE_OCR_ENDPOINT;
-const AZURE_OCR_KEY = process.env.AZURE_OCR_KEY;
-const GEMINI_KEY = process.env.GOOGLE_GENERATIVE_AI_KEY;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-if (!GEMINI_KEY) {
-  console.warn("⚠️ GOOGLE_GENERATIVE_AI_KEY is missing in .env.azure. Gemini OCR will fail.");
-}
-
-if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
-  console.warn("⚠️ AZURE_OCR keys missing. The /api/ocr-azure route will fail if used.");
-}
-
-// -----------------------------------------------------------------
-// 2. Main Express App Setup
-// -----------------------------------------------------------------
 const app = express();
 
-// 1. Keep your logic-based origin check
+// -----------------------------------------------------------------
+// 1. Port & Environment Logic
+// -----------------------------------------------------------------
+const PORT = process.env.PORT || process.env.OCR_SERVER_PORT || 4000;
+
 const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
     ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
     : 'http://localhost:5173'; 
 
+// -----------------------------------------------------------------
+// 2. Middleware (CORS & Body Parsing)
+// -----------------------------------------------------------------
 app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin || 
-        origin.includes('localhost') || 
-        origin.includes('127.0.0.1') || 
-        origin.includes('vercel.app')) {
-      return callback(null, true);
-    }
+  origin: function(origin, callback){
+    if(!origin) return callback(null, true);
+    if (origin.includes('localhost')) return callback(null, true);
+    if (origin.includes('192.168')) return callback(null, true);
+    if (origin === ALLOWED_ORIGIN || origin.includes('vercel.app')) return callback(null, true);
     return callback(new Error(`CORS blocked for origin: ${origin}`), false);
   },
-  credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  credentials: false,
 }));
 
-// 🟢 CRITICAL: Handle Pre-flight for all routes
-app.options('/:any*', cors());
-
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
-// 3. Register Routes
+// 3. Register Routes (Your Original Logic)
 // -----------------------------------------------------------------
-
 app.use(geminiOcrRoutes);
+app.use(mergeRoutes); 
+app.use(polishGroqRoute);
+app.use(syncRoute);
 
+// Azure OCR Endpoint
 app.post("/api/ocr-azure", async (req, res) => {
+  const AZURE_OCR_ENDPOINT = process.env.AZURE_OCR_ENDPOINT;
+  const AZURE_OCR_KEY = process.env.AZURE_OCR_KEY;
+
   if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
       return res.status(500).json({ error: "OCR keys are not configured on the server." });
   }
+
   try {
     const { imageBase64 } = req.body || {};
     if (!imageBase64) return res.status(400).json({ error: "Missing imageBase64" });
@@ -94,6 +87,10 @@ app.post("/api/ocr-azure", async (req, res) => {
     for (const block of blocks) {
       for (const line of block.lines ?? []) {
         if (line.text) rawLines.push(line.text.trim());
+        if (line.words && line.words.length) {
+          const avg = line.words.reduce((sum, w) => sum + (w.confidence ?? 0), 0) / line.words.length;
+          confidences.push(avg);
+        }
       }
     }
 
@@ -103,12 +100,14 @@ app.post("/api/ocr-azure", async (req, res) => {
       return acc.length === 0 ? line : (isNewItem ? `${acc}\n${line}` : `${acc} ${line}`);
     }, "");
 
-    return res.json({ text });
+    const confidence = confidences.length === 0 ? 0 : confidences.reduce((a, b) => a + b, 0) / confidences.length;
+    return res.json({ text, confidence });
   } catch (err) {
     return res.status(500).json({ error: "Server error" });
   }
 });
 
+// GrapeSEED Token Proxy
 app.post("/api/get-grapeseed-token", async (req, res) => {
     const authHeader = (process.env.GRAPESEED_AUTH_HEADER || "").trim();
     const username = (process.env.GRAPESEED_USERNAME || "").trim();
@@ -136,6 +135,7 @@ app.post("/api/get-grapeseed-token", async (req, res) => {
     }
 });
 
+// GrapeSEED Class Data Proxy
 app.post("/api/get-grapeseed-classes", async (req, res) => {
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: "Missing Access Token" });
@@ -157,33 +157,26 @@ app.post("/api/get-grapeseed-classes", async (req, res) => {
     }
 });
 
-app.use(mergeRoutes); 
-
-// 🔥 MOUNT ROUTE FILE HERE
-app.use(polishGroqRoute); 
-app.use(syncRoute);
-
-// index.js (inside your server folder)
-const PORT = process.env.PORT || 4000;
-
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// 🟢 THE FIX: Go up one level (..) to find dist from the server folder
+// -----------------------------------------------------------------
+// 4. Static Serving & SPA Routing (Fix for Render)
+// -----------------------------------------------------------------
+// Go up one level from /server to the root /dist folder
 const rootDistPath = path.join(__dirname, "..", "dist");
 
 app.use(express.static(rootDistPath));
 
-app.get("/:any*", (req, res) => {
+// Final catch-all for SPA
+app.get("*", (req, res) => {
+  // Prevent sending index.html for dead API requests
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: "API route not found" });
   }
   res.sendFile(path.join(rootDistPath, "index.html"));
 });
 
+// -----------------------------------------------------------------
+// 5. Start Server
+// -----------------------------------------------------------------
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
 });
