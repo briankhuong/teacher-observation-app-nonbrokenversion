@@ -3,7 +3,6 @@ import Groq from "groq-sdk";
 import multer from "multer";
 import axios from "axios";
 import FormData from "form-data";
-import { Readable } from "stream";
 
 
 const router = express.Router();
@@ -63,8 +62,6 @@ router.post("/api/transcribe", upload.single("file"), async (req, res) => {
     res.status(500).json({ error: "Server transcription failed" });
   }
 });
-
-
 // ---------------------------------------------------------
 // 1. SINGLE TEXT POLISH
 // ---------------------------------------------------------
