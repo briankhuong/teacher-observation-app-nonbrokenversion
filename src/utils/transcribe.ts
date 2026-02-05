@@ -1,26 +1,20 @@
-// src/utils/transcribe.ts
-
 export async function transcribeWithGroq(audioBlob: Blob, mimeType: string): Promise<string> {
   const formData = new FormData();
   
-  // 🟢 DETERMINE EXTENSION
-  // If mime is 'audio/webm' -> use .webm
-  // If mime is 'audio/mp4' -> use .m4a (Safari)
+  // 1. Determine the extension based on the browser's mimeType
   const extension = mimeType.includes("mp4") ? "m4a" : "webm";
   
+  // 2. The key MUST be "file" to match the server's upload.single("file")
   formData.append("file", audioBlob, `recording.${extension}`);
-  formData.append("mimeType", mimeType); // Optional, but good for debugging
 
-  const SERVER_URL = "/api/transcribe"; 
-
-  const response = await fetch(SERVER_URL, {
+  const response = await fetch("/api/transcribe", {
     method: "POST",
-    body: formData,
+    body: formData, // Do NOT set Content-Type header manually; fetch handles the boundary
   });
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `Server error: ${response.status}`);
+    const err = await response.json();
+    throw new Error(err.error || "Transcription failed");
   }
 
   const data = await response.json();

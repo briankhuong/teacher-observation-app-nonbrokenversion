@@ -4,11 +4,12 @@ import multer from "multer";
 import axios from "axios";
 import FormData from "form-data";
 
-
 const router = express.Router();
+
 // Memory storage handles the audio buffer directly
 const upload = multer({ storage: multer.memoryStorage() });
-// 🔒 Secure Initialization (No dangerouslyAllowBrowser)
+
+// 🔒 Secure Initialization
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY, 
 });
@@ -16,37 +17,21 @@ const groq = new Groq({
 router.use(express.json());
 
 // ---------------------------------------------------------
-// 0. SECURE TRANSCRIPTION PROXY (Fixed for Code-Switching)
+// 0. NEW: TRANSCRIPTION PROXY (ADDED)
 // ---------------------------------------------------------
-
-
-
 router.post("/api/transcribe", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No audio file provided" });
 
-    // 🔍 Debug Log: See what arrived at the server
-    console.log(`🎤 Received file: ${req.file.originalname} (${req.file.size} bytes)`);
-
     const formData = new FormData();
-
-    // 1. Config
-    // 🟢 MANDATORY: Force "vi" so Vietnamese is never ignored.
     formData.append("language", "vi"); 
-    
-    // 🟢 MANDATORY: The "Anchor" Prompt to allow English to pass through.
     formData.append("prompt", "GrapeSEED Teacher Observation. Checking indicators. Unit 5 Lesson 1. Học sinh phát âm tốt. OK so this is a test. Giáo viên làm mẫu.");
-    
     formData.append("model", "whisper-large-v3");
     formData.append("response_format", "json");
 
-    // 2. Append File (The Fix)
-    // ❌ OLD (Likely failed): formData.append("file", buffer, { filename: ... })
-    // ✅ NEW (Universal): formData.append("file", buffer, filenameString)
     const filename = req.file.originalname || "recording.webm";
     formData.append("file", req.file.buffer, filename);
 
-    // 3. Send to Groq
     const response = await axios.post("https://api.groq.com/openai/v1/audio/transcriptions", formData, {
       headers: {
         "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
@@ -54,16 +39,15 @@ router.post("/api/transcribe", upload.single("file"), async (req, res) => {
       },
     });
 
-    console.log("✅ Groq Response:", response.data); // See the result in your terminal
     res.json({ text: response.data.text });
-
   } catch (error) {
     console.error("❌ Transcription Failed:", error.response?.data || error.message);
     res.status(500).json({ error: "Server transcription failed" });
   }
 });
+
 // ---------------------------------------------------------
-// 1. SINGLE TEXT POLISH
+// 1. SINGLE TEXT POLISH (KEPT EXACTLY AS IS)
 // ---------------------------------------------------------
 router.post("/api/polish-text", async (req, res) => {
   try {
@@ -124,11 +108,11 @@ router.post("/api/polish-text", async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 2. BATCH POLISH
+// 2. BATCH POLISH (KEPT EXACTLY AS IS)
 // ---------------------------------------------------------
 router.post("/api/polish-batch", async (req, res) => {
   try {
-    const { items } = req.body; // Expects array of { id, text }
+    const { items } = req.body; 
     
     const systemPrompt = `You are a professional text processing engine for an English Phonics Teacher.
   
@@ -169,17 +153,13 @@ router.post("/api/polish-batch", async (req, res) => {
 
 // ---------------------------------------------------------
 // STEP 1: AGENTIC LOGIC COMPILER (Detective -> Writer Pipeline)
+// KEPT EXACTLY AS IS - NO CHANGES TO LOGIC OR MODELS
 // ---------------------------------------------------------
 router.post("/api/generate-next-steps", async (req, res) => {
   try {
     const { notes } = req.body; 
     if (!notes || notes.length === 0) return res.json({ result: "" });
 
-    // =========================================================
-    // 🕵️ SUB-STEP A: THE PEDAGOGICAL DETECTIVE (Logic Only)
-    // Goal: Identify the "Real" Error and Output Safe JSON
-    // =========================================================
-    
     const detectiveSystemPrompt = `
     ROLE: Expert GrapeSEED Educational Analyst.
     TASK: Analyze teacher observation notes to identify the ROOT CAUSE and LOGICAL CATEGORY.
@@ -209,7 +189,6 @@ router.post("/api/generate-next-steps", async (req, res) => {
        - Identify Capitalized phrases (e.g., "The Beehive") and Student Speech (e.g. said "duck").
     `;
 
-    // Call Agent A (Detective)
     const detectiveResponse = await groq.chat.completions.create({
       messages: [
         { role: "system", content: detectiveSystemPrompt },
@@ -220,7 +199,6 @@ router.post("/api/generate-next-steps", async (req, res) => {
       temperature: 0.1, 
     });
 
-    // 🛡️ Robust Parsing: Handle potential markdown wrappers
     let rawContent = detectiveResponse.choices[0]?.message?.content || "{}";
     rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
 
@@ -234,11 +212,6 @@ router.post("/api/generate-next-steps", async (req, res) => {
         console.error("JSON Parse Error on Detective Output:", rawContent);
         analysisData = { analysis: [] };
     }
-
-    // =========================================================
-    // ✍️ SUB-STEP B: THE VIETNAMESE WRITER (Translation + Glossary)
-    // Goal: Write professional feedback using the Analysis + Glossary
-    // =========================================================
 
     const writerSystemPrompt = `
     ROLE: Senior Vietnamese Educational Administrator.
@@ -327,7 +300,6 @@ router.post("/api/generate-next-steps", async (req, res) => {
       3. **Specific Component Names** (e.g. học liệu "Writers").
     `;
 
-    // Call Agent B (Writer)
     const writerResponse = await groq.chat.completions.create({
       messages: [
         { role: "system", content: writerSystemPrompt },
@@ -345,4 +317,5 @@ router.post("/api/generate-next-steps", async (req, res) => {
     res.json({ result: "- Không thể tạo báo cáo do lỗi hệ thống. Vui lòng thử lại." });
   }
 });
+
 export default router;
