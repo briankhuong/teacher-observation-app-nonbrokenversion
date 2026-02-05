@@ -1617,70 +1617,77 @@ const startRecording = async () => {
 const stopRecording = async (target: 'indicator' | 'admin') => {
   if (!mediaRecorderRef.current || !isRecording) return;
 
+  // 1. Trigger the stop
   mediaRecorderRef.current.stop();
   setIsRecording(false);
   setIsTranscribing(true);
 
-  // Wait 1s to ensure the last chunk is captured
-  await new Promise(r => setTimeout(r, 1000));
+  // 2. Kill the Microphone stream (Releases the hardware)
+  mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
 
-  // 🔍 Debug: Check if we actually recorded audio
+  // 3. Wait for the final data chunks to settle
+  // A 500ms - 1s delay ensures the 'ondataavailable' event has finished firing
+  await new Promise(r => setTimeout(r, 800));
+
+  // 4. Calculate total size for debugging
   const blobSize = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
-  console.log(`🎙️ Recording finished. Total Size: ${blobSize} bytes`);
+  console.log(`🎙️ Final Recording Stats - Size: ${blobSize} bytes, Type: ${mimeTypeRef.current}`);
   
   if (blobSize === 0) {
-    alert("❌ Microphone recorded silence (0 bytes). Please check your mic permissions.");
+    alert("❌ Recording failed: 0 bytes captured. Please check your microphone.");
     setIsTranscribing(false);
     return;
   }
 
-  // Use the stored mimeType or default to webm
+  // 5. Construct the Blob using the exact same type used during initialization
   const mimeType = mimeTypeRef.current || "audio/webm";
   const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
 
   try {
+    // 6. Send to your Port 4000 backend
     const text = await transcribeWithGroq(audioBlob, mimeType);
     
-    // 🔍 Debug: Alert exactly what came back
     console.log("📝 Transcribed Text:", text);
+    
     if (!text || text.trim() === "") {
-        alert("⚠️ Server returned empty text. Check the terminal logs for errors.");
+        console.warn("⚠️ Server returned empty text.");
+        return;
     }
 
-    // ... Update State (setIndicators etc) ...
+    const textToAdd = text.trim();
+
+    // 7. Update State based on the target
     if (target === 'indicator') {
         setIndicators(prev => {
             const newInds = [...prev];
+            // Safety check for current active index
             if (!newInds[activeIndex]) return prev;
             
             const existing = newInds[activeIndex].commentText || "";
-            // Append safely
-            const textToAdd = text.trim();
-            if (textToAdd) {
-                newInds[activeIndex] = {
-                    ...newInds[activeIndex],
-                    commentText: existing ? `${existing}\n${textToAdd}` : textToAdd
-                };
-            }
+            newInds[activeIndex] = {
+                ...newInds[activeIndex],
+                commentText: existing ? `${existing}\n${textToAdd}` : textToAdd
+            };
             return newInds;
         });
     } else {
-        // ... Admin Logic ...
-        const textToAdd = text.trim();
-        if (textToAdd) {
-            setAdminPreview(prev => prev ? { 
-                ...prev, 
-                trainerSummary: (prev.trainerSummary || "") + "\n" + textToAdd 
-            } : prev);
-            setAdminSummaryVN(prev => (prev || "") + "\n" + textToAdd);
-        }
+        // Update Admin Preview state
+        setAdminPreview(prev => prev ? { 
+            ...prev, 
+            trainerSummary: (prev.trainerSummary || "") + "\n" + textToAdd 
+        } : prev);
+        
+        // Update the VN Summary directly if that state is used separately
+        setAdminSummaryVN(prev => (prev || "") + "\n" + textToAdd);
     }
 
   } catch (err: any) {
-    console.error("Transcription Logic Error:", err);
-    alert("Error: " + err.message);
+    console.error("Transcription Pipeline Error:", err);
+    alert("Transcription Error: " + err.message);
   } finally {
     setIsTranscribing(false);
+    // 8. Clear chunks for the next recording session
+    audioChunksRef.current = [];
   }
 };
 
