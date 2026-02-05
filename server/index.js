@@ -159,13 +159,12 @@ app.use(express.static(rootDistPath));
 
 // 🔥 THE MINIMUM CHANGE: Added '/*' instead of just '*'
 // Express 5 needs the leading slash for the wildcard to be parsed as a path
-app.get("/*", (req, res) => {
+app.get("/:catchall*", (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: "API route not found" });
   }
   res.sendFile(path.join(rootDistPath, "index.html"));
 });
-
 // -----------------------------------------------------------------
 // 5. Start Server
 // -----------------------------------------------------------------
