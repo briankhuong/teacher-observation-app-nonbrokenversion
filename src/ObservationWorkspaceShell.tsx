@@ -1584,6 +1584,8 @@ const handleStrokesChange = (index: number, newStrokes: Stroke[]) => {
 
 
 const mimeTypeRef = useRef<string>("");
+
+
 const startRecording = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1617,79 +1619,73 @@ const startRecording = async () => {
 const stopRecording = async (target: 'indicator' | 'admin') => {
   if (!mediaRecorderRef.current || !isRecording) return;
 
-  // 1. Trigger the stop
   mediaRecorderRef.current.stop();
   setIsRecording(false);
   setIsTranscribing(true);
 
-  // 2. Kill the Microphone stream (Releases the hardware)
-  mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+  // Wait 1s to ensure the last chunk is captured
+  await new Promise(r => setTimeout(r, 1000));
 
-  // 3. Wait for the final data chunks to settle
-  // A 500ms - 1s delay ensures the 'ondataavailable' event has finished firing
-  await new Promise(r => setTimeout(r, 800));
-
-  // 4. Calculate total size for debugging
+  // 🔍 Debug: Check if we actually recorded audio
   const blobSize = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
-  console.log(`🎙️ Final Recording Stats - Size: ${blobSize} bytes, Type: ${mimeTypeRef.current}`);
+  console.log(`🎙️ Recording finished. Total Size: ${blobSize} bytes`);
   
   if (blobSize === 0) {
-    alert("❌ Recording failed: 0 bytes captured. Please check your microphone.");
+    alert("❌ Microphone recorded silence (0 bytes). Please check your mic permissions.");
     setIsTranscribing(false);
     return;
   }
 
-  // 5. Construct the Blob using the exact same type used during initialization
+  // Use the stored mimeType or default to webm
   const mimeType = mimeTypeRef.current || "audio/webm";
   const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
 
   try {
-    // 6. Send to your Port 4000 backend
     const text = await transcribeWithGroq(audioBlob, mimeType);
     
+    // 🔍 Debug: Alert exactly what came back
     console.log("📝 Transcribed Text:", text);
-    
     if (!text || text.trim() === "") {
-        console.warn("⚠️ Server returned empty text.");
-        return;
+        alert("⚠️ Server returned empty text. Check the terminal logs for errors.");
     }
 
-    const textToAdd = text.trim();
-
-    // 7. Update State based on the target
+    // ... Update State (setIndicators etc) ...
     if (target === 'indicator') {
         setIndicators(prev => {
             const newInds = [...prev];
-            // Safety check for current active index
             if (!newInds[activeIndex]) return prev;
             
             const existing = newInds[activeIndex].commentText || "";
-            newInds[activeIndex] = {
-                ...newInds[activeIndex],
-                commentText: existing ? `${existing}\n${textToAdd}` : textToAdd
-            };
+            // Append safely
+            const textToAdd = text.trim();
+            if (textToAdd) {
+                newInds[activeIndex] = {
+                    ...newInds[activeIndex],
+                    commentText: existing ? `${existing}\n${textToAdd}` : textToAdd
+                };
+            }
             return newInds;
         });
     } else {
-        // Update Admin Preview state
-        setAdminPreview(prev => prev ? { 
-            ...prev, 
-            trainerSummary: (prev.trainerSummary || "") + "\n" + textToAdd 
-        } : prev);
-        
-        // Update the VN Summary directly if that state is used separately
-        setAdminSummaryVN(prev => (prev || "") + "\n" + textToAdd);
+        // ... Admin Logic ...
+        const textToAdd = text.trim();
+        if (textToAdd) {
+            setAdminPreview(prev => prev ? { 
+                ...prev, 
+                trainerSummary: (prev.trainerSummary || "") + "\n" + textToAdd 
+            } : prev);
+            setAdminSummaryVN(prev => (prev || "") + "\n" + textToAdd);
+        }
     }
 
   } catch (err: any) {
-    console.error("Transcription Pipeline Error:", err);
-    alert("Transcription Error: " + err.message);
+    console.error("Transcription Logic Error:", err);
+    alert("Error: " + err.message);
   } finally {
     setIsTranscribing(false);
-    // 8. Clear chunks for the next recording session
-    audioChunksRef.current = [];
   }
 };
+
 
 
 const handlePolishWithAi = async () => {
