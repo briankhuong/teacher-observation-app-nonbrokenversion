@@ -9,7 +9,7 @@ const router = express.Router();
 // Memory storage handles the audio buffer directly
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 🔒 Secure Initialization
+// 🔒 Secure Initialization (No dangerouslyAllowBrowser)
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY, 
 });
@@ -24,11 +24,13 @@ router.post("/api/transcribe", upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No audio file provided" });
 
     const formData = new FormData();
+    // Force Vietnamese + English Prompt
     formData.append("language", "vi"); 
     formData.append("prompt", "GrapeSEED Teacher Observation. Checking indicators. Unit 5 Lesson 1. Học sinh phát âm tốt. OK so this is a test. Giáo viên làm mẫu.");
     formData.append("model", "whisper-large-v3");
     formData.append("response_format", "json");
 
+    // Pass the file buffer to Groq
     const filename = req.file.originalname || "recording.webm";
     formData.append("file", req.file.buffer, filename);
 
@@ -47,7 +49,7 @@ router.post("/api/transcribe", upload.single("file"), async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 1. SINGLE TEXT POLISH (KEPT EXACTLY AS IS)
+// 1. SINGLE TEXT POLISH
 // ---------------------------------------------------------
 router.post("/api/polish-text", async (req, res) => {
   try {
@@ -108,11 +110,11 @@ router.post("/api/polish-text", async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 2. BATCH POLISH (KEPT EXACTLY AS IS)
+// 2. BATCH POLISH
 // ---------------------------------------------------------
 router.post("/api/polish-batch", async (req, res) => {
   try {
-    const { items } = req.body; 
+    const { items } = req.body; // Expects array of { id, text }
     
     const systemPrompt = `You are a professional text processing engine for an English Phonics Teacher.
   
@@ -153,13 +155,17 @@ router.post("/api/polish-batch", async (req, res) => {
 
 // ---------------------------------------------------------
 // STEP 1: AGENTIC LOGIC COMPILER (Detective -> Writer Pipeline)
-// KEPT EXACTLY AS IS - NO CHANGES TO LOGIC OR MODELS
 // ---------------------------------------------------------
 router.post("/api/generate-next-steps", async (req, res) => {
   try {
     const { notes } = req.body; 
     if (!notes || notes.length === 0) return res.json({ result: "" });
 
+    // =========================================================
+    // 🕵️ SUB-STEP A: THE PEDAGOGICAL DETECTIVE (Logic Only)
+    // Goal: Identify the "Real" Error and Output Safe JSON
+    // =========================================================
+    
     const detectiveSystemPrompt = `
     ROLE: Expert GrapeSEED Educational Analyst.
     TASK: Analyze teacher observation notes to identify the ROOT CAUSE and LOGICAL CATEGORY.
@@ -189,6 +195,7 @@ router.post("/api/generate-next-steps", async (req, res) => {
        - Identify Capitalized phrases (e.g., "The Beehive") and Student Speech (e.g. said "duck").
     `;
 
+    // Call Agent A (Detective)
     const detectiveResponse = await groq.chat.completions.create({
       messages: [
         { role: "system", content: detectiveSystemPrompt },
@@ -199,6 +206,7 @@ router.post("/api/generate-next-steps", async (req, res) => {
       temperature: 0.1, 
     });
 
+    // 🛡️ Robust Parsing: Handle potential markdown wrappers
     let rawContent = detectiveResponse.choices[0]?.message?.content || "{}";
     rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
 
@@ -212,6 +220,11 @@ router.post("/api/generate-next-steps", async (req, res) => {
         console.error("JSON Parse Error on Detective Output:", rawContent);
         analysisData = { analysis: [] };
     }
+
+    // =========================================================
+    // ✍️ SUB-STEP B: THE VIETNAMESE WRITER (Translation + Glossary)
+    // Goal: Write professional feedback using the Analysis + Glossary
+    // =========================================================
 
     const writerSystemPrompt = `
     ROLE: Senior Vietnamese Educational Administrator.
@@ -300,6 +313,7 @@ router.post("/api/generate-next-steps", async (req, res) => {
       3. **Specific Component Names** (e.g. học liệu "Writers").
     `;
 
+    // Call Agent B (Writer)
     const writerResponse = await groq.chat.completions.create({
       messages: [
         { role: "system", content: writerSystemPrompt },
@@ -317,5 +331,4 @@ router.post("/api/generate-next-steps", async (req, res) => {
     res.json({ result: "- Không thể tạo báo cáo do lỗi hệ thống. Vui lòng thử lại." });
   }
 });
-
 export default router;
