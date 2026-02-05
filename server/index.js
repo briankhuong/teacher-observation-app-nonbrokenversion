@@ -50,15 +50,15 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
-// 3. Register Routes (MUST BE BEFORE STATIC FILES)
+// 3. Register Routes (ORDER MATTERS)
 // -----------------------------------------------------------------
-
+// 🟢 FIXED: Move polishGroqRoute to the TOP to prevent blocking
+app.use(polishGroqRoute); // Handles /api/transcribe and /api/polish-text
 app.use(geminiOcrRoutes);
 app.use(mergeRoutes); 
-app.use(polishGroqRoute); // Handles /api/transcribe and /api/polish-text
 app.use(syncRoute);
 
-// Azure OCR Endpoint (Backup)
+// Manual API Routes
 app.post("/api/ocr-azure", async (req, res) => {
   if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
       return res.status(500).json({ error: "OCR keys are not configured." });
@@ -176,10 +176,19 @@ app.post("/api/get-grapeseed-classes", async (req, res) => {
 });
 
 // -----------------------------------------------------------------
+// 🚨 SAFETY TRAP: Prevent HTML leaking into API calls
+// -----------------------------------------------------------------
+// If a request starts with /api/ but wasn't handled above, return JSON 404.
+// This prevents the "Unexpected token T" error on the frontend.
+app.all('/api/*', (req, res) => {
+  console.error(`❌ API 404: Route Not Found - ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ error: `API endpoint not found: ${req.originalUrl}` });
+});
+
+// -----------------------------------------------------------------
 // 4. SERVE REACT FRONTEND (Robust Fix)
 // -----------------------------------------------------------------
 
-// 🟢 Use process.cwd() to get the Project Root directly
 const DIST_PATH = path.join(process.cwd(), 'dist');
 const INDEX_PATH = path.join(DIST_PATH, 'index.html');
 
@@ -188,18 +197,14 @@ if (fs.existsSync(INDEX_PATH)) {
     console.log("✅ index.html found!");
 } else {
     console.error("❌ ERROR: index.html is MISSING at " + INDEX_PATH);
-    try {
-        console.log("📂 Files in Root:", fs.readdirSync(process.cwd()));
-    } catch (e) {
-        console.log("Could not list files.");
-    }
 }
 
 // Serve the Static Files
 app.use(express.static(DIST_PATH));
 
 // Handle React Routing
-app.get(/(.*)/, (req, res) => {
+// 🟢 FIXED: Replaced greedy regex with standard catch-all
+app.get('*', (req, res) => {
   if (fs.existsSync(INDEX_PATH)) {
     res.sendFile(INDEX_PATH);
   } else {
