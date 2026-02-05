@@ -1,19 +1,21 @@
+// src/utils/transcribe.ts
+
 export async function transcribeWithGroq(audioBlob: Blob, mimeType: string): Promise<string> {
   const formData = new FormData();
   
   // 🟢 DETERMINE EXTENSION
+  // If mime is 'audio/webm' -> use .webm
+  // If mime is 'audio/mp4' -> use .m4a (Safari)
   const extension = mimeType.includes("mp4") ? "m4a" : "webm";
   
   formData.append("file", audioBlob, `recording.${extension}`);
-  formData.append("mimeType", mimeType);
+  formData.append("mimeType", mimeType); // Optional, but good for debugging
 
-  // 🔥 FIX: Explicitly point to the backend port
-  const SERVER_URL = "http://localhost:4000/api/transcribe"; 
+const SERVER_URL = `${import.meta.env.VITE_API_BASE_URL}/api/transcribe`;
 
   const response = await fetch(SERVER_URL, {
     method: "POST",
     body: formData,
-    // Note: Browser automatically sets the correct Multipart boundary headers
   });
 
   if (!response.ok) {
