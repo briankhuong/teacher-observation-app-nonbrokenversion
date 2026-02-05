@@ -163,7 +163,29 @@ app.use(mergeRoutes);
 app.use(polishGroqRoute); 
 app.use(syncRoute);
 
-const PORT = process.env.OCR_SERVER_PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`✅ Main server running at http://localhost:${PORT}`);
+// index.js (inside your server folder)
+const PORT = process.env.PORT || 4000;
+
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 🟢 THE FIX: Go up one level (..) to find dist from the server folder
+const rootDistPath = path.join(__dirname, "..", "dist");
+
+app.use(express.static(rootDistPath));
+
+// Handle SPA routing
+app.get("*", (req, res) => {
+  // Check if it's an API call first - don't send index.html for failed API routes
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: "API route not found" });
+  }
+  res.sendFile(path.join(rootDistPath, "index.html"));
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running on port ${PORT}`);
 });
