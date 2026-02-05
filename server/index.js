@@ -42,7 +42,7 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
-// 3. Register Routes (Your Original Logic)
+// 3. Register Routes
 // -----------------------------------------------------------------
 app.use(geminiOcrRoutes);
 app.use(mergeRoutes); 
@@ -82,15 +82,10 @@ app.post("/api/ocr-azure", async (req, res) => {
     const result = await azureResponse.json();
     const blocks = result?.readResult?.blocks ?? [];
     const rawLines = [];
-    const confidences = [];
 
     for (const block of blocks) {
       for (const line of block.lines ?? []) {
         if (line.text) rawLines.push(line.text.trim());
-        if (line.words && line.words.length) {
-          const avg = line.words.reduce((sum, w) => sum + (w.confidence ?? 0), 0) / line.words.length;
-          confidences.push(avg);
-        }
       }
     }
 
@@ -100,8 +95,7 @@ app.post("/api/ocr-azure", async (req, res) => {
       return acc.length === 0 ? line : (isNewItem ? `${acc}\n${line}` : `${acc} ${line}`);
     }, "");
 
-    const confidence = confidences.length === 0 ? 0 : confidences.reduce((a, b) => a + b, 0) / confidences.length;
-    return res.json({ text, confidence });
+    return res.json({ text });
   } catch (err) {
     return res.status(500).json({ error: "Server error" });
   }
@@ -127,7 +121,6 @@ app.post("/api/get-grapeseed-token", async (req, res) => {
             body: bodyString,
         });
 
-        if (!response.ok) return res.status(response.status).json({ error: "Token request failed" });
         const data = await response.json();
         res.json(data);
     } catch (error) {
@@ -158,16 +151,15 @@ app.post("/api/get-grapeseed-classes", async (req, res) => {
 });
 
 // -----------------------------------------------------------------
-// 4. Static Serving & SPA Routing (Fix for Render)
+// 4. Static Serving & SPA Routing (Express 5.0 Fix)
 // -----------------------------------------------------------------
-// Go up one level from /server to the root /dist folder
 const rootDistPath = path.join(__dirname, "..", "dist");
 
 app.use(express.static(rootDistPath));
 
-// Final catch-all for SPA
-app.get("*", (req, res) => {
-  // Prevent sending index.html for dead API requests
+// 🔥 THE MINIMUM CHANGE: Added '/*' instead of just '*'
+// Express 5 needs the leading slash for the wildcard to be parsed as a path
+app.get("/*", (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: "API route not found" });
   }
