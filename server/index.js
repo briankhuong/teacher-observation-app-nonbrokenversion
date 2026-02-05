@@ -4,12 +4,12 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch"; 
-import fs from 'fs'; // 🟢 FIXED: Imported at the top
+import fs from 'fs'; 
 
 // Routes
 import mergeRoutes from "./mergeRoutes.js";
 import geminiOcrRoutes from "./ocrGeminiRoute.js";
-import polishGroqRoute from "./polishGroqRoute.js"; // 🟢 Contains Transcribe + Polish
+import polishGroqRoute from "./polishGroqRoute.js"; 
 import syncRoute from "./syncRoute.js";
 
 dotenv.config({ path: ".env.azure" });
@@ -50,12 +50,12 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
-// 3. Register Routes
+// 3. Register Routes (MUST BE BEFORE STATIC FILES)
 // -----------------------------------------------------------------
 
 app.use(geminiOcrRoutes);
 app.use(mergeRoutes); 
-app.use(polishGroqRoute); // 🟢 This handles /api/transcribe AND /api/polish-text
+app.use(polishGroqRoute); // Handles /api/transcribe and /api/polish-text
 app.use(syncRoute);
 
 // Azure OCR Endpoint (Backup)
@@ -188,7 +188,6 @@ if (fs.existsSync(INDEX_PATH)) {
     console.log("✅ index.html found!");
 } else {
     console.error("❌ ERROR: index.html is MISSING at " + INDEX_PATH);
-    // 🔍 LIST FILES: See what is actually in the root folder
     try {
         console.log("📂 Files in Root:", fs.readdirSync(process.cwd()));
     } catch (e) {
