@@ -50,9 +50,9 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" })); 
 
 // -----------------------------------------------------------------
-// 3. Register Routes (ORDER MATTERS)
+// 3. Register Routes (ORDER MATTERS - APIs FIRST)
 // -----------------------------------------------------------------
-// 🟢 FIXED: Move polishGroqRoute to the TOP to prevent blocking
+
 app.use(polishGroqRoute); // Handles /api/transcribe and /api/polish-text
 app.use(geminiOcrRoutes);
 app.use(mergeRoutes); 
@@ -176,16 +176,6 @@ app.post("/api/get-grapeseed-classes", async (req, res) => {
 });
 
 // -----------------------------------------------------------------
-// 🚨 SAFETY TRAP: Prevent HTML leaking into API calls
-// -----------------------------------------------------------------
-// If a request starts with /api/ but wasn't handled above, return JSON 404.
-// This prevents the "Unexpected token T" error on the frontend.
-app.all('/api/*', (req, res) => {
-  console.error(`❌ API 404: Route Not Found - ${req.method} ${req.originalUrl}`);
-  res.status(404).json({ error: `API endpoint not found: ${req.originalUrl}` });
-});
-
-// -----------------------------------------------------------------
 // 4. SERVE REACT FRONTEND (Robust Fix)
 // -----------------------------------------------------------------
 
@@ -203,7 +193,6 @@ if (fs.existsSync(INDEX_PATH)) {
 app.use(express.static(DIST_PATH));
 
 // Handle React Routing
-// 🟢 FIXED: Replaced greedy regex with standard catch-all
 app.get('*', (req, res) => {
   if (fs.existsSync(INDEX_PATH)) {
     res.sendFile(INDEX_PATH);
