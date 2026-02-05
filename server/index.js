@@ -30,30 +30,30 @@ if (!AZURE_OCR_ENDPOINT || !AZURE_OCR_KEY) {
 // -----------------------------------------------------------------
 const app = express();
 
+// 1. Keep your logic-based origin check
 const ALLOWED_ORIGIN = process.env.NODE_ENV === 'production'
     ? 'https://teacher-observation-app-nonbrokenve-delta.vercel.app' 
     : 'http://localhost:5173'; 
 
-// 🟢 REVISE THIS IN index.js
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow if no origin (like mobile apps or curl) or if it's your Vercel/Local dev
     if (!origin || 
         origin.includes('localhost') || 
         origin.includes('127.0.0.1') || 
         origin.includes('vercel.app')) {
       return callback(null, true);
     }
-    
-    console.log("🚫 Blocked CORS origin:", origin);
     return callback(new Error(`CORS blocked for origin: ${origin}`), false);
   },
-  credentials: true, // Set to true if you ever use cookies/sessions
+  credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json({ limit: "10mb" })); 
+// 🟢 CRITICAL: Handle Pre-flight for all routes
+app.options('*', cors()); 
+
+app.use(express.json({ limit: "10mb" }));
 
 // -----------------------------------------------------------------
 // 3. Register Routes
