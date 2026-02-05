@@ -51,7 +51,7 @@ app.use(cors({
 }));
 
 // 🟢 CRITICAL: Handle Pre-flight for all routes
-app.options('*', cors()); 
+app.options('(.*)', cors());
 
 app.use(express.json({ limit: "10mb" }));
 
@@ -177,9 +177,7 @@ const rootDistPath = path.join(__dirname, "..", "dist");
 
 app.use(express.static(rootDistPath));
 
-// Handle SPA routing
-app.get("*", (req, res) => {
-  // Check if it's an API call first - don't send index.html for failed API routes
+app.get("(.*)", (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: "API route not found" });
   }
