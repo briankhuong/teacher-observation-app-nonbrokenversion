@@ -51,7 +51,7 @@ app.use(cors({
 }));
 
 // 🟢 CRITICAL: Handle Pre-flight for all routes
-app.options('(.*)', cors());
+app.options('/:any*', cors());
 
 app.use(express.json({ limit: "10mb" }));
 
@@ -177,7 +177,7 @@ const rootDistPath = path.join(__dirname, "..", "dist");
 
 app.use(express.static(rootDistPath));
 
-app.get("(.*)", (req, res) => {
+app.get("/:any*", (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: "API route not found" });
   }
