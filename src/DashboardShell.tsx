@@ -476,7 +476,7 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
     if (teacherNames.length > 0) {
       const { data } = await supabase
         .from("teachers")
-        .select("name, school_name, worksheet_url")
+        .select("name, school_name, worksheet_url, grapeseed_id")
         .in("name", teacherNames);
       teacherData = data || [];
     }
@@ -950,8 +950,6 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
 
     const cacheOfflineResources = async () => {
       try {
-        console.log(`☁️ Checking Supabase for schools assigned to: ${user.id}`);
-
         // 2. Fetch Schools (Strictly Filtered by Trainer ID)
         // Note: If RLS is enabled on Supabase, this will return [] unless a policy exists!
         const { data: schools, error: sError } = await supabase
@@ -975,7 +973,7 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
             
             const { data: teachers, error: tError } = await supabase
               .from("teachers")
-              .select("id, name, school_name, campus, email, worksheet_url")
+              .select("id, grapeseed_id, name, school_name, campus, email, worksheet_url")
               .in("school_name", mySchoolNames) // 🟢 Only fetch teachers for MY schools
               .order("name");
             
