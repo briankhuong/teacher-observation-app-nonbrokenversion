@@ -96,7 +96,7 @@ export async function saveObservationToDb(args: {
   meta: ObservationMeta;
   indicators: any[];
   updatedAt: number;
-  lastSync: number; // 👈 NEW PARAMETER
+  lastSync: number;
 }) {
   const { id, status, meta, indicators, updatedAt, lastSync } = args;
 
@@ -113,10 +113,8 @@ export async function saveObservationToDb(args: {
   }
 
   // 2) 🛡️ UPDATED CONFLICT CHECK
-  // Compare Server Time vs. When YOU last saw the data (lastSync)
   const serverTime = serverRow.updated_at ? new Date(serverRow.updated_at).getTime() : 0;
   
-  // Logic: If Server is > 2 seconds newer than your last sync, someone else touched it.
   if (serverTime > lastSync + 2000) {
     throw new Error("CONFLICT: Server has newer data. Please refresh.");
   }
@@ -149,6 +147,21 @@ export async function saveObservationToDb(args: {
   if (writeErr) {
     console.error("[DB] saveObservationToDb error", writeErr);
     throw writeErr;
+  }
+
+  // 🟢 Phase 4: Broadcast metadata to related trainers via Postgres Function
+  if (status === "saved") {
+    const { error: rpcErr } = await supabase.rpc('sync_teacher_crm_metadata', {
+      target_grapeseed_id: mergedMeta.grapeseed_id,
+      new_performance: (mergedMeta as any).performance_rating || null,
+      flagged_indicators: indicators.filter((i: any) => i.is_bad).map((i: any) => i.label)
+    });
+
+    if (rpcErr) {
+      console.error("[CRM] Sync Metadata RPC failed", rpcErr);
+      // We don't throw here to avoid blocking the main save success, 
+      // but we log it for debugging.
+    }
   }
 }
 /**
