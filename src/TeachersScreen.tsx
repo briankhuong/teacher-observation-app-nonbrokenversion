@@ -85,43 +85,83 @@ const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
   const [viewingObservation, setViewingObservation] = useState<any | null>(null);
   const [loadingObs, setLoadingObs] = useState(false);
 
-  useEffect(() => {
-    if (open && row?.grapeseed_id) {
-      const fetchHistory = async () => {
-        setViewingObservation(null); 
-        const { data, error } = await supabase
-          .from('observations')
-          .select('id, observation_date, trainer_name, school_name, campus, support_type, performance_rating')
-          .eq('grapeseed_id', row.grapeseed_id)
-          .order('observation_date', { ascending: false });
+useEffect(() => {
+  if (open && row?.grapeseed_id) {
+    const fetchHistory = async () => {
+      setViewingObservation(null); 
+      const { data, error } = await supabase
+        .from('observations')
+        .select(`
+          id, 
+          observation_date, 
+          teacher_name, 
+          school_name, 
+          campus, 
+          support_type, 
+          performance_rating, 
+          status, 
+          meta,
+          trainer_id
+        `) // 🟢 Removed the join attempt and illegal comments
+        .eq('grapeseed_id', row.grapeseed_id)
+        .order('observation_date', { ascending: false });
 
-        if (!error && data) setSupportHistory(data);
-      };
-      fetchHistory();
-    } else {
-      setSupportHistory([]);
-    }
-  }, [open, row?.grapeseed_id]);
+      if (!error && data) setSupportHistory(data);
+      if (error) console.error("Fetch Error:", error.message);
+    };
+    fetchHistory();
+  } else {
+    setSupportHistory([]);
+  }
+}, [open, row?.grapeseed_id]);
+
+const { goodNotes, growthNotes } = useMemo(() => {
+  const obsIndicators = viewingObservation?.indicators;
+
+  if (!Array.isArray(obsIndicators)) return { goodNotes: "", growthNotes: "" };
+
+  return {
+    // 🟢 Filter for: good === true AND commentText has actual text
+    goodNotes: obsIndicators
+      .filter((i: any) => i.good === true && i.commentText && i.commentText.trim().length > 0)
+      .map((i: any) => `• ${i.title}: ${i.commentText}`)
+      .join('\n\n'),
+
+    // 🔴 Filter for: growth === true AND commentText has actual text
+    growthNotes: obsIndicators
+      .filter((i: any) => i.growth === true && i.commentText && i.commentText.trim().length > 0)
+      .map((i: any) => `• ${i.title}: ${i.commentText}`)
+      .join('\n\n')
+  };
+}, [viewingObservation]);
 
   if (!open || !row) return null;
   
 const handleOpenDeepDive = async (obsId: string) => {
     setLoadingObs(true);
+    // 🟢 Fetch JUST the observation. This is 100% safe.
     const { data, error } = await supabase
       .from('observations')
-      .select('*') // We fetch everything including the 'indicators' JSON
+      .select('*') 
       .eq('id', obsId)
       .single();
     
-    if (!error && data) setViewingObservation(data);
+    if (error) {
+      console.error("Deep Dive Error:", error.message);
+    } else {
+      setViewingObservation(data);
+    }
     setLoadingObs(false);
-  };
-
+};
 
   const handleOpenWorksheet = (r: TeacherRow) => {
     if (!r.worksheet_url) return;
     window.open(r.worksheet_url, "_blank", "noopener,noreferrer");
   };
+
+  // Filter the indicators array for items with comments
+// 🟢 Corrected with optional chaining to prevent crashes
+
 
   return (
     <div className="modal-backdrop">
@@ -201,35 +241,44 @@ const handleOpenDeepDive = async (obsId: string) => {
               Support History (Cross-Trainer)
             </label>
             <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {supportHistory.length > 0 ? supportHistory.map((obs) => (
-                <div 
-                  key={obs.id}
-                  onClick={() => handleOpenDeepDive(obs.id)} // 🟢 ADD THIS
-                  style={{ 
-                    padding: '10px', 
-                    background: viewingObservation?.id === obs.id ? 'rgba(59, 130, 246, 0.2)' : 'rgba(30, 41, 59, 0.5)', 
-                    borderLeft: `3px solid ${
-                      obs.performance_rating === 'Thriving' ? '#22c55e' : 
-                      obs.performance_rating === 'Functioning' ? '#3b82f6' : 
-                      obs.performance_rating === 'Developing' ? '#ef4444' : '#475569'
-                    }`,
-                    borderRadius: '0 6px 6px 0',
-                    cursor: 'pointer', // 🟢 ADD THIS
-                    transition: 'all 0.2s ease',
-                    border: viewingObservation?.id === obs.id ? '1px solid #3b82f6' : '1px solid transparent'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                    <strong style={{ color: '#f8fafc' }}>{obs.support_type}</strong>
-                    <span style={{ color: 'var(--text-muted)' }}>{new Date(obs.observation_date).toLocaleDateString()}</span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                    By {obs.trainer_name} @ {obs.school_name}
-                  </div>
-                </div>
-              )) : (
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>No history found.</div>
-              )}
+{supportHistory.length > 0 ? supportHistory.map((obs) => (
+  <div 
+    key={obs.id}
+    onClick={() => handleOpenDeepDive(obs.id)}
+    style={{ 
+      padding: '10px', 
+      background: viewingObservation?.id === obs.id ? 'rgba(59, 130, 246, 0.2)' : 'rgba(30, 41, 59, 0.5)', 
+      borderLeft: `3px solid ${
+        obs.performance_rating === 'Thriving' ? '#22c55e' : 
+        obs.performance_rating === 'Functioning' ? '#3b82f6' : 
+        obs.performance_rating === 'Developing' ? '#ef4444' : '#475569'
+      }`,
+      borderRadius: '0 6px 6px 0',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+      border: viewingObservation?.id === obs.id ? '1px solid #3b82f6' : '1px solid transparent'
+    }}
+  >
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+      {/* 🟢 Corrected: Use flat column name from schema */}
+      <strong style={{ color: '#f8fafc' }}>{obs.support_type || 'Visit'}</strong>
+      <span style={{ color: 'var(--text-muted)' }}>
+        {/* 🟢 Corrected: Matches observation_date in schema */}
+        {obs.observation_date ? new Date(obs.observation_date).toLocaleDateString() : 'No date'}
+      </span>
+    </div>
+    
+    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+      By {obs.profiles?.display_name || 'Unknown Trainer'} @ {obs.school_name}
+    </div>
+    {/* 🟢 Corrected: Matches status column in schema */}
+    {obs.status === 'draft' && (
+      <div style={{ fontSize: '9px', color: '#fca5a5', marginTop: '4px', textTransform: 'uppercase', fontWeight: 700 }}>Draft</div>
+    )}
+  </div>
+)) : (
+  <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>No history found.</div>
+)}
             </div>
           </div>
 
@@ -248,25 +297,30 @@ const handleOpenDeepDive = async (obsId: string) => {
       <button className="btn-ghost" onClick={() => setViewingObservation(null)} style={{ padding: '0 4px' }}>×</button>
     </div>
 
-    {/* Good Points */}
-    <div style={{ marginBottom: '12px' }}>
-      <label style={{ fontSize: '10px', color: '#22c55e', textTransform: 'uppercase', fontWeight: 700 }}>Good Points</label>
-      <div style={{ fontSize: '12px', color: '#f8fafc', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
-        {viewingObservation.indicators?.good_points || "No specific notes recorded."}
-      </div>
-    </div>
 
-    {/* Growth Points */}
-    <div>
-      <label style={{ fontSize: '10px', color: '#ef4444', textTransform: 'uppercase', fontWeight: 700 }}>Growth Areas</label>
-      <div style={{ fontSize: '12px', color: '#f8fafc', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
-        {viewingObservation.indicators?.growth_points || "No specific notes recorded."}
-      </div>
-    </div>
-    
-    <div style={{ marginTop: '12px', fontSize: '10px', color: 'var(--text-muted)', borderTop: '1px solid #1e293b', paddingTop: '8px' }}>
-      Notes by {viewingObservation.trainer_name}
-    </div>
+
+{/* Good Points */}
+<div style={{ marginBottom: '12px' }}>
+  <label style={{ fontSize: '10px', color: '#22c55e', textTransform: 'uppercase', fontWeight: 700 }}>Good Points</label>
+  <div style={{ fontSize: '12px', color: '#f8fafc', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+    {/* 🟢 Corrected: Show filtered notes instead of a missing property */}
+    {goodNotes || "No specific notes recorded."}
+  </div>
+</div>
+
+{/* Growth Areas */}
+<div>
+  <label style={{ fontSize: '10px', color: '#ef4444', textTransform: 'uppercase', fontWeight: 700 }}>Growth Areas</label>
+  <div style={{ fontSize: '12px', color: '#f8fafc', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+    {/* 🟢 Corrected: Show filtered notes instead of a missing property */}
+    {growthNotes || "No specific notes recorded."}
+  </div>
+</div>
+
+<div style={{ marginTop: '12px', fontSize: '10px', color: 'var(--text-muted)', borderTop: '1px solid #1e293b', paddingTop: '8px' }}>
+  Notes by {viewingObservation?.profiles?.display_name || "Unknown Trainer"}
+</div>
+
   </div>
 )}
 
@@ -1029,7 +1083,6 @@ export const TeachersScreen: React.FC = () => {
         created_at,
         updated_at
       `) // Ensure no comments, emojis, or "ADD THIS" text remains here
-      .eq("trainer_id", trainerId)
       .order("school_name", { ascending: true })
       .order("campus", { ascending: true })
       .order("name", { ascending: true });
