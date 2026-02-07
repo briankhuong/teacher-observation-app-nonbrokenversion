@@ -2,6 +2,7 @@
 import { supabase } from "../supabaseClient";
 
 export type ObservationStatus = "draft" | "saved";
+export type PerformanceRating = "Developing" | "Functioning" | "Thriving" | null;
 
 export interface ObservationMeta {
   teacherName: string;
@@ -18,6 +19,7 @@ export interface ObservationRecord {
   trainer_id: string;
   teacher_id: string | null;
   status: ObservationStatus;
+  performance_rating: PerformanceRating;
   meta: ObservationMeta;
   indicators: any[]; // your existing indicator shape
   observation_date: string | null;
@@ -33,10 +35,7 @@ export interface ObservationRecord {
 export async function loadObservationFromDb(id: string) {
   const { data, error } = await supabase
     .from("observations")
-    .select(
-      // ADD THE NEW COLUMN HERE
-      "id, trainer_id, teacher_id, status, meta, indicators, observation_date, created_at, updated_at, admin_summary_vn"
-    )
+    .select("id, trainer_id, teacher_id, status, performance_rating, meta, indicators, updated_at, admin_summary_vn")
     .eq("id", id)
     .single();
 
@@ -225,3 +224,5 @@ export async function updateObservationMetaLinks(opts: {
 
   return meta as typeof meta;
 }
+
+

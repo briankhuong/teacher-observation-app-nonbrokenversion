@@ -20,6 +20,9 @@ export interface TeacherRow {
   id: string;
   trainer_id: string;
   name: string;
+  grapeseed_id: string | null; 
+  latest_performance: string | null; // From CRM Sync
+  teaching_issue: string[] | null;   // From CRM Sync
   email: string | null;
   school_name: string;
   status: string | null;    // 🟢 NEW FIELD
@@ -78,7 +81,42 @@ const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
   onEdit,
   onDelete,
 }) => {
+  const [supportHistory, setSupportHistory] = useState<any[]>([]);
+  const [viewingObservation, setViewingObservation] = useState<any | null>(null);
+  const [loadingObs, setLoadingObs] = useState(false);
+
+  useEffect(() => {
+    if (open && row?.grapeseed_id) {
+      const fetchHistory = async () => {
+        setViewingObservation(null); 
+        const { data, error } = await supabase
+          .from('observations')
+          .select('id, observation_date, trainer_name, school_name, campus, support_type, performance_rating')
+          .eq('grapeseed_id', row.grapeseed_id)
+          .order('observation_date', { ascending: false });
+
+        if (!error && data) setSupportHistory(data);
+      };
+      fetchHistory();
+    } else {
+      setSupportHistory([]);
+    }
+  }, [open, row?.grapeseed_id]);
+
   if (!open || !row) return null;
+  
+const handleOpenDeepDive = async (obsId: string) => {
+    setLoadingObs(true);
+    const { data, error } = await supabase
+      .from('observations')
+      .select('*') // We fetch everything including the 'indicators' JSON
+      .eq('id', obsId)
+      .single();
+    
+    if (!error && data) setViewingObservation(data);
+    setLoadingObs(false);
+  };
+
 
   const handleOpenWorksheet = (r: TeacherRow) => {
     if (!r.worksheet_url) return;
@@ -89,39 +127,56 @@ const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
     <div className="modal-backdrop">
       <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
         <div className="modal-header">
-          <div className="modal-title">Teacher Details</div>
-          <button type="button" className="btn" onClick={onCancel}>
-            ×
-          </button>
+          <div className="modal-title">Teacher Profile</div>
+          <button type="button" className="btn" onClick={onCancel}>×</button>
         </div>
 
         <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
+          
+          {/* --- SECTION 1: CRM QUICK LOOK --- */}
+          <div style={{ 
+            padding: '12px', 
+            background: 'rgba(239, 68, 68, 0.05)', 
+            border: '1px solid rgba(239, 68, 68, 0.15)', 
+            borderRadius: '10px',
+            marginBottom: '16px' 
+          }}>
+            <label style={{ fontSize: '10px', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase' }}>
+              Quick Look: Teaching Issues
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+              {row.teaching_issue && row.teaching_issue.length > 0 ? (
+                row.teaching_issue.map((issue, idx) => (
+                  <span key={idx} className="tag-pill" style={{ background: '#ef4444', color: 'white', border: 'none' }}>
+                    {issue}
+                  </span>
+                ))
+              ) : (
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No recent issues flagged.</span>
+              )}
+            </div>
+          </div>
+
+          {/* --- SECTION 2: BASIC INFO --- */}
           <div className="detail-row">
-            <label>Name</label>
-            <span>{row.name}</span>
+            <label>Full Name</label>
+            <span style={{ fontWeight: 600 }}>{row.name}</span>
+          </div>
+          <div className="detail-row">
+            <label>School Context</label>
+            <span>{row.school_name} — {row.campus}</span>
           </div>
           <div className="detail-row">
             <label>Email</label>
             <span>{row.email || "—"}</span>
           </div>
-          <div className="detail-row">
-            <label>School</label>
-            <span>{row.school_name}</span>
-          </div>
-          <div className="detail-row">
-            <label>Campus</label>
-            <span>{row.campus}</span>
-          </div>
 
+          {/* --- SECTION 3: WORKBOOK LINK --- */}
           <div className="detail-row">
             <label>Worksheet Link</label>
             {row.worksheet_url ? (
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => handleOpenWorksheet(row)}
-                >
+                <button type="button" className="link-button" onClick={() => handleOpenWorksheet(row)}>
                   Open Worksheet
                 </button>
                 <button
@@ -129,42 +184,112 @@ const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
                   className="icon-button"
                   title="Copy workbook link"
                   onClick={() => {
-                    const url = row.worksheet_url;
-                    if (!url) return;
-                    navigator.clipboard.writeText(url).catch((err) => console.error("Copy failed", err));
+                    if (row.worksheet_url) navigator.clipboard.writeText(row.worksheet_url);
                   }}
                 >
                   📋
                 </button>
               </div>
             ) : (
-              <span>—</span>
+              <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not set</span>
             )}
           </div>
-          <div className="detail-row">
-            <label>Created At</label>
-            <span>{new Date(row.created_at).toLocaleString()}</span>
+
+          {/* --- SECTION 4: SUPPORT TIMELINE --- */}
+          <div style={{ marginTop: '20px', borderTop: '1px solid #334155', paddingTop: '16px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
+              Support History (Cross-Trainer)
+            </label>
+            <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {supportHistory.length > 0 ? supportHistory.map((obs) => (
+                <div 
+                  key={obs.id}
+                  onClick={() => handleOpenDeepDive(obs.id)} // 🟢 ADD THIS
+                  style={{ 
+                    padding: '10px', 
+                    background: viewingObservation?.id === obs.id ? 'rgba(59, 130, 246, 0.2)' : 'rgba(30, 41, 59, 0.5)', 
+                    borderLeft: `3px solid ${
+                      obs.performance_rating === 'Thriving' ? '#22c55e' : 
+                      obs.performance_rating === 'Functioning' ? '#3b82f6' : 
+                      obs.performance_rating === 'Developing' ? '#ef4444' : '#475569'
+                    }`,
+                    borderRadius: '0 6px 6px 0',
+                    cursor: 'pointer', // 🟢 ADD THIS
+                    transition: 'all 0.2s ease',
+                    border: viewingObservation?.id === obs.id ? '1px solid #3b82f6' : '1px solid transparent'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                    <strong style={{ color: '#f8fafc' }}>{obs.support_type}</strong>
+                    <span style={{ color: 'var(--text-muted)' }}>{new Date(obs.observation_date).toLocaleDateString()}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                    By {obs.trainer_name} @ {obs.school_name}
+                  </div>
+                </div>
+              )) : (
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>No history found.</div>
+              )}
+            </div>
           </div>
-          <div className="detail-row">
-            <label>Last Updated</label>
-            <span>{new Date(row.updated_at).toLocaleString()}</span>
+
+          {/* 🟢 ADD THIS SECTION below the Timeline map */}
+{viewingObservation && (
+  <div style={{ 
+    marginTop: '16px', 
+    padding: '16px', 
+    background: '#0f172a', 
+    borderRadius: '12px', 
+    border: '1px solid #334155',
+    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)'
+  }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+      <h4 style={{ margin: 0, fontSize: '13px', color: '#3b82f6' }}>Visit Deep Dive</h4>
+      <button className="btn-ghost" onClick={() => setViewingObservation(null)} style={{ padding: '0 4px' }}>×</button>
+    </div>
+
+    {/* Good Points */}
+    <div style={{ marginBottom: '12px' }}>
+      <label style={{ fontSize: '10px', color: '#22c55e', textTransform: 'uppercase', fontWeight: 700 }}>Good Points</label>
+      <div style={{ fontSize: '12px', color: '#f8fafc', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+        {viewingObservation.indicators?.good_points || "No specific notes recorded."}
+      </div>
+    </div>
+
+    {/* Growth Points */}
+    <div>
+      <label style={{ fontSize: '10px', color: '#ef4444', textTransform: 'uppercase', fontWeight: 700 }}>Growth Areas</label>
+      <div style={{ fontSize: '12px', color: '#f8fafc', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+        {viewingObservation.indicators?.growth_points || "No specific notes recorded."}
+      </div>
+    </div>
+    
+    <div style={{ marginTop: '12px', fontSize: '10px', color: 'var(--text-muted)', borderTop: '1px solid #1e293b', paddingTop: '8px' }}>
+      Notes by {viewingObservation.trainer_name}
+    </div>
+  </div>
+)}
+
+{loadingObs && <div className="entity-cell-sub" style={{ textAlign: 'center', marginTop: '10px' }}>Loading notes...</div>}
+
+          {/* --- SECTION 5: SYSTEM INFO --- */}
+          <div style={{ marginTop: '24px', opacity: 0.5, fontSize: '11px' }}>
+            <div className="detail-row" style={{ border: 'none', padding: '2px 0' }}>
+              <label>Created</label>
+              <span>{new Date(row.created_at).toLocaleDateString()}</span>
+            </div>
+            <div className="detail-row" style={{ border: 'none', padding: '2px 0' }}>
+              <label>Updated</label>
+              <span>{new Date(row.updated_at).toLocaleDateString()}</span>
+            </div>
           </div>
+
         </div>
 
         <div className="modal-footer">
-          <button type="button" className="btn" onClick={onCancel}>
-            Close
-          </button>
-          <button type="button" className="btn btn-primary" onClick={() => onEdit(row)}>
-            Edit Details
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-danger"
-            onClick={() => onDelete(row)}
-          >
-            Delete
-          </button>
+          <button type="button" className="btn" onClick={onCancel}>Close</button>
+          <button type="button" className="btn btn-primary" onClick={() => onEdit(row)}>Edit</button>
+          <button type="button" className="btn btn-ghost btn-danger" onClick={() => onDelete(row)}>Delete</button>
         </div>
       </div>
     </div>
@@ -592,60 +717,58 @@ export const TeachersScreen: React.FC = () => {
   // Define Columns
   const columns = useMemo<ColumnDef<TeacherRow>[]>(
     () => [
-      // Inside columns definition in TeachersScreen.tsx
-// Inside your columns definition in TeachersScreen.tsx
-{
-  accessorKey: "name",
-  header: "Teacher",
-  cell: (info) => {
-    const { tags } = info.row.original;
-    const safeTags = Array.isArray(tags) ? tags : [];
+      {
+        accessorKey: "name",
+        header: "Teacher",
+        cell: (info) => {
+          const { tags } = info.row.original;
+          const safeTags = Array.isArray(tags) ? tags : [];
 
-    // 1. Detect Status
-    const isInactive = safeTags.some(t => t.toLowerCase() === "inactive");
-    const isNoTag = safeTags.includes("No tag");
+          // 1. Detect Status
+          const isInactive = safeTags.some(t => t.toLowerCase() === "inactive");
+          const isNoTag = safeTags.includes("No tag");
 
-    // 2. Detect Other Trainers (Mutual)
-    // Filter out "Inactive" and "No tag" -> Whatever remains are Trainer Names
-    const otherTrainers = safeTags.filter(
-      t => t !== "No tag" && t.toLowerCase() !== "inactive"
-    );
-    const isMutual = otherTrainers.length > 0;
+          // 2. Detect Other Trainers (Mutual)
+          // Filter out "Inactive" and "No tag" -> Whatever remains are Trainer Names
+          const otherTrainers = safeTags.filter(
+            t => t !== "No tag" && t.toLowerCase() !== "inactive"
+          );
+          const isMutual = otherTrainers.length > 0;
 
-    return (
-      <>
-        <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 600, color: '#ffffffff' }}>
-            {info.getValue() as string}
-          </span>
+          return (
+            <>
+              <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, color: '#ffffffff' }}>
+                  {info.getValue() as string}
+                </span>
 
-          {/* BADGE: INACTIVE */}
-          {isInactive && (
-            <span className="tag-pill tag-pill-inactive">Inactive</span>
-          )}
+                {/* BADGE: INACTIVE */}
+                {isInactive && (
+                  <span className="tag-pill tag-pill-inactive">Inactive</span>
+                )}
 
-          {/* BADGE: MUTUAL (Shows Names!) */}
-          {isMutual && (
-             <span className="tag-pill tag-pill-mutual" title={`Also tagged by: ${otherTrainers.join(", ")}`}>
-               {otherTrainers.join(" & ")}
-             </span>
-          )}
+                {/* BADGE: MUTUAL (Shows Names!) */}
+                {isMutual && (
+                  <span className="tag-pill tag-pill-mutual" title={`Also tagged by: ${otherTrainers.join(", ")}`}>
+                    {otherTrainers.join(" & ")}
+                  </span>
+                )}
 
-          {/* BADGE: NO TAG (Only show if active, otherwise redundant) */}
-          {isNoTag && !isInactive && (
-             <span className="tag-pill tag-pill-notag" title="No trainer tags found in GrapeSEED">
-               No tag
-             </span>
-          )}
-        </div>
-        <div className="entity-cell-sub">{info.row.original.email || "—"}</div>
-      </>
-    );
-  },
-  id: "name",
-  minSize: 150,
-  size: 200,
-},
+                {/* BADGE: NO TAG (Only show if active, otherwise redundant) */}
+                {isNoTag && !isInactive && (
+                  <span className="tag-pill tag-pill-notag" title="No trainer tags found in GrapeSEED">
+                    No tag
+                  </span>
+                )}
+              </div>
+              <div className="entity-cell-sub">{info.row.original.email || "—"}</div>
+            </>
+          );
+        },
+        id: "name",
+        minSize: 150,
+        size: 200,
+      },
       {
         id: "school_campus",
         header: "School & Campus",
@@ -669,6 +792,81 @@ export const TeachersScreen: React.FC = () => {
         minSize: 150,
         size: 200,
       },
+
+      // 🟢 ADD: Latest Performance Column
+      {
+        accessorKey: "latest_performance",
+        header: "Performance",
+        cell: (info) => {
+          const val = info.getValue() as string;
+          if (!val) return <span className="entity-cell-sub">—</span>;
+          
+          // Logic to color-code based on your 3-tier system
+          const color = val === 'Thriving' ? '#22c55e' : val === 'Functioning' ? '#3b82f6' : '#ef4444';
+          
+          return (
+            <span style={{ 
+              padding: '2px 8px', 
+              borderRadius: '12px', 
+              fontSize: '11px', 
+              fontWeight: 700, 
+              border: `1px solid ${color}`, 
+              color: color,
+              background: `${color}10` // 10% opacity
+            }}>
+              {val}
+            </span>
+          );
+        },
+        id: "latest_performance",
+        minSize: 100,
+        size: 120,
+      },
+
+      // 🟢 ADD: Focus Area Chips Column (Quick Look)
+      {
+        accessorKey: "teaching_issue",
+        header: "Issues",
+        cell: (info) => {
+          const issues = info.getValue() as string[] | null;
+          if (!issues || issues.length === 0) return <span className="entity-cell-sub">No issues</span>;
+          
+          return (
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              {issues.slice(0, 2).map((issue, idx) => (
+                <span key={idx} className="tag-pill" style={{ background: '#ef4444', color: 'white', border: 'none', fontSize: '10px' }}>
+                  {issue}
+                </span>
+              ))}
+              {issues.length > 2 && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>+{issues.length - 2}</span>}
+            </div>
+          );
+        },
+        id: "teaching_issue",
+        minSize: 150,
+        size: 200,
+      },
+      // 🟢 ADD: Most Recent Support Column
+      {
+        id: "recent_support",
+        header: "Latest Support",
+        cell: (info) => {
+          const row = info.row.original;
+          // We rely on the Supabase 'updated_at' or a specific date if you prefer
+          return (
+            <div style={{ lineHeight: 1.2 }}>
+              <div className="entity-cell-main" style={{ fontSize: '12px' }}>
+                {row.updated_at ? new Date(row.updated_at).toLocaleDateString() : "No visits"}
+              </div>
+              <div className="entity-cell-sub" style={{ fontSize: '10px' }}>
+                {row.latest_performance ? "Observation synced" : "Pending first visit"}
+              </div>
+            </div>
+          );
+        },
+        minSize: 120,
+      },
+      
       {
         accessorKey: "worksheet_url",
         header: "Worksheet",

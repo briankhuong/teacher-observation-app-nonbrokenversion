@@ -1125,7 +1125,7 @@ async function getMergedDashboardData(userId: string) {
 
 
 
-  const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
+const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
     try {
       console.log(`☁️ Attempting Smart Sync for: ${id} (Force: ${force})`);
       
@@ -1135,22 +1135,30 @@ async function getMergedDashboardData(userId: string) {
         return;
       }
 
-      // 1. LOAD DATA (The Robust Way)
-      // If we have override data (from modal), use it.
-      // If not, try to get from IndexedDB (the Vault).
+      // 1. LOAD DATA
       let localData = overrideData;
       if (!localData) {
          const storageKey = `${STORAGE_PREFIX}${id}`;
          localData = await get(storageKey);
       }
       
-      // 🟢 SMARTER LOGIC: If no local data exists, it means the user hasn't edited anything yet.
-      // We shouldn't error out. We should just treat it as "Already Synced".
       if (!localData) {
         console.log("No local changes found. Fetching latest from server to verify...");
-        // Just refresh the list to ensure UI is up to date (this runs the !parsed logic we fixed)
         window.location.reload(); 
         return;
+      }
+
+      // 🟢 NEW: PERFORMANCE RATING GUARDRAIL
+      // Check if performance_rating is missing (null, undefined, or empty string)
+      if (!localData.performance_rating) {
+        const confirmMsg = "Performance Rating is not set. This helps other trainers understand the teacher's current level.\n\nClick 'OK' to go set the rating (Update), or 'Cancel' to sync anyway (Keep Syncing).";
+        if (window.confirm(confirmMsg)) {
+          // "Update" path: Redirect to the workspace
+          // Assuming you have a way to navigate, e.g., via a prop or window.location
+          window.location.hash = `/workspace/${id}`; 
+          return;
+        }
+        // "Keep Syncing" path: Logic continues below with performance_rating as null
       }
 
       // 2. CHECK FOR CONFLICTS (Unless Forced)
@@ -1164,18 +1172,14 @@ async function getMergedDashboardData(userId: string) {
         
         if (serverRow) {
           const serverTime = new Date(serverRow.updated_at).getTime();
-          // Safety: ensure lastSync exists, default to 0
           const localLastSync = localData.lastSync || 0;
 
-          // 🛑 CONFLICT LOGIC:
-          // Only show modal if Server is Newer AND we are trying to push older/different data
-          // (Simple check: Server Time > Local Receipt Time)
           if (serverTime > localLastSync) {
              console.log("⚔️ Conflict Detected! Server is newer.");
              setConflictLocalData(localData);
              setConflictServerData(serverRow);
              setIsConflictModalOpen(true);
-             return; // <--- STOP HERE. Modal takes over.
+             return; 
           }
         }
       } else {
@@ -1185,7 +1189,6 @@ async function getMergedDashboardData(userId: string) {
       // 3. PUSH TO SERVER
       console.log("🚀 No conflict. Pushing data...");
       
-      // Construct Meta Safely to prevent DB errors
       const safeMeta = localData.meta || {
         teacherName: localData.teacherName || "",
         schoolName: localData.schoolName || "",
@@ -1214,6 +1217,8 @@ async function getMergedDashboardData(userId: string) {
         status: localData.status,
         updated_at: new Date(localData.updatedAt || Date.now()).toISOString(),
         admin_summary_vn: localData.adminSummaryVN,
+        // 🟢 ADDED TO PAYLOAD
+        performance_rating: localData.performance_rating || null,
       };
 
       const { error } = await supabase.from("observations").upsert(payload).select('id');
@@ -1223,13 +1228,29 @@ async function getMergedDashboardData(userId: string) {
         throw error;
       }
 
+      // 🟢 NEW: CRM BROADCAST (Update other trainers' teacher records)
+      // Extract titles of indicators where Admin Report is checked
+      const flaggedIndicators = (localData.indicators || [])
+        .filter((ind: any) => ind.includeInTrainerSummary)
+        .map((ind: any) => ind.title);
+
+      const gsId = localData.meta?.grapeseed_id || localData.grapeseed_id;
+
+      if (gsId) {
+        const { error: rpcError } = await supabase.rpc('sync_teacher_crm_metadata', {
+          target_grapeseed_id: gsId,
+          new_performance: localData.performance_rating || null,
+          flagged_indicators: flaggedIndicators
+        });
+        if (rpcError) console.error("CRM Broadcast failed:", rpcError);
+      }
+
       // 4. STAMP RECEIPT
-      // 🟢 FIX: Update the local storage so it knows we are now 100% in sync
       const now = Date.now();
       const storageKey = `${STORAGE_PREFIX}${localData.id}`;
       const finalPayload = {
         ...localData,
-        lastSync: now // <--- THE IMPORTANT PART
+        lastSync: now 
       };
       
       await set(storageKey, finalPayload);
@@ -1242,7 +1263,8 @@ async function getMergedDashboardData(userId: string) {
             ...obs, 
             lastSync: now, 
             syncStatus: 'synced',
-            updatedAt: localData.updatedAt 
+            updatedAt: localData.updatedAt,
+            performance_rating: localData.performance_rating // 🟢 Update UI state
           };
         }
         return obs;
@@ -1279,49 +1301,6 @@ const handleConflictResolved = async (mergedData: any) => {
     }
   };
 
-  // 🟢 NEW: The Manual Pull Action
-  const handlePull = async (obsId: string) => {
-    // 1. Safety Check (Basic for Phase 3)
-    // In Phase 4, this will open the "Visual Diff" modal instead.
-    const confirm = window.confirm(
-      "⚠️ Warning: This will overwrite your local copy with the version from the server.\n\nAre you sure?"
-    );
-    if (!confirm) return;
-
-    try {
-      console.log(`⬇️ Pulling observation ${obsId}...`);
-
-      // 2. Fetch FULL data from Supabase
-      const { data, error } = await supabase
-        .from("observations")
-        .select("id, status, meta, indicators, updated_at, observation_date, admin_summary_vn")
-        .eq("id", obsId)
-        .single();
-
-      if (error) throw error;
-      if (!data) throw new Error("Observation not found on server.");
-
-      // 3. Update the Vault (IndexedDB)
-      const storageKey = `${STORAGE_PREFIX}${obsId}`;
-      
-      // We explicitly set updatedAt to match the server so it shows as "Synced"
-      const serverTime = new Date(data.updated_at).getTime();
-      const payload = {
-        ...data,
-        updatedAt: serverTime, 
-        lastSync: serverTime // Important: Mark as synced
-      };
-
-      await set(storageKey, payload);
-      
-      console.log("✅ Pull complete.");
-      window.location.reload(); // Refresh to show new data
-
-    } catch (err) {
-      console.error("Pull failed:", err);
-      alert("Could not download update. Check connection.");
-    }
-  };
 
 // 🟢 CORE LOGIC: CACHE-FIRST LOADING + GHOST MERGE
   React.useEffect(() => {
