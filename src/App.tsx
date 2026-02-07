@@ -28,6 +28,7 @@ interface NewObservationMeta {
   date: string; // "YYYY-MM-DD"
   observationId?: string;
   teacher_id?: string; 
+  grapeseed_id?: string | null;
 }
 
 interface SelectedObservationMeta extends NewObservationMeta {
@@ -285,6 +286,7 @@ interface TeacherOption {
   school_name: string;
   campus: string;
   worksheet_url: string | null;
+  grapeseed_id?: string | null;
 }
 
 interface SchoolRow {
@@ -351,7 +353,7 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
         try {
           const { data, error } = await supabase
             .from("teachers")
-            .select("id, name, email, school_name, campus, worksheet_url")
+            .select("id,grapeseed_id, name, email, school_name, campus, worksheet_url")
             .eq("trainer_id", user!.id)
             .order("name", { ascending: true });
 
@@ -571,6 +573,7 @@ const handleSubmit = async (e: React.FormEvent) => {
              school_name: schoolName,
              campus,
              worksheet_url: data.worksheet_url ?? null,
+             grapeseed_id: null,
           };
           setTeachers((prev) => [...prev, newTeacherObj]);
         } catch (err) {
@@ -589,6 +592,7 @@ const handleSubmit = async (e: React.FormEvent) => {
             school_name: schoolName,
             campus,
             worksheet_url: worksheetUrl || null,
+            grapeseed_id: null,
         };
         
         setTeachers((prev) => [...prev, newTeacherObj]);
@@ -599,6 +603,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     // ---------------------------------------------------------
 
     // 🟢 CRITICAL FIX: Add teacher_id to meta so it survives the State Handover
+const selectedTeacherObj = teachers.find(t => t.id === finalTeacherId);
 const meta: NewObservationMeta = { 
         teacherName, 
         schoolName, 
@@ -607,7 +612,8 @@ const meta: NewObservationMeta = {
         lesson, 
         supportType, 
         date,
-        teacher_id: finalTeacherId // 🟢 STAMP THE ID HERE
+        teacher_id: finalTeacherId, // 🟢 STAMP THE ID HERE
+        grapeseed_id: selectedTeacherObj?.grapeseed_id
     };
 
 if (!navigator.onLine) {

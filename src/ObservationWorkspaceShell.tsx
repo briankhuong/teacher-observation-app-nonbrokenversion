@@ -179,6 +179,7 @@ interface ObservationWorkspaceProps {
     supportType: "Training" | "LVA" | "Visit";
     date: string;
     teacher_id?: string; 
+    grapeseed_id?: string | null;
   };
   onBack: () => void;
   isOnline: boolean;
@@ -206,6 +207,7 @@ interface SavedObservationPayload {
     supportType: "Training" | "LVA" | "Visit";
     date: string;
     teacher_id?: string; // 🟢 ADD THIS LINE HERE
+    grapeseed_id?: string | null;
     teacherWorkbookUrl?: string | null;
     adminWorkbookUrl?: string | null;
     adminWorkbookViewUrl?: string | null;
@@ -362,7 +364,7 @@ export const ObservationWorkspaceShell: React.FC<
     user?.user_metadata?.name || 
     user?.user_metadata?.display_name || 
     (user?.email ? user.email.split('@')[0] : "GrapeSEED Trainer");
-const { teacherName, schoolName, campus, unit, lesson, supportType, date, teacher_id } = observationMeta;
+const { teacherName, schoolName, campus, unit, lesson, supportType, date, teacher_id, grapeseed_id} = observationMeta;
 const [showBatchModal, setShowBatchModal] = useState(false);
 const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
 const [isAiPolishing, setIsAiPolishing] = useState(false);
@@ -976,7 +978,7 @@ const handleManualSave = async () => {
       id: observationMeta.id,
       teacher_id: teacher_id || (observationMeta as any).teacher_id,
       
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date, teacher_id: teacher_id || (observationMeta as any).teacher_id},
+      meta: { teacherName,grapeseed_id, schoolName, campus, unit, lesson, supportType, date, teacher_id: teacher_id || (observationMeta as any).teacher_id},
       indicators,
       performance_rating: indicators[0]?.performance_rating || null,
       status: observationStatus,
@@ -1005,7 +1007,7 @@ const handleAdminReviewSave = async () => {
       // 3. 🟢 Update Local Storage (Keep the Draft in sync!)
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
-        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        meta: { teacherName,teacher_id,grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
         indicators,
         status: observationStatus,
         updatedAt: Date.now(),
@@ -1027,7 +1029,7 @@ const handleBackToDashboard = () => {
     if (isDirtyRef.current || canvasDirty) {
         const payload: SavedObservationPayload = {
           id: observationMeta.id,
-          meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+          meta: { teacherName,teacher_id,grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
           indicators,
           performance_rating: indicators[0]?.performance_rating || null,
           status: observationStatus,
@@ -1055,7 +1057,7 @@ const handleToggleLock = () => {
 
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      meta: { teacherName, grapeseed_id,schoolName, campus, unit, lesson, supportType, date },
       indicators,
       performance_rating: indicators[0]?.performance_rating || null,
       status: nextStatus,
@@ -1350,7 +1352,7 @@ const handleSavePreview = (targetIndex?: any) => {
     
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
-      meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+      meta: { teacherName, teacher_id,grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
       indicators: newIndicators,
       status: observationStatus,
       updatedAt: Date.now(),
@@ -1382,7 +1384,7 @@ const handleMarkAllReviewed = () => {
       
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
-        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        meta: { teacherName,teacher_id,grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
         indicators: newIndicators,
         status: observationStatus,
         updatedAt: Date.now(),
@@ -1535,7 +1537,7 @@ useEffect(() => {
     saveTimeoutRef.current = window.setTimeout(() => {
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
-        meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
+        meta: { teacherName,teacher_id, grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
         indicators,
         performance_rating: indicators[0]?.performance_rating || null,
         status: observationStatus,
