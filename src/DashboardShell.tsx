@@ -1146,17 +1146,13 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         return;
       }
 
-      // 🟢 NEW: PERFORMANCE RATING GUARDRAIL
-      // Check if performance_rating is missing (null, undefined, or empty string)
+      // 🟢 GUARDRAIL: PERFORMANCE RATING
       if (!localData.performance_rating) {
         const confirmMsg = "Performance Rating is not set. This helps other trainers understand the teacher's current level.\n\nClick 'OK' to go set the rating (Update), or 'Cancel' to sync anyway (Keep Syncing).";
         if (window.confirm(confirmMsg)) {
-          // "Update" path: Redirect to the workspace
-          // Assuming you have a way to navigate, e.g., via a prop or window.location
           window.location.hash = `/workspace/${id}`; 
           return;
         }
-        // "Keep Syncing" path: Logic continues below with performance_rating as null
       }
 
       // 2. CHECK FOR CONFLICTS (Unless Forced)
@@ -1196,11 +1192,33 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         supportType: localData.supportType || "Visit",
         date: localData.date || new Date().toISOString()
       };
+
+      // 🟢 FIX 1: Robust Teacher ID Extraction
+      // Checks: Root -> Meta -> Legacy camelCase
+      const finalTeacherId = 
+        localData.teacher_id || 
+        safeMeta.teacher_id || 
+        localData.teacherId || 
+        null;
+
+      if (!finalTeacherId) {
+        console.warn("⚠️ Warning: Syncing observation without a valid teacher_id");
+      }
+
+      // 🟢 FIX 2: Grapeseed ID Extraction
+      const finalGsId = 
+        localData.grapeseed_id || 
+        safeMeta.grapeseed_id || 
+        null;
       
       const payload = {
         id: localData.id,
         trainer_id: user.id, 
-        teacher_id: localData.teacher_id || localData.meta?.teacher_id,
+        
+        // 🟢 MAPPED CORRECTLY
+        teacher_id: finalTeacherId,
+        grapeseed_id: finalGsId, // Saves to the new column
+
         teacher_name: safeMeta.teacherName,
         school_name: safeMeta.schoolName,
         campus: safeMeta.campus,
@@ -1209,13 +1227,16 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         support_type: safeMeta.supportType,
         observation_date: safeMeta.date,
 
-        meta: safeMeta,
+        meta: { 
+            ...safeMeta, 
+            teacher_id: finalTeacherId, // Ensure meta stays in sync
+            grapeseed_id: finalGsId 
+        },
 
         indicators: localData.indicators,
         status: localData.status,
         updated_at: new Date(localData.updatedAt || Date.now()).toISOString(),
         admin_summary_vn: localData.adminSummaryVN,
-        // 🟢 ADDED TO PAYLOAD
         performance_rating: localData.performance_rating || null,
       };
 
@@ -1226,17 +1247,14 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         throw error;
       }
 
-      // 🟢 NEW: CRM BROADCAST (Update other trainers' teacher records)
-      // Extract titles of indicators where Admin Report is checked
+      // 🟢 NEW: CRM BROADCAST
       const flaggedIndicators = (localData.indicators || [])
         .filter((ind: any) => ind.includeInTrainerSummary)
         .map((ind: any) => ind.title);
 
-      const gsId = localData.meta?.grapeseed_id || localData.grapeseed_id;
-
-      if (gsId) {
+      if (finalGsId) {
         const { error: rpcError } = await supabase.rpc('sync_teacher_crm_metadata', {
-          target_grapeseed_id: gsId,
+          target_grapeseed_id: finalGsId,
           new_performance: localData.performance_rating || null,
           flagged_indicators: flaggedIndicators
         });
@@ -1248,6 +1266,10 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
       const storageKey = `${STORAGE_PREFIX}${localData.id}`;
       const finalPayload = {
         ...localData,
+        // Update local object with the IDs we just ensured existed
+        teacher_id: finalTeacherId, 
+        grapeseed_id: finalGsId,
+        meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
         lastSync: now 
       };
       
@@ -1262,7 +1284,7 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
             lastSync: now, 
             syncStatus: 'synced',
             updatedAt: localData.updatedAt,
-            performance_rating: localData.performance_rating // 🟢 Update UI state
+            performance_rating: localData.performance_rating
           };
         }
         return obs;
@@ -1275,7 +1297,6 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
       alert("Sync failed: " + err.message);
     }
   };
-
 const handleConflictResolved = async (mergedData: any) => {
     try {
       console.log("💾 Saving resolved data & Force Pushing...", mergedData);
