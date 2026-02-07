@@ -1013,6 +1013,9 @@ export const TeachersScreen: React.FC = () => {
       .select(`
         id,
         trainer_id,
+        grapeseed_id,
+        latest_performance,
+        teaching_issue,
         name,
         email,
         school_name,
@@ -1110,7 +1113,8 @@ export const TeachersScreen: React.FC = () => {
     }
   };
 
-  const submitForm = async (values: TeacherFormState, autoCreateToken?: string) => {
+const submitForm = async (values: TeacherFormState, autoCreateToken?: string) => {
+    // --- CREATE CASE ---
     if (formMode === "create") {
       const { data, error } = await supabase
         .from("teachers")
@@ -1121,8 +1125,8 @@ export const TeachersScreen: React.FC = () => {
           school_name: values.school_name.trim(),
           campus: values.campus.trim(),
           worksheet_url: values.worksheet_url.trim() || null,
-          school_id: values.school_id, // 🟢 ADD THIS
-    campus_id: values.campus_id, // 🟢 ADD THIS
+          school_id: values.school_id, 
+          campus_id: values.campus_id, 
         })
         .select(
           `
@@ -1136,7 +1140,13 @@ export const TeachersScreen: React.FC = () => {
           created_at,
           school_id,
           campus_id,
-          updated_at
+          updated_at,
+          grapeseed_id,
+          latest_performance,
+          teaching_issue,
+          tags,
+          status,
+          is_active
         `
         )
         .single();
@@ -1149,16 +1159,16 @@ export const TeachersScreen: React.FC = () => {
 
       const newRow = data as TeacherRow;
       setRows((prev) => [...prev, newRow]);
-      openView(newRow); // Open View Modal on creation
+      openView(newRow); 
       setShowForm(false);
 
-      // 🟢 Trigger Background Task if requested
       if (autoCreateToken) {
         runBackgroundProvisioning(newRow, autoCreateToken);
       }
       return;
     }
 
+    // --- UPDATE CASE ---
     if (!editingRow) return;
 
     const { data, error } = await supabase
@@ -1168,8 +1178,8 @@ export const TeachersScreen: React.FC = () => {
         email: values.email.trim() || null,
         school_name: values.school_name.trim(),
         campus: values.campus.trim(),
-        school_id: values.school_id, // 🟢 ADD THIS
-        campus_id: values.campus_id, // 🟢 ADD THIS
+        school_id: values.school_id, 
+        campus_id: values.campus_id, 
         worksheet_url: values.worksheet_url.trim() || null,
         updated_at: new Date().toISOString(),
       })
@@ -1187,7 +1197,13 @@ export const TeachersScreen: React.FC = () => {
         created_at,
         school_id,
         campus_id,
-        updated_at
+        updated_at,
+        grapeseed_id,
+        latest_performance,
+        teaching_issue,
+        tags,
+        status,
+        is_active
       `
       )
       .single();
@@ -1203,11 +1219,11 @@ export const TeachersScreen: React.FC = () => {
       prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
 
-if (autoCreateToken) {
+    if (autoCreateToken) {
         runBackgroundProvisioning(updated, autoCreateToken);
     }
 
-    openView(updated); // Open View Modal after update
+    openView(updated); 
     setShowForm(false);
   };
 
@@ -1359,8 +1375,6 @@ const handleSync = async () => {
     setLoading(false);
   }
 };
-
-
 
   return (
     <>

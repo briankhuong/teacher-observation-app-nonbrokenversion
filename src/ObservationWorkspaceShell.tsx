@@ -892,14 +892,44 @@ const persistObservation = React.useCallback(
       setSyncError(null);
 
       try {
-        await set(storageKey, payload);
-        setLastSavedAt(payload.updatedAt);
-        console.log("✅ Saved to Vault.");
+        // 🟢 1. READ DISK FIRST
+        // The IDs are here! We must grab them before overwriting.
+        const existingOnDisk = await get<SavedObservationPayload>(storageKey);
+
+        // 🟢 2. RESCUE THE IDs
+        // If the new payload has them, use them. 
+        // If not (undefined), copy them from the disk so they aren't lost.
+        const safeTeacherId = 
+            payload.teacher_id || 
+            payload.meta?.teacher_id || 
+            existingOnDisk?.teacher_id || 
+            existingOnDisk?.meta?.teacher_id;
+
+        const safeGrapeSeedId = 
+            payload.meta?.grapeseed_id || 
+            existingOnDisk?.meta?.grapeseed_id;
+
+        // 🟢 3. MERGE (New Data + Rescued IDs)
+        // We create a final object that combines your new changes with the rescued IDs.
+        const safePayload: SavedObservationPayload = {
+            ...payload, // Take all the new changes (text, ratings, etc.)
+            
+            teacher_id: safeTeacherId, // Force the valid ID
+            
+            meta: {
+                ...payload.meta, // Keep the new meta
+                teacher_id: safeTeacherId, // Force the valid ID
+                grapeseed_id: safeGrapeSeedId // Force the valid ID
+            }
+        };
+
+        // 🟢 4. SAVE THE SAFE PAYLOAD
+        await set(storageKey, safePayload);
+        
+        setLastSavedAt(safePayload.updatedAt);
+        console.log("✅ Saved to Vault (Merged & Protected).");
         
         setSaveStatus("saved");
-        
-        // 🟢 FIX 2: RESET DIRTY FLAG
-        // We just saved, so we are now "Clean" until the user types again.
         isDirtyRef.current = false;
 
       } catch (err: any) {
@@ -909,7 +939,9 @@ const persistObservation = React.useCallback(
     },
     [storageKey] 
   );
-  const isFirstRun = useRef(true);
+
+
+const isFirstRun = useRef(true);
 
 
 
