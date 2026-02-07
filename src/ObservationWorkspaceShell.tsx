@@ -197,6 +197,7 @@ interface OcrResult {
 interface SavedObservationPayload {
   id: string;
   teacher_id?: string;
+  grapeseed_id?: string | null;
   performance_rating?: PerformanceRating;
   meta: {
     teacherName: string;
@@ -390,6 +391,8 @@ const [isCanvasLocked, setIsCanvasLocked] = useState(false);
 // Inside ObservationWorkspaceShell component
 const [isBatchOcrRunning, setIsBatchOcrRunning] = useState(false);
 const [batchOcrProgress, setBatchOcrProgress] = useState(""); // e.g., "Processing batch 1 of 3..."
+const [rescuedIds, setRescuedIds] = useState<{ teacher_id?: string; grapeseed_id?: string | null }>({});
+const [isMetadataReady, setIsMetadataReady] = useState(false);
 
 
 // Helper to extract IDs like "1.1", "3.4" from any messy string
@@ -561,7 +564,10 @@ const handleConvertAllInk = async () => {
     }
 };
 
-
+// --- SIDEBAR RESIZE STATE ---
+  const [sidebarWidth, setSidebarWidth] = useState(getPersistedSidebarWidth);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
 // Update the startSidebarResize function
 const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) => {
   // 🔒 STOP if locked
@@ -570,18 +576,6 @@ const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) 
   e.preventDefault(); 
   setIsSidebarResizing(true);
 }, [isResizerLocked]);
-
-// --- SIDEBAR RESIZE STATE ---
-  const [sidebarWidth, setSidebarWidth] = useState(getPersistedSidebarWidth);
-  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
-  const sidebarRef = useRef<HTMLDivElement>(null);
-
-
-  // const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-  //   // Prevent text selection during drag
-  //   e.preventDefault(); 
-  //   setIsSidebarResizing(true);
-  // }, []);
 
   const doSidebarResize = useCallback(
     (e: MouseEvent | TouchEvent) => {
@@ -794,6 +788,8 @@ const audioChunksRef = useRef<Blob[]>([]);
 
 const transcriptionTargetRef = useRef<'indicator' | 'admin'>('indicator');
 
+
+
 const isDirtyRef = useRef(false);
 useEffect(() => {
       if (indicators.length === 0) return;
@@ -807,6 +803,37 @@ useEffect(() => {
   indicators[activeIndex] ?? indicators[0] ?? INITIAL_INDICATORS[0];
 
 useEffect(() => {
+  async function hydrateIds() {
+    try {
+      const masterList = await get<any[]>("dashboard_backup_list");
+      if (Array.isArray(masterList)) {
+        const match = masterList.find((obs) => obs.id === observationMeta.id);
+        if (match) {
+          // 🟢 LOOK DEEPER: Check both top-level AND inside meta
+          const tId = match.teacher_id || match.meta?.teacher_id;
+          const gId = match.grapeseed_id || match.meta?.grapeseed_id;
+          
+          if (tId || gId) {
+            console.log(`🎯 Hydrated IDs for ${observationMeta.id}:`, { tId, gId });
+            setRescuedIds({
+              teacher_id: tId,
+              grapeseed_id: gId
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Hydration failed", e);
+    } finally {
+      setIsMetadataReady(true);
+    }
+  }
+  hydrateIds();
+}, [observationMeta.id]);
+
+
+
+  useEffect(() => {
   let cancelled = false;
 
   async function load() {
@@ -888,61 +915,48 @@ useEffect(() => {
 }, [storageKey, observationMeta.id]);
 
 const persistObservation = React.useCallback(
-    async (payload: SavedObservationPayload) => {
-      setSyncError(null);
+  async (payload: SavedObservationPayload) => {
+    if (!isMetadataReady) return; 
+    setSyncError(null);
 
-      try {
-        // 🟢 1. READ DISK FIRST
-        // The IDs are here! We must grab them before overwriting.
-        const existingOnDisk = await get<SavedObservationPayload>(storageKey);
+    try {
+      const existingOnDisk = await get<SavedObservationPayload>(storageKey);
 
-        // 🟢 2. RESCUE THE IDs
-        // If the new payload has them, use them. 
-        // If not (undefined), copy them from the disk so they aren't lost.
-        const safeTeacherId = 
-            payload.teacher_id || 
-            payload.meta?.teacher_id || 
-            existingOnDisk?.teacher_id || 
-            existingOnDisk?.meta?.teacher_id;
+      // 🛡️ THE TRIPLE THREAT RESCUE
+      // We look in the payload, the rescued state, and finally the existing disk file.
+      const safeTeacherId = payload.teacher_id || rescuedIds.teacher_id || existingOnDisk?.teacher_id || existingOnDisk?.meta?.teacher_id;
+      const safeGrapeSeedId = payload.grapeseed_id || rescuedIds.grapeseed_id || existingOnDisk?.grapeseed_id || existingOnDisk?.meta?.grapeseed_id;
 
-        const safeGrapeSeedId = 
-            payload.meta?.grapeseed_id || 
-            existingOnDisk?.meta?.grapeseed_id;
+      const safePayload: SavedObservationPayload = {
+        ...payload,
+        teacher_id: safeTeacherId,
+        grapeseed_id: safeGrapeSeedId, // 🟢 Now valid because of the interface update
+        meta: {
+          ...payload.meta,
+          teacher_id: safeTeacherId, 
+          grapeseed_id: safeGrapeSeedId
+        },
+        updatedAt: Date.now()
+      };
 
-        // 🟢 3. MERGE (New Data + Rescued IDs)
-        // We create a final object that combines your new changes with the rescued IDs.
-        const safePayload: SavedObservationPayload = {
-            ...payload, // Take all the new changes (text, ratings, etc.)
-            
-            teacher_id: safeTeacherId, // Force the valid ID
-            
-            meta: {
-                ...payload.meta, // Keep the new meta
-                teacher_id: safeTeacherId, // Force the valid ID
-                grapeseed_id: safeGrapeSeedId // Force the valid ID
-            }
-        };
-
-        // 🟢 4. SAVE THE SAFE PAYLOAD
-        await set(storageKey, safePayload);
-        
-        setLastSavedAt(safePayload.updatedAt);
-        console.log("✅ Saved to Vault (Merged & Protected).");
-        
-        setSaveStatus("saved");
-        isDirtyRef.current = false;
-
-      } catch (err: any) {
-        console.error("Failed to write to IndexedDB", err);
-        setSyncError("Disk Full");
+      await set(storageKey, safePayload);
+      setLastSavedAt(safePayload.updatedAt);
+      setSaveStatus("saved");
+      isDirtyRef.current = false;
+      
+      // Log for your peace of mind
+      if (safeTeacherId && !payload.teacher_id) {
+        console.log("🩹 ID Rescued during save:", safeTeacherId);
       }
-    },
-    [storageKey] 
-  );
-
+    } catch (err: any) {
+      console.error("Failed to write to IndexedDB", err);
+      setSyncError("Disk Full");
+    }
+  },
+  [storageKey, rescuedIds, isMetadataReady] 
+);
 
 const isFirstRun = useRef(true);
-
 
 
   const handleBatchPolishClick = () => {
@@ -1000,6 +1014,7 @@ const executeBatchPolish = async () => {
     setIsAiPolishing(false);
   }
 };
+
 const handleManualSave = async () => { 
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -1008,44 +1023,49 @@ const handleManualSave = async () => {
 
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
-      teacher_id: teacher_id || (observationMeta as any).teacher_id,
-      
-      meta: { teacherName,grapeseed_id, schoolName, campus, unit, lesson, supportType, date, teacher_id: teacher_id || (observationMeta as any).teacher_id},
+      // 🟢 Explicit ID Rescue
+      teacher_id: rescuedIds.teacher_id || teacher_id,
+      grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
+      meta: { 
+        ...observationMeta,
+        teacher_id: rescuedIds.teacher_id || teacher_id,
+        grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id 
+      },
       indicators,
       performance_rating: indicators[0]?.performance_rating || null,
       status: observationStatus,
       updatedAt: Date.now(),
-      scratchpadText, // Ensure scratchpad is saved too
-      adminSummaryVN, // Ensure admin summary is saved too
-      // 🟢 ADD THIS LINE: Preserve the last known sync time
+      scratchpadText, 
+      adminSummaryVN, 
       lastSync: lastServerVersionRef.current, 
     };
 
     persistObservation(payload); 
-  };
+};
 
 const handleAdminReviewSave = async () => {
     if (!adminPreview) return;
-
     const translatedSummary = adminPreview.trainerSummary;
 
     try {
-      // 1. Save to Database
       await saveAdminSummaryToDb(observationMeta.id, translatedSummary);
-      
-      // 2. Update React State
       setAdminSummaryVN(translatedSummary);
 
-      // 3. 🟢 Update Local Storage (Keep the Draft in sync!)
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
-        meta: { teacherName,teacher_id,grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
+        // 🟢 Explicit ID Rescue
+        teacher_id: rescuedIds.teacher_id || teacher_id,
+        grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
+        meta: { 
+          ...observationMeta,
+          teacher_id: rescuedIds.teacher_id || teacher_id,
+          grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id 
+        },
         indicators,
         status: observationStatus,
         updatedAt: Date.now(),
         scratchpadText,
         adminSummaryVN: translatedSummary, 
-        // 🟢 ADD THIS LINE: Preserve the last known sync time
         lastSync: lastServerVersionRef.current,
       };
       persistObservation(payload);
@@ -1055,13 +1075,20 @@ const handleAdminReviewSave = async () => {
       console.error("Admin Review Save failed", err);
       alert("❌ Save failed. Check console for details.");
     }
-  };
+};
+
 const handleBackToDashboard = () => {
-    // 🟢 NEW: Only update timestamp if you actually changed something!
     if (isDirtyRef.current || canvasDirty) {
         const payload: SavedObservationPayload = {
           id: observationMeta.id,
-          meta: { teacherName,teacher_id,grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
+          // 🟢 Explicit ID Rescue
+          teacher_id: rescuedIds.teacher_id || teacher_id,
+          grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
+          meta: { 
+            ...observationMeta,
+            teacher_id: rescuedIds.teacher_id || teacher_id,
+            grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id 
+          },
           indicators,
           performance_rating: indicators[0]?.performance_rating || null,
           status: observationStatus,
@@ -1073,8 +1100,6 @@ const handleBackToDashboard = () => {
     
         persistObservation(payload);
     }
-    
-    // Always exit, whether we saved or not
     onBack();
 };
 
@@ -1089,21 +1114,27 @@ const handleToggleLock = () => {
 
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
-      meta: { teacherName, grapeseed_id,schoolName, campus, unit, lesson, supportType, date },
+      // 🟢 Explicit ID Rescue
+      teacher_id: rescuedIds.teacher_id || teacher_id,
+      grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
+      meta: { 
+        ...observationMeta,
+        teacher_id: rescuedIds.teacher_id || teacher_id,
+        grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id 
+      },
       indicators,
       performance_rating: indicators[0]?.performance_rating || null,
       status: nextStatus,
       updatedAt: Date.now(),
       scratchpadText,
       adminSummaryVN,
-      // 🟢 ADD THIS LINE: Preserve the last known sync time
       lastSync: lastServerVersionRef.current,
     };
 
     persistObservation(payload);
-
     setObservationStatus(nextStatus);
-  };
+};
+
 
 const handleEmailTeacher = async () => {
   if (canvasDirty) {
@@ -1559,17 +1590,31 @@ const handleGenerateAiSummary = async () => {
 };
 
 const [canvasDirty, setCanvasDirty] = useState(false);
+
+
 useEffect(() => {
-    if (!observationMeta.id) return;
+    // 1. Don't save if we aren't ready or have no ID
+    if (!observationMeta.id || !isMetadataReady) return;
+
+    // 2. Only save if something actually changed
+    // (isDirtyRef tracks comments/ratings, canvasDirty tracks ink)
     if (!isDirtyRef.current && !canvasDirty) return;
-    if (saveTimeoutRef.current) {
-      window.clearTimeout(saveTimeoutRef.current);
-    }
+    
+    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
 
     saveTimeoutRef.current = window.setTimeout(() => {
+      console.log("💾 Auto-saving draft...");
+      
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
-        meta: { teacherName,teacher_id, grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
+        // Priority: Rescued ID > Props ID
+        teacher_id: rescuedIds.teacher_id || teacher_id, 
+        grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
+        meta: { 
+          ...observationMeta, 
+          teacher_id: rescuedIds.teacher_id || teacher_id,
+          grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id 
+        },
         indicators,
         performance_rating: indicators[0]?.performance_rating || null,
         status: observationStatus,
@@ -1587,11 +1632,21 @@ useEffect(() => {
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
     };
   }, [
-    // Keep your existing dependencies
-    indicators, scratchpadText, observationMeta, teacherName, schoolName, 
-    campus, unit, lesson, supportType, observationStatus, isBad, isFavorite, 
-    persistObservation, adminSummaryVN, canvasDirty 
+    // 🟢 ALL ACTUAL DEPENDENCIES LISTED HERE:
+    observationMeta, 
+    isMetadataReady, 
+    canvasDirty, 
+    rescuedIds, 
+    indicators, 
+    observationStatus, 
+    scratchpadText, 
+    adminSummaryVN, 
+    persistObservation,
+    teacher_id,
+    grapeseed_id
   ]);
+
+
 // Update this useEffect
 useEffect(() => {
   const handleBeforeUnload = (e: BeforeUnloadEvent) => {
