@@ -10,9 +10,8 @@ import { getOptimizedInkImage } from "./utils/imageOptimizer"; // If you created
 import { get, set, del } from 'idb-keyval';
 // 1. Import the constant (the data array) normally
 import { INITIAL_INDICATORS } from "./constants";
-
-// 2. Import the interfaces using 'import type'
 import type { 
+  PerformanceRating, 
   StrokePoint, 
   Stroke, 
   IndicatorState 
@@ -197,6 +196,7 @@ interface OcrResult {
 interface SavedObservationPayload {
   id: string;
   teacher_id?: string;
+  performance_rating?: PerformanceRating;
   meta: {
     teacherName: string;
     schoolName: string;
@@ -978,6 +978,7 @@ const handleManualSave = async () => {
       
       meta: { teacherName, schoolName, campus, unit, lesson, supportType, date, teacher_id: teacher_id || (observationMeta as any).teacher_id},
       indicators,
+      performance_rating: indicators[0]?.performance_rating || null,
       status: observationStatus,
       updatedAt: Date.now(),
       scratchpadText, // Ensure scratchpad is saved too
@@ -1028,6 +1029,7 @@ const handleBackToDashboard = () => {
           id: observationMeta.id,
           meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
           indicators,
+          performance_rating: indicators[0]?.performance_rating || null,
           status: observationStatus,
           updatedAt: Date.now(),
           scratchpadText,
@@ -1055,6 +1057,7 @@ const handleToggleLock = () => {
       id: observationMeta.id,
       meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
       indicators,
+      performance_rating: indicators[0]?.performance_rating || null,
       status: nextStatus,
       updatedAt: Date.now(),
       scratchpadText,
@@ -1524,12 +1527,7 @@ const handleGenerateAiSummary = async () => {
 const [canvasDirty, setCanvasDirty] = useState(false);
 useEffect(() => {
     if (!observationMeta.id) return;
-
-    // 🟢 FIX 1: STOP SAVE ON LOAD
-    // If the user hasn't typed (isDirty) or drawn (canvasDirty), DO NOT autosave.
-    // This prevents the "Ghost Save" when opening a file.
     if (!isDirtyRef.current && !canvasDirty) return;
-
     if (saveTimeoutRef.current) {
       window.clearTimeout(saveTimeoutRef.current);
     }
@@ -1539,6 +1537,7 @@ useEffect(() => {
         id: observationMeta.id,
         meta: { teacherName, schoolName, campus, unit, lesson, supportType, date },
         indicators,
+        performance_rating: indicators[0]?.performance_rating || null,
         status: observationStatus,
         updatedAt: Date.now(),
         scratchpadText,
@@ -2204,36 +2203,57 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
       }}
     >
       <div className="indicator-panel-header">
-        <div style={{ overflow: "hidden" }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Indicators</div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-muted)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis"
-            }}
-          >
-            {sidebarWidth < 260 ? "Select item" : "Tap to switch or mark"}
-          </div>
-        </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          {/* Hide dropdown if super narrow */}
-          {sidebarWidth >= 300 && (
+           {/* --- PERFORMANCE RATING DROPDOWN --- */}
+          <div style={{ 
+            padding: "10px 14px", 
+            borderBottom: "1px solid #334155", 
+            background: "rgba(15, 23, 42, 0.4)" 
+          }}>
+            <label style={{ 
+              display: "block", 
+              fontSize: 11, 
+              fontWeight: 600, 
+              color: observationStatus === "saved" ? "var(--text-muted)" : "var(--accent)",
+              marginBottom: 6 
+            }}>
+              OVERALL PERFORMANCE {!indicators[activeIndex]?.performance_rating && " *"}
+            </label>
             <select
               className="select"
-              value={filterMode}
-              onChange={(e) =>
-                setFilterMode(e.target.value as "all" | "good" | "growth")
-              }
-              style={{ width: 90 }}
+              // Use the first indicator's rating as the source of truth for the dropdown
+              value={indicators[0]?.performance_rating || ""} 
+              disabled={observationStatus === "saved"}
+              onChange={(e) => {
+                // 🟢 The Fix: Cast 'val' to 'PerformanceRating'
+                const val = (e.target.value === "" ? null : e.target.value) as PerformanceRating;
+                
+                // Update ALL indicators so the rating is consistent across the entire observation object
+                setIndicators(prev => prev.map(ind => ({ 
+                  ...ind, 
+                  performance_rating: val 
+                })));
+                
+                isDirtyRef.current = true;
+              }}
+              style={{
+                width: "100%",
+                fontSize: 13,
+                borderColor: !indicators[0]?.performance_rating ? "#f59e0b" : "#334155",
+                backgroundColor: "#0f172a"
+              }}
             >
-              <option value="all">All</option>
-              <option value="good">Good</option>
-              <option value="growth">Growth</option>
+              <option value="">[ Select Rating ]</option>
+              <option value="Developing">Developing</option>
+              <option value="Functioning">Functioning</option>
+              <option value="Thriving">Thriving</option>
             </select>
-          )}
+            {!indicators[activeIndex]?.performance_rating && observationStatus !== "saved" && (
+              <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 4 }}>
+                ⚠️ Required before sync
+              </div>
+            )}
+          </div> 
           {/* 🔒 NEW LOCK BUTTON */}
           <button
             type="button"

@@ -1,5 +1,6 @@
 // src/constants.ts
 
+export type PerformanceRating = "Developing" | "Functioning" | "Thriving" | null;
 // 1. Move the types here so they can be shared
 export interface StrokePoint {
   x: number;
@@ -26,6 +27,7 @@ export interface IndicatorState {
   favorite: boolean;
   commentText: string;
   strokes: Stroke[];
+  performance_rating?: PerformanceRating;
   ocrUsed?: boolean;
   ocrLastRunAt?: number | null;
   ocrLastConfidence?: number | null; 
