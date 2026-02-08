@@ -72,6 +72,74 @@ router.post("/api/sync-teachers", async (req, res) => {
 
     log(`🏫 Found ${dbSchools.length} active schools. Launching Hyper-Parallel Sync...`);
 
+/* -------------------------------------------------- */
+    /* 2.5 DATA ALIGNMENT: LIVE AUTO-LINKING              */
+    /* -------------------------------------------------- */
+    // 🟢 UPDATED: Fetch 'email' as well, because upsert needs all NOT NULL fields
+    const { data: orphans, error: orphanErr } = await supabase
+      .from("teachers")
+      .select("id, name, email, school_name, campus")
+      .eq("trainer_id", userId)
+      .is("school_id", null);
+
+    if (orphanErr) log(`⚠️ Alignment Error: ${orphanErr.message}`);
+
+    if (orphans && orphans.length > 0) {
+      log(`🔗 Found ${orphans.length} orphaned teachers. Starting Live Alignment...`);
+      const alignmentUpdates = [];
+
+      orphans.forEach(teacher => {
+        const teacherText = clean(`${teacher.school_name} ${teacher.campus}`);
+        let bestMatchId = null;
+        let bestCampusId = null;
+        let bestSchoolName = "";
+        let bestCampusName = "";
+        let highestScore = 0;
+
+        dbSchools.forEach(school => {
+          const schoolText = clean(`${school.school_name} ${school.campus_name}`);
+          const score = (teacherText === schoolText) ? 1.0 : getSimilarity(teacherText, schoolText);
+
+          if (score > highestScore) {
+            highestScore = score;
+            bestMatchId = school.id;
+            bestCampusId = school.campus_id;
+            bestSchoolName = school.school_name;
+            bestCampusName = school.campus_name;
+          }
+        });
+
+        if (bestMatchId && highestScore >= 0.90) {
+          log(`   ✅ LINKING: "${teacher.name || teacher.id}" to School ID: ${bestMatchId} [${bestSchoolName}] (Score: ${highestScore.toFixed(2)})`);
+          
+          alignmentUpdates.push({ 
+            id: teacher.id, 
+            trainer_id: userId,          // Required: satisfies NOT NULL constraint
+            name: teacher.name,          // 👈 ADDED: satisfies NOT NULL constraint
+            email: teacher.email,        // 👈 ADDED: satisfies NOT NULL constraint
+            school_id: bestMatchId,
+            campus_id: bestCampusId,     
+            school_name: bestSchoolName, 
+            campus: bestCampusName,      
+            updated_at: new Date() 
+          });
+        } else {
+          log(`   ⚠️ NO CONFIDENT MATCH: "${teacher.name || teacher.id}" (Best Score: ${highestScore.toFixed(2)})`);
+        }
+      });
+
+      if (alignmentUpdates.length > 0) {
+        const { error: liveLinkErr } = await supabase
+          .from("teachers")
+          .upsert(alignmentUpdates, { onConflict: 'id' });
+          
+        if (!liveLinkErr) {
+          log(`📊 Database Updated: ${alignmentUpdates.length} teachers are no longer orphans.`);
+        } else {
+          log(`❌ Database Update Failed: ${liveLinkErr.message}`);
+        }
+      }
+    }
     /* ================================================================================= */
     /* MASTER LOOP: PROCESS EACH SCHOOL (PARALLEL)                                       */
     /* ================================================================================= */
