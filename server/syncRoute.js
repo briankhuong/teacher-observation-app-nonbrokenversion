@@ -39,9 +39,7 @@ async function pMap(array, mapper, { concurrency = 20 } = {}) {
   return Promise.all(results);
 }
 
-/* -------------------------------------------------- */
-/* SYNC ROUTE: RECALIBRATED MULTI-SILO ENGINE         */
-/* -------------------------------------------------- */
+
 router.post("/api/sync-teachers", async (req, res) => {
   const { token, userId } = req.body;
   const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
@@ -51,12 +49,13 @@ router.post("/api/sync-teachers", async (req, res) => {
   const log = (m) => { console.log(m); logs.push(m); };
 
   try {
-    /* PHASE 6 (Foundation): TRAINER IDENTITY */
+    /* 1. TRAINER IDENTITY (Exact split logic) */
     const { data: { user: trainerUser }, error: userErr } = await supabase.auth.admin.getUserById(userId);
     if (userErr || !trainerUser) throw new Error("Trainer not found");
     const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0]; 
     log(`👤 Syncing for Trainer: "${myName}"`);
 
+    /* 2. GET ALL ACTIVE SCHOOLS */
     const { data: dbSchools, error: schoolsErr } = await supabase
       .from("schools")
       .select("id, school_name, campus_name, official_code, campus_id")
@@ -64,50 +63,45 @@ router.post("/api/sync-teachers", async (req, res) => {
       .eq("disabled", false);
 
     if (schoolsErr) throw new Error(`DB Error: ${schoolsErr.message}`);
-    if (!dbSchools || dbSchools.length === 0) return res.json({ success: true, logs: ["⚠️ No active schools found."] });
+    if (!dbSchools || dbSchools.length === 0) return res.json({ success: true, logs: ["⚠️ No schools."] });
 
-    /* PHASE 1: GLOBAL ALIGNMENT (Orphan Rescue) */
+    /* PHASE 1: ORPHAN ALIGNMENT (Text Clues) */
     const { data: orphans } = await supabase.from("teachers").select("*").eq("trainer_id", userId).is("school_id", null);
     if (orphans?.length > 0) {
-      log(`🔗 Found ${orphans.length} orphaned teachers. Aligning to schools by text...`);
-      const alignmentUpdates = [];
-      orphans.forEach(t => {
+      const alignmentUpdates = orphans.map(t => {
         const tText = clean(`${t.school_name} ${t.campus}`);
-        let bestMatch = { id: null, score: 0, name: "", campus: "" };
+        let best = { id: null, score: 0, name: "", campus: "" };
         dbSchools.forEach(s => {
           const sText = clean(`${s.school_name} ${s.campus_name}`);
           const score = (tText === sText) ? 1.0 : getSimilarity(tText, sText);
-          if (score > bestMatch.score) bestMatch = { id: s.id, score, name: s.school_name, campus: s.campus_name };
+          if (score > best.score) best = { id: s.id, score, name: s.school_name, campus: s.campus_name };
         });
-        if (bestMatch.id && bestMatch.score >= 0.90) {
-          alignmentUpdates.push({ id: t.id, school_id: bestMatch.id, school_name: bestMatch.name, campus: bestMatch.campus, updated_at: new Date() });
-        }
-      });
+        return (best.score >= 0.9) ? { id: t.id, school_id: best.id, school_name: best.name, campus: best.campus, updated_at: new Date() } : null;
+      }).filter(Boolean);
       if (alignmentUpdates.length > 0) await supabase.from("teachers").upsert(alignmentUpdates);
     }
 
-    /* MASTER LOOP: PROCESS EACH SCHOOL SILO */
+    /* MASTER LOOP: MULTI-SILO PROCESSOR */
     await pMap(dbSchools, async (schoolRow) => {
         const schoolLogPrefix = `[${schoolRow.school_name}]`;
         let targetCampusId = schoolRow.campus_id;
 
         try {
-            /* PHASE 2: SCHOOL GEOGRAPHY REPAIR (Building Repair) */
+            /* PHASE 2: BUILDING REPAIR (GEOGRAPHY) */
             const apiCResp = await fetch(`https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/campuses/accessiblecampuses`, { headers: getHeaders(token) });
             if (!apiCResp.ok) return;
             const apiCampuses = await apiCResp.json();
             const targetApiCamp = apiCampuses.find(c => c.id === targetCampusId) || 
                                   apiCampuses.find(c => clean(c.name) === clean(schoolRow.campus_name));
 
-            if (!targetApiCamp) return log(`${schoolLogPrefix} ❌ Campus name not found in Portal.`);
+            if (!targetApiCamp) return log(`${schoolLogPrefix} ❌ Campus not found.`);
 
             if (targetCampusId !== targetApiCamp.id) {
                 await supabase.from("schools").update({ campus_id: targetApiCamp.id }).eq("id", schoolRow.id);
                 targetCampusId = targetApiCamp.id;
             }
 
-            /* PHASE 3 (Discovery) & PHASE 5 (Identity Phonebook) */
-            // 🟢 Recalibrated Query: Catch teachers by School ID OR School Name (for Triple-Nulls)
+            /* PHASE 3: SOURCE OF TRUTH (TRIPLE-NULL NET) */
             const [classResp, { data: allPotentialTeachers }] = await Promise.all([
                 fetch(`https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`, { headers: getHeaders(token) }),
                 supabase.from("teachers").select("*").or(`school_id.eq.${schoolRow.id},school_name.eq."${schoolRow.school_name}"`)
@@ -116,7 +110,7 @@ router.post("/api/sync-teachers", async (req, res) => {
             const classData = await classResp.json();
             const apiClasses = classData.schoolClasses || classData || [];
             
-            // Empty Class Alert Feature
+            // Empty Class Alert
             supabase.from("schools").update({ has_empty_class: apiClasses.some(c => !c.teacherId) }).eq("id", schoolRow.id).then();
 
             const apiActiveIds = new Set();
@@ -131,43 +125,60 @@ router.post("/api/sync-teachers", async (req, res) => {
                 const d = await r.json();
                 return Array.isArray(d) ? d[0] : d;
             }, { concurrency: 10 });
+            apiProfiles.forEach(p => { if (p?.email) emailToApiId.set(p.email.toLowerCase().trim(), p.id.toLowerCase()); });
 
-            apiProfiles.forEach(p => {
-                if (p?.email && p?.id) emailToApiId.set(p.email.toLowerCase().trim(), p.id.toLowerCase());
-            });
-
-            /* PHASE 4: MULTI-SILO RESOLUTION (Heal vs. Clone) */
             const updatesToSave = [];
             const insertsToSave = [];
 
-            // Net includes: already in campus, no campus assigned, or missing school_id but matching school_name
+            /* PHASE 4: RESOLUTION (ORIGINAL TAG LOGIC TRANSLANTED) */
             const sandboxCandidates = (allPotentialTeachers || []).filter(t => t.campus_id === targetCampusId || !t.campus_id);
 
             await pMap(sandboxCandidates, async (t) => {
                 let gseedId = (t.grapeseed_id || "").toLowerCase();
                 const cleanEmail = (t.email || "").toLowerCase().trim();
 
-                // 🟢 THE HEALER: Bridge using Email + Text Clues
+                // DETECTIVE HEAL: Bridge ID via Email Phonebook
                 if (!gseedId && emailToApiId.has(cleanEmail)) {
                     gseedId = emailToApiId.get(cleanEmail);
-                    log(`${schoolLogPrefix} 🔗 [HEALED] ${t.name || cleanEmail} fully restored.`);
                 }
 
-                const isActiveHere = apiActiveIds.has(gseedId);
+                const isActive = apiActiveIds.has(gseedId);
                 let finalTags = Array.isArray(t.tags) ? t.tags : [];
 
-                if (isActiveHere && gseedId) {
-                    /* PHASE 6: TAG SIEVE */
-                    const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
-                    let rawTags = [];
-                    if (tagResp.ok) {
-                        const tData = await tagResp.json();
-                        rawTags = tData.tags || tData.entityTags || (Array.isArray(tData) ? tData[0]?.tags : []);
+                if (isActive) {
+                    // --- START ORIGINAL TAG SIEVE ---
+                    let rawTagObjects = [];
+                    if (gseedId && gseedId !== "null" && gseedId !== "") {
+                        const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+                        if (tagResp.ok) {
+                            const tData = await tagResp.json();
+                            // UNIVERSAL PARSER (COPY-PASTE)
+                            if (tData.tags) rawTagObjects = tData.tags; 
+                            else if (tData.entityTags) rawTagObjects = tData.entityTags; 
+                            else if (Array.isArray(tData)) {
+                                if (tData[0] && (tData[0].tags || tData[0].entityTags)) rawTagObjects = tData[0].tags || tData[0].entityTags;
+                                else rawTagObjects = tData;
+                            }
+                        }
                     }
-                    const names = (rawTags || []).map(tag => (tag.name || "").trim()).filter(n => isNaN(Number(n))).map(n => clean(n).split(" ")[0]); 
-                    const others = [...new Set(names.filter(n => n !== myName))];
-                    finalTags = others.length > 0 ? others : (names.includes(myName) ? [] : ["No tag"]);
+
+                    const rawNames = rawTagObjects
+                        .map(tag => (tag.name || "").trim())
+                        .filter(name => isNaN(Number(name))) 
+                        .map(name => clean(name).split(" ")[0]); 
+
+                    const hasMe = rawNames.some(n => n === myName);
+                    const others = [...new Set(rawNames.filter(n => n !== myName))];
+
+                    if (others.length > 0) {
+                        finalTags = others; 
+                    } else {
+                        if (hasMe) finalTags = []; 
+                        else finalTags = ["No tag"];
+                    }
+                    // --- END ORIGINAL TAG SIEVE ---
                 } else {
+                    // --- ORIGINAL INACTIVE APPENDAGE LOGIC ---
                     const currentClean = finalTags.filter(tag => tag.toLowerCase() !== "inactive");
                     finalTags = [...currentClean, "Inactive"];
                 }
@@ -187,13 +198,24 @@ router.post("/api/sync-teachers", async (req, res) => {
                 });
             }, { concurrency: 20 });
 
-            // 🟢 THE CLONER: If teacher exists in API but not in this specific campus silo
+            /* PHASE 5: THE CLONER (NEW INSTANCES) */
             const siloIds = new Set(updatesToSave.map(u => u.grapeseed_id).filter(id => id));
             const missingIds = [...apiActiveIds].filter(id => !siloIds.has(id));
 
             for (const id of missingIds) {
                 const profile = apiProfiles.find(p => p && p.id.toLowerCase() === id);
                 if (profile) {
+                    // NEW DISCOVERY TAG PROCESSING (PARALLEL FETCH)
+                    const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+                    let rawT = [];
+                    if (tagResp.ok) {
+                        const d = await tagResp.json();
+                        rawT = d.tags || d.entityTags || (Array.isArray(d) ? d[0]?.tags : []);
+                    }
+                    const pNames = (rawT || []).map(tag => (tag.name || "").trim()).filter(n => isNaN(Number(n))).map(n => clean(n).split(" ")[0]);
+                    const others = [...new Set(pNames.filter(n => n !== myName))];
+                    const cloneTags = others.length > 0 ? others : (pNames.includes(myName) ? [] : ["No tag"]);
+
                     insertsToSave.push({
                         trainer_id: userId,
                         grapeseed_id: id,
@@ -203,15 +225,15 @@ router.post("/api/sync-teachers", async (req, res) => {
                         school_name: schoolRow.school_name,
                         campus: schoolRow.campus_name,
                         campus_id: targetCampusId,
-                        tags: ["No tag"], 
+                        tags: cloneTags,
                         created_at: new Date(),
                         updated_at: new Date()
                     });
-                    log(`${schoolLogPrefix} ✨ [NEW INSTANCE] ${profile.name} added to silo.`);
+                    log(`${schoolLogPrefix} ✨ [CLONED] ${profile.name}`);
                 }
             }
 
-            /* PHASE 7: COMMIT */
+            /* PHASE 6: COMMIT */
             await Promise.all([
                 updatesToSave.length > 0 ? supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' }) : Promise.resolve(),
                 insertsToSave.length > 0 ? supabase.from("teachers").insert(insertsToSave) : Promise.resolve()
@@ -222,7 +244,7 @@ router.post("/api/sync-teachers", async (req, res) => {
         }
     }, { concurrency: 15 });
 
-    log(`🏁 Finished Full Sync in ${((Date.now() - startTime)/1000).toFixed(2)}s`);
+    log(`🏁 Finished Sync in ${((Date.now() - startTime)/1000).toFixed(2)}s`);
     res.json({ success: true, logs });
 
   } catch (err) {
@@ -230,7 +252,6 @@ router.post("/api/sync-teachers", async (req, res) => {
     res.json({ success: false, error: err.message, logs });
   }
 });
-
 
 /* -------------------------------------------------- */
 /* INTERNAL HELPER: Fetch GrapeSEED Master Token      */
