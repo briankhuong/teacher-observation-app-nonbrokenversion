@@ -626,6 +626,14 @@ const [pulseResults, setPulseResults] = useState<{
   classlessClasses: [],
   nameMismatches: []
 });
+
+// 🟢 NEW: Count Unique Schools
+  const uniqueSchoolCount = useMemo(() => {
+    const names = rows.map((r) => r.school_name);
+    return new Set(names).size;
+  }, [rows]);
+
+
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
     try {
       const saved = localStorage.getItem("schoolsColumnVisibility");
@@ -1200,8 +1208,9 @@ const runPulseAudit = async () => {
         {/* Tier 1: Title & Info */}
         <div className="tm-title-section">
           <div className="card-title">Schools & campuses</div>
+{/* 🟢 REPLACE WITH THIS */}
           <div className="card-subtitle">
-            Manage school metadata (admin, AM, address) used by observations and reports.
+             Manage <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{rows.length}</strong> campuses.
           </div>
         </div>
 
