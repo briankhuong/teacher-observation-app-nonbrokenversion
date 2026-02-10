@@ -715,6 +715,50 @@ export const TeachersScreen: React.FC = () => {
   const [showViewModal, setShowViewModal] = useState(false);
 
   const [refreshKey, setRefreshKey] = useState(0);
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'mutual' | 'inactive'>('all');
+
+  // 🟢 NEW: Calculate Counts & Filter Rows
+  const { filteredRows, counts } = useMemo(() => {
+    let activeCount = 0;
+    let mutualCount = 0;
+    let inactiveCount = 0;
+    // Pre-calculate status for each row to avoid re-running logic during render
+    const rowsWithStatus = rows.map((r) => {
+      const tags = Array.isArray(r.tags) ? r.tags : [];
+      
+      // 1. Check Inactive
+      const isInactive = tags.some(t => t.toLowerCase() === "inactive");
+      
+      // 2. Check Mutual (Has tags that are NOT "Inactive" and NOT "No tag")
+      const isMutual = tags.some(t => t !== "No tag" && t.toLowerCase() !== "inactive");
+
+      // 3. Active (Empty tags [] or just "No tag")
+      const isActive = !isInactive && !isMutual;
+
+      if (isInactive) inactiveCount++;
+      else if (isMutual) mutualCount++;
+      else activeCount++;
+
+      return { 
+        ...r, 
+        _derivedStatus: isInactive ? 'inactive' : isMutual ? 'mutual' : 'active' 
+      };
+    });
+
+    const filtered = filterStatus === 'all'
+      ? rowsWithStatus
+      : rowsWithStatus.filter(r => r._derivedStatus === filterStatus);
+
+    return {
+      filteredRows: filtered,
+      counts: { 
+        all: rows.length, 
+        active: activeCount, 
+        mutual: mutualCount, 
+        inactive: inactiveCount 
+      }
+    };
+  }, [rows, filterStatus]);
 
   // TanStack Table State
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
@@ -1014,7 +1058,7 @@ export const TeachersScreen: React.FC = () => {
   );
 
   const table = useReactTable({
-    data: rows,
+    data: filteredRows,
     columns,
     state: {
       sorting,
@@ -1496,6 +1540,36 @@ const handleSync = async () => {
 
           {!loading && table.getRowModel().rows.length > 0 && (
             <>
+            {/* 🟢 NEW: Filter Tabs */}
+              <div className="filter-tabs-row">
+                <button 
+                  className={`filter-tab ${filterStatus === 'all' ? 'active' : ''}`}
+                  onClick={() => setFilterStatus('all')}
+                >
+                  All Teachers <span className="count-badge">{counts.all}</span>
+                </button>
+                
+                <button 
+                  className={`filter-tab ${filterStatus === 'active' ? 'active-green' : ''}`}
+                  onClick={() => setFilterStatus('active')}
+                >
+                  Active <span className="count-badge-color">{counts.active}</span>
+                </button>
+
+                <button 
+                  className={`filter-tab ${filterStatus === 'mutual' ? 'active-blue' : ''}`}
+                  onClick={() => setFilterStatus('mutual')}
+                >
+                  Mutual <span className="count-badge-color">{counts.mutual}</span>
+                </button>
+
+                <button 
+                  className={`filter-tab ${filterStatus === 'inactive' ? 'active-red' : ''}`}
+                  onClick={() => setFilterStatus('inactive')}
+                >
+                  Inactive <span className="count-badge-color">{counts.inactive}</span>
+                </button>
+              </div>
               {/* Column Visibility Menu */}
               <div
                 style={{
