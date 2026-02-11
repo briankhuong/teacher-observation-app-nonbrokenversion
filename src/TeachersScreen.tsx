@@ -715,24 +715,22 @@ export const TeachersScreen: React.FC = () => {
   const [showViewModal, setShowViewModal] = useState(false);
 
   const [refreshKey, setRefreshKey] = useState(0);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'mutual' | 'inactive'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'mutual' | 'inactive'>('active');
+  // 🟢 NEW: Secondary Filters (Performance & Month)
+  const [filterPerformance, setFilterPerformance] = useState<string>('all');
+  const [filterMonth, setFilterMonth] = useState<string>(''); // Format: "YYYY-MM"
 
-  // 🟢 NEW: Calculate Counts & Filter Rows
+// 🟢 UPDATED: Multi-step Filter Logic
   const { filteredRows, counts } = useMemo(() => {
     let activeCount = 0;
     let mutualCount = 0;
     let inactiveCount = 0;
-    // Pre-calculate status for each row to avoid re-running logic during render
+
+    // STEP 1: Calculate Base Status & Counts (Global)
     const rowsWithStatus = rows.map((r) => {
       const tags = Array.isArray(r.tags) ? r.tags : [];
-      
-      // 1. Check Inactive
       const isInactive = tags.some(t => t.toLowerCase() === "inactive");
-      
-      // 2. Check Mutual (Has tags that are NOT "Inactive" and NOT "No tag")
       const isMutual = tags.some(t => t !== "No tag" && t.toLowerCase() !== "inactive");
-
-      // 3. Active (Empty tags [] or just "No tag")
       const isActive = !isInactive && !isMutual;
 
       if (isInactive) inactiveCount++;
@@ -745,12 +743,27 @@ export const TeachersScreen: React.FC = () => {
       };
     });
 
-    const filtered = filterStatus === 'all'
+    // STEP 2: Filter by Status Tab
+    let result = filterStatus === 'all'
       ? rowsWithStatus
       : rowsWithStatus.filter(r => r._derivedStatus === filterStatus);
 
+    // STEP 3: Filter by Performance
+    if (filterPerformance !== 'all') {
+      result = result.filter(r => r.latest_performance === filterPerformance);
+    }
+
+    // STEP 4: Filter by Month (Last Visit)
+    if (filterMonth) {
+      result = result.filter(r => {
+        if (!r.updated_at) return false;
+        // Compare YYYY-MM strings
+        return r.updated_at.startsWith(filterMonth);
+      });
+    }
+
     return {
-      filteredRows: filtered,
+      filteredRows: result,
       counts: { 
         all: rows.length, 
         active: activeCount, 
@@ -758,7 +771,7 @@ export const TeachersScreen: React.FC = () => {
         inactive: inactiveCount 
       }
     };
-  }, [rows, filterStatus]);
+  }, [rows, filterStatus, filterPerformance, filterMonth]);
 
   // TanStack Table State
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
@@ -1476,46 +1489,46 @@ const handleSync = async () => {
   return (
     <>
       <div className="card">
-<div className="card-header tm-header-layout">
-  <div className="tm-title-section">
-    <div className="card-title">Teachers</div>
-    <div className="card-subtitle">Manage your roster and workbooks.</div>
-  </div>
+      <div className="card-header tm-header-layout">
+        <div className="tm-title-section">
+          <div className="card-title">Teachers</div>
+          <div className="card-subtitle">Manage your roster and workbooks.</div>
+        </div>
 
-  <div className="tm-toolbar-row">
-    <div className="tm-search-wrapper">
-      <Search size={14} strokeWidth={2} className="tm-search-icon-svg" />
-      <input
-        className="tm-search-input"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search..."
-      />
-    </div>
+        <div className="tm-toolbar-row">
+          <div className="tm-search-wrapper">
+            <Search size={14} strokeWidth={2} className="tm-search-icon-svg" />
+            <input
+              className="tm-search-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search..."
+            />
+          </div>
 
-    <div className="tm-actions-group">
-      <button 
-        type="button" 
-        className="tm-pure-icon" 
-        onClick={handleSync}
-        title="Sync with GrapeSEED"
-      >
-        <RefreshCw size={18} strokeWidth={2} />
-      </button>
+          <div className="tm-actions-group">
+            <button 
+              type="button" 
+              className="tm-pure-icon" 
+              onClick={handleSync}
+              title="Sync with GrapeSEED"
+            >
+              <RefreshCw size={18} strokeWidth={2} />
+            </button>
 
-      <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
+            <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
 
-      <button
-        type="button"
-        className="tm-btn-primary"
-        onClick={openCreate}
-      >
-        <Plus size={18} strokeWidth={2.5} style={{ marginRight: '6px' }} />
-        New teacher
-      </button>
-    </div>
-  </div>
-</div>
+            <button
+              type="button"
+              className="tm-btn-primary"
+              onClick={openCreate}
+            >
+              <Plus size={18} strokeWidth={2.5} style={{ marginRight: '6px' }} />
+              New teacher
+            </button>
+          </div>
+        </div>
+      </div>
 
         <div className="card-body" style={{ position: "relative" }}>
           {loading && <div>Loading teachers…</div>}
@@ -1525,7 +1538,8 @@ const handleSync = async () => {
             </div>
           )}
 
-          {!loading && table.getRowModel().rows.length === 0 && !loadError && (
+          {/* STATE 1: Truly Empty DB (No data at all) */}
+          {!loading && rows.length === 0 && !loadError && (
             <div className="empty-state">
               <p>No teachers yet.</p>
               <button
@@ -1538,9 +1552,12 @@ const handleSync = async () => {
             </div>
           )}
 
-          {!loading && table.getRowModel().rows.length > 0 && (
+          {/* STATE 2: Data Exists (Show Filters regardless of search results) */}
+          {!loading && rows.length > 0 && (
             <>
-            {/* 🟢 NEW: Filter Tabs */}
+              {/* 🟢 FIXED: Filters are now outside the table-row-length check */}
+              
+              {/* 1. Status Tabs */}
               <div className="filter-tabs-row">
                 <button 
                   className={`filter-tab ${filterStatus === 'all' ? 'active' : ''}`}
@@ -1570,13 +1587,56 @@ const handleSync = async () => {
                   Inactive <span className="count-badge-color">{counts.inactive}</span>
                 </button>
               </div>
-              {/* Column Visibility Menu */}
+
+              {/* 2. Secondary Toolbar */}
+              <div className="filter-secondary-row">
+                <div className="filter-group">
+                  <label>Performance:</label>
+                  <select 
+                    className="filter-select"
+                    value={filterPerformance} 
+                    onChange={(e) => setFilterPerformance(e.target.value)}
+                  >
+                    <option value="all">All Ratings</option>
+                    <option value="Thriving">Thriving</option>
+                    <option value="Functioning">Functioning</option>
+                    <option value="Developing">Developing</option>
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label>Last Visit:</label>
+                  <input 
+                    type="month" 
+                    className="filter-input"
+                    value={filterMonth}
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                  />
+                </div>
+
+                {(filterPerformance !== 'all' || filterMonth !== '' || filterStatus !== 'active' || search !== '') && (
+                  <button 
+                    className="btn-text-danger"
+                    onClick={() => {
+                      setFilterPerformance('all');
+                      setFilterMonth('');
+                      setFilterStatus('active'); // Reset to default view
+                      setSearch('');
+                    }}
+                    style={{ fontSize: '12px', marginLeft: 'auto' }}
+                  >
+                    Clear Filters ×
+                  </button>
+                )}
+              </div>
+
+              {/* 3. Column Visibility Menu (Positioned Absolute) */}
               <div
                 style={{
                   position: "absolute",
-                  top: "1px", // Adjust to align with table header row
+                  top: "1px",
                   right: "8px",
-                  zIndex: 10, // Ensure it's above table
+                  zIndex: 10,
                 }}
               >
                 {showColumnMenu && (
@@ -1596,10 +1656,9 @@ const handleSync = async () => {
                   >
                     <div className="modal-body" style={{ marginTop: 0, gap: "6px" }}>
                       {table.getAllLeafColumns().map((column) => (
-                        column.id !== "actions" && ( // Exclude the actions column from the toggle list
+                        column.id !== "actions" && (
                           <div key={column.id} className="form-row" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                             <label style={{ fontSize: "13px", color: "var(--text)" }}>
-                              {/* Use the column header text or a capitalized ID if header is a component */}
                               {typeof column.columnDef.header === 'string'
                                 ? column.columnDef.header
                                 : column.id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
@@ -1620,74 +1679,103 @@ const handleSync = async () => {
                   </div>
                 )}
               </div>
-              <div className="table-wrapper">
-              <table className="simple-table">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id}>
-                      {headerGroup.headers.map((header) => (
-                        <th
-                          key={header.id}
-                          colSpan={header.colSpan}
-                          style={{ width: header.getSize() }}
-                          className={header.column.getCanSort() ? "sortable-header" : ""}
-                        >
-                          {header.isPlaceholder ? null : (
-                            <div
-                              {...{
-                                className: header.column.getCanSort()
-                                  ? "cursor-pointer select-none"
-                                  : "",
-                                onClick: header.column.getToggleSortingHandler(),
-                              }}
+
+              {/* 4. The Table OR No Matches Message */}
+              {table.getRowModel().rows.length > 0 ? (
+                <div className="table-wrapper">
+                  <table className="simple-table">
+                    <thead>
+                      {table.getHeaderGroups().map((headerGroup) => (
+                        <tr key={headerGroup.id}>
+                          {headerGroup.headers.map((header) => (
+                            <th
+                              key={header.id}
+                              colSpan={header.colSpan}
+                              style={{ width: header.getSize() }}
+                              className={header.column.getCanSort() ? "sortable-header" : ""}
                             >
-                              {flexRender(
-                                header.column.columnDef.header,
-                                header.getContext()
+                              {header.isPlaceholder ? null : (
+                                <div
+                                  {...{
+                                    className: header.column.getCanSort()
+                                      ? "cursor-pointer select-none"
+                                      : "",
+                                    onClick: header.column.getToggleSortingHandler(),
+                                  }}
+                                >
+                                  {flexRender(
+                                    header.column.columnDef.header,
+                                    header.getContext()
+                                  )}
+                                  {{
+                                    asc: " ↑",
+                                    desc: " ↓",
+                                  }[header.column.getIsSorted() as string] ?? null}
+                                </div>
                               )}
-                              {{
-                                asc: " ↑",
-                                desc: " ↓",
-                              }[header.column.getIsSorted() as string] ?? null}
-                            </div>
-                          )}
-                        </th>
+                            </th>
+                          ))}
+                        </tr>
                       ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.map((row) => {
-                    const isActive = row.original.id === viewingRow?.id;
-                    return (
-                      <tr
-                        key={row.id}
-                        className={
-                          "simple-table-row" +
-                          (isActive ? " simple-table-row--active" : "")
-                        }
-                        onClick={() => openView(row.original)}
-                      >
-                        {row.getVisibleCells().map((cell) => (
-                          <td
-                            key={cell.id}
-                            style={{ width: cell.column.getSize() }}
+                    </thead>
+                    <tbody>
+                      {table.getRowModel().rows.map((row) => {
+                        const isActive = row.original.id === viewingRow?.id;
+                        return (
+                          <tr
+                            key={row.id}
+                            className={
+                              "simple-table-row" +
+                              (isActive ? " simple-table-row--active" : "")
+                            }
+                            onClick={() => openView(row.original)}
                           >
-                            {flexRender(
-                              cell.column.columnDef.cell,
-                              cell.getContext()
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                            {row.getVisibleCells().map((cell) => (
+                              <td
+                                key={cell.id}
+                                style={{ width: cell.column.getSize() }}
+                              >
+                                {flexRender(
+                                  cell.column.columnDef.cell,
+                                  cell.getContext()
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                /* 🟢 NEW: No Matches State (Keeps filters visible) */
+                <div style={{ 
+                  textAlign: 'center', 
+                  padding: '40px', 
+                  color: 'var(--text-muted)',
+                  background: 'rgba(255,255,255,0.02)',
+                  borderRadius: '8px',
+                  border: '1px dashed var(--border)'
+                }}>
+                   <p style={{ marginBottom: '12px' }}>No teachers found matching these filters.</p>
+                   <button 
+                     className="btn btn-ghost"
+                     onClick={() => {
+                        setFilterStatus('active');
+                        setFilterPerformance('all');
+                        setFilterMonth('');
+                        setSearch('');
+                     }}
+                   >
+                     Reset Search
+                   </button>
+                </div>
+              )}
             </>
           )}
         </div>
+
+        
       </div>
 
       <TeacherFormModal
