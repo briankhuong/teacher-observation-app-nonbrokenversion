@@ -34,6 +34,7 @@ export interface TeacherRow {
   campus_id: string | null;  // 🟢 ADD THIS (Text ID)
   created_at: string;
   updated_at: string;
+  last_visit?: string | null;
 }
 
 type TeacherFormState = {
@@ -755,10 +756,10 @@ export const TeachersScreen: React.FC = () => {
 
     // STEP 4: Filter by Month (Last Visit)
     if (filterMonth) {
-      result = result.filter(r => {
-        if (!r.updated_at) return false;
-        // Compare YYYY-MM strings
-        return r.updated_at.startsWith(filterMonth);
+result = result.filter(r => {
+        // 🟢 UPDATED: Use the new last_visit field
+        if (!r.last_visit) return false; 
+        return r.last_visit.startsWith(filterMonth);
       });
     }
 
@@ -957,20 +958,20 @@ export const TeachersScreen: React.FC = () => {
         minSize: 150,
         size: 200,
       },
-      // 🟢 ADD: Most Recent Support Column
       {
         id: "recent_support",
         header: "Latest Support",
         cell: (info) => {
           const row = info.row.original;
-          // We rely on the Supabase 'updated_at' or a specific date if you prefer
           return (
             <div style={{ lineHeight: 1.2 }}>
               <div className="entity-cell-main" style={{ fontSize: '12px' }}>
-                {row.updated_at ? new Date(row.updated_at).toLocaleDateString() : "No visits"}
+                {/* 🟢 UPDATED: Use last_visit */}
+                {row.last_visit ? new Date(row.last_visit).toLocaleDateString() : "No visits"}
               </div>
               <div className="entity-cell-sub" style={{ fontSize: '10px' }}>
-                {row.latest_performance ? "Observation synced" : "Pending first visit"}
+                 {/* Optional: Show relative time or status */}
+                 {row.last_visit ? "Recorded" : "—"}
               </div>
             </div>
           );
@@ -1110,56 +1111,87 @@ export const TeachersScreen: React.FC = () => {
 
   const trainerId = user.id;
 
-  // Load teachers for this trainer
+// Load teachers for this trainer
   useEffect(() => {
     let cancelled = false;
 
     async function loadTeachers() {
-  try {
-    setLoading(true);
-    setLoadError(null);
+      try {
+        setLoading(true);
+        setLoadError(null);
 
-    const { data, error } = await supabase
-      .from("teachers")
-      .select(`
-        id,
-        trainer_id,
-        grapeseed_id,
-        latest_performance,
-        teaching_issue,
-        name,
-        email,
-        school_name,
-        campus,
-        school_id, 
-        campus_id,
-        worksheet_url,
-        status,
-        is_active,
-        tags,
-        created_at,
-        updated_at
-      `) // Ensure no comments, emojis, or "ADD THIS" text remains here
-      .order("school_name", { ascending: true })
-      .order("campus", { ascending: true })
-      .order("name", { ascending: true });
+        // 1. Fetch Teachers
+        const { data: teachersData, error: teacherError } = await supabase
+          .from("teachers")
+          .select(`
+            id,
+            trainer_id,
+            grapeseed_id,
+            latest_performance,
+            teaching_issue,
+            name,
+            email,
+            school_name,
+            campus,
+            school_id, 
+            campus_id,
+            worksheet_url,
+            status,
+            is_active,
+            tags,
+            created_at,
+            updated_at
+          `)
+          .eq("trainer_id", trainerId) // Ensure we only get our teachers
+          .order("school_name", { ascending: true })
+          .order("campus", { ascending: true })
+          .order("name", { ascending: true });
 
-    if (error) {
-      console.error("[DB] load teachers error", error);
-      if (!cancelled) setLoadError(error.message);
-      return;
+        if (teacherError) throw teacherError;
+
+        if (!cancelled && teachersData) {
+          // 2. Extract IDs for bulk fetch
+          const grapeseedIds = teachersData
+            .map(t => t.grapeseed_id)
+            .filter(id => id); // Remove nulls
+
+          // 3. Fetch Observation Dates (Slim Query)
+          // Note: We fetch ALL dates for these teachers and calculate max in JS 
+          // because joining/grouping in Supabase client is complex without a View.
+          const { data: obsData } = await supabase
+            .from("observations")
+            .select("grapeseed_id, observation_date")
+            .in("grapeseed_id", grapeseedIds)
+            .order("observation_date", { ascending: false });
+
+          // 4. Create Map: ID -> Latest Date
+          const lastVisitMap = new Map<string, string>();
+          if (obsData) {
+            obsData.forEach(obs => {
+              // Since we ordered by desc, the first one we see is the latest
+              if (obs.grapeseed_id && !lastVisitMap.has(obs.grapeseed_id)) {
+                lastVisitMap.set(obs.grapeseed_id, obs.observation_date);
+              }
+            });
+          }
+
+          // 5. Merge into Teacher Rows
+          const mergedRows: TeacherRow[] = teachersData.map(t => ({
+            ...t,
+            last_visit: t.grapeseed_id ? lastVisitMap.get(t.grapeseed_id) || null : null
+          }));
+
+          setRows(mergedRows);
+        }
+      } catch (err: any) {
+        console.error("[DB] load teachers error", err);
+        if (!cancelled) setLoadError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
 
-    if (!cancelled && data) {
-      // This cast will now work because the 'data' structure matches TeacherRow
-      setRows(data as TeacherRow[]); 
-    }
-  } finally {
-    if (!cancelled) setLoading(false);
-  }
-}
-
-    loadTeachers();
+    if (trainerId) loadTeachers();
     return () => {
       cancelled = true;
     };
@@ -1198,7 +1230,9 @@ export const TeachersScreen: React.FC = () => {
     setShowViewModal(false);
   };
 
-  const handleDelete = async (row: TeacherRow) => {
+
+
+const handleDelete = async (row: TeacherRow) => {
     const ok = window.confirm(
       `Delete teacher "${row.name}"?\nThis cannot be undone.`
     );
@@ -1221,7 +1255,7 @@ export const TeachersScreen: React.FC = () => {
       setViewingRow(null);
       setShowViewModal(false);
     }
-  };
+};
 
 const submitForm = async (values: TeacherFormState, autoCreateToken?: string) => {
     // --- CREATE CASE ---
