@@ -47,6 +47,7 @@ router.post("/api/sync-teachers", async (req, res) => {
   const startTime = Date.now();
   const logs = [];
   const log = (m) => { console.log(m); logs.push(m); };
+  const touchedTeacherIds = new Set();
 
   try {
     /* 1. TRAINER IDENTITY (Exact split logic) */
@@ -196,6 +197,7 @@ router.post("/api/sync-teachers", async (req, res) => {
                     tags: finalTags,
                     updated_at: new Date()
                 });
+                touchedTeacherIds.add(t.id);touchedTeacherIds.add(t.id);
             }, { concurrency: 20 });
 
             /* PHASE 5: THE CLONER (NEW INSTANCES) */
@@ -232,20 +234,81 @@ router.post("/api/sync-teachers", async (req, res) => {
                     log(`${schoolLogPrefix} ✨ [CLONED] ${profile.name}`);
                 }
             }
+/* PHASE 6: COMMIT (Updated for Ghost Hunter) */
+            // 🟢 Capture IDs of newly inserted teachers for the Safe List
+            const insertPromise = insertsToSave.length > 0 
+                ? supabase.from("teachers").insert(insertsToSave).select("id") 
+                : Promise.resolve({ data: [] });
 
-            /* PHASE 6: COMMIT */
-            await Promise.all([
+            const [updateRes, insertRes] = await Promise.all([
                 updatesToSave.length > 0 ? supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' }) : Promise.resolve(),
-                insertsToSave.length > 0 ? supabase.from("teachers").insert(insertsToSave) : Promise.resolve()
+                insertPromise
             ]);
+
+            // Add newly generated IDs to the Safe List
+            if (insertRes.data) {
+                insertRes.data.forEach(row => touchedTeacherIds.add(row.id));
+            }
 
         } catch (schoolErr) {
             log(`${schoolLogPrefix} ❌ Error: ${schoolErr.message}`);
         }
     }, { concurrency: 15 });
 
+// 🟢 GHOST HUNTER CLEANUP (The Purge)
+    // Run this AFTER the loop finishes
+    if (touchedTeacherIds.size > 0) {
+        const safeListArray = Array.from(touchedTeacherIds);
+
+        // 1. Fetch Untouched Teachers
+        // 🟢 REMOVED the .not("tags"...) filter so we catch teachers with NULL/Empty tags
+        const { data: ghosts, error: ghostErr } = await supabase
+            .from("teachers")
+            .select("id, tags, name, email, school_name") 
+            .eq("trainer_id", userId)
+            .not("id", "in", `(${safeListArray.join(",")})`);
+
+        if (ghostErr) {
+            log(`👻 Ghost Hunter Query Failed: ${ghostErr.message}`);
+        } else if (ghosts && ghosts.length > 0) {
+             
+             // 2. Filter in JS: Find those who are NOT ALREADY strictly ["Inactive"]
+             // This saves us from updating records that are already correct.
+             const validGhosts = ghosts.filter(t => {
+                 const currentTags = t.tags || [];
+                 return JSON.stringify(currentTags) !== JSON.stringify(["Inactive"]);
+             });
+
+             if (validGhosts.length > 0) {
+                 // 3. Overwrite tags to ["Inactive"]
+                 const updatePromises = validGhosts.map(async (t) => {
+                     const msg = `👻 [INACTIVE] Overwriting: ${t.name} (${t.email}) | School: ${t.school_name}`;
+                     log(msg); 
+
+                     return supabase
+                        .from("teachers")
+                        .update({ 
+                            tags: ["Inactive"], // 🟢 FORCE OVERWRITE
+                            updated_at: new Date() 
+                        })
+                        .eq("id", t.id);
+                 });
+
+                 await Promise.all(updatePromises);
+                 log(`✅ Successfully overwrote ${validGhosts.length} teachers to ["Inactive"].`);
+             } else {
+                 log(`👻 Ghost Hunter: Found ${ghosts.length} ghosts, but they were already Inactive.`);
+             }
+        } else {
+            log(`👻 Ghost Hunter: No inactive teachers found to clean up.`);
+        }
+    } else {
+        log(`⚠️ Ghost Hunter Skipped: Safe List was empty.`);
+    }
+
     log(`🏁 Finished Sync in ${((Date.now() - startTime)/1000).toFixed(2)}s`);
     res.json({ success: true, logs });
+
 
   } catch (err) {
     log(`❌ FATAL: ${err.message}`);
