@@ -3085,3 +3085,48 @@ display: -webkit-box;
           color: white;
           box-shadow: 0 2px 5px rgba(239, 68, 68, 0.3);
         }
+
+        /* 🟢 NEW: Secondary Filter Styles */
+        .filter-secondary-row {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          margin-bottom: 16px;
+          padding: 8px 12px;
+          background: var(--bg-surface-hover); /* Slight background to distinguish area */
+          border-radius: 8px;
+          border: 1px solid var(--border);
+        }
+
+        .filter-group {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: var(--text-muted);
+        }
+
+        .filter-select, .filter-input {
+          background: var(--bg-surface);
+          border: 1px solid var(--border);
+          color: var(--text);
+          padding: 4px 8px;
+          border-radius: 6px;
+          font-size: 13px;
+          outline: none;
+        }
+
+        .filter-select:focus, .filter-input:focus {
+          border-color: #3b82f6;
+        }
+        
+        .btn-text-danger {
+          background: none;
+          border: none;
+          color: #ef4444;
+          cursor: pointer;
+          font-weight: 500;
+        }
+        .btn-text-danger:hover {
+          text-decoration: underline;
+        }
