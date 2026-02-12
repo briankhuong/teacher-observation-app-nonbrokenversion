@@ -3130,3 +3130,53 @@ display: -webkit-box;
         .btn-text-danger:hover {
           text-decoration: underline;
         }
+
+
+
+        .planning-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+/* Sticky Headers */
+.planning-table thead th {
+  position: sticky;
+  top: 0;
+  background: #1e293b;
+  z-index: 10;
+  padding: 10px;
+  border-bottom: 2px solid #334155;
+}
+
+/* Sticky First Column (School/Teacher) */
+.sticky-col {
+  position: sticky;
+  left: 0;
+  background: #0f172a;
+  z-index: 5;
+  min-width: 250px;
+  border-right: 2px solid #334155;
+}
+
+.first-header { z-index: 15 !important; } /* Corner cell stays on top of both */
+
+/* Grid Cell Styling */
+.grid-cell {
+  width: 80px;
+  height: 50px;
+  border: 1px solid #1e293b;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  text-align: center;
+}
+
+.cell-lva { background: rgba(59, 130, 246, 0.2); color: #3b82f6; border: 1px solid #3b82f6; }
+.cell-visit { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; border: 1px solid #8b5cf6; }
+.cell-complete { background: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; cursor: not-allowed; }
+
+.conflict-icon { color: #ef4444; position: absolute; top: 2px; right: 2px; }
+.lock-icon { position: absolute; bottom: 2px; right: 2px; opacity: 0.6; }
+
+.activity-label { font-size: 11px; font-weight: 800; }
