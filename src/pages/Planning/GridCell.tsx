@@ -10,7 +10,7 @@ interface GridCellProps {
   matchingObs: any;
   allPlans: any[];
   onOpenMenu: (x: number, y: number, teacher: any, monthKey: string, plan: any) => void;
-  onRefresh: () => void; // 🟢 Added to interface
+  onRefresh: () => void;
 }
 
 const GridCell: React.FC<GridCellProps> = ({
@@ -21,8 +21,10 @@ const GridCell: React.FC<GridCellProps> = ({
   matchingObs,
   allPlans,
   onOpenMenu,
-  onRefresh // 🟢 Destructured here
+  onRefresh
 }) => {
+
+  // 1. Conflict Detection
   const hasConflict = useMemo(() => {
     if (!teacher.grapeseed_id) return false;
     return allPlans.some(p => 
@@ -35,44 +37,50 @@ const GridCell: React.FC<GridCellProps> = ({
   const isComplete = !!matchingObs;
   const displayType = isComplete ? matchingObs.support_type : existingPlan?.activity_type;
   
-// Inside GridCell.tsx
-const handleClick = async () => {
-  // Prevent interaction if no tool is selected or if a real observation exists
-  if (!activeTool || isComplete) return;
+  // 2. Click Handler (The Painter)
+  const handleClick = async () => {
+    if (!activeTool || isComplete) return;
 
-  try {
-    if (activeTool === 'Eraser') {
-      if (existingPlan) {
-        await supabase.from('support_plans').delete().eq('id', existingPlan.id);
+    try {
+      if (activeTool === 'Eraser') {
+        if (existingPlan?.id) {
+          const { error } = await supabase
+            .from('support_plans')
+            .delete()
+            .eq('id', existingPlan.id);
+          if (error) throw error;
+        }
+      } else {
+        // Prepare Payload
+        const payload = {
+          trainer_id: teacher.trainer_id,
+          teacher_id: teacher.id,
+          grapeseed_id: teacher.grapeseed_id, // This column MUST exist now
+          month_key: monthKey,
+          activity_type: activeTool,
+          status: 'planned',
+          updated_at: new Date().toISOString()
+        };
+
+        // UPSERT LOGIC
+        // We rely on the constraint: unique(teacher_id, month_key)
+        const { error } = await supabase
+          .from('support_plans')
+          .upsert(payload, { 
+            onConflict: 'teacher_id,month_key', // No spaces!
+            ignoreDuplicates: false 
+          });
+
+        if (error) throw error;
       }
-    } else {
-      // Use upsert to handle both "new" and "update" in one call
-      const { error } = await supabase.from('support_plans').upsert({
-        // If existingPlan exists, use its ID to update; otherwise, let Supabase gen a new one
-        ...(existingPlan?.id && { id: existingPlan.id }),
-        trainer_id: teacher.trainer_id,
-        teacher_id: teacher.id,
-        grapeseed_id: teacher.grapeseed_id,
-        school_name: teacher.school_name,
-        month_key: monthKey,
-        activity_type: activeTool,
-        status: 'planned',
-        updated_at: new Date().toISOString()
-      }, {
-        // This ensures that teacher_id + month_key remains unique per plan
-        onConflict: 'teacher_id,month_key' 
-      });
 
-      if (error) throw error;
+      // 3. Update UI
+      onRefresh(); 
+    } catch (err: any) {
+      console.error("Painter error:", err.message);
+      alert(`Save failed: ${err.message}`);
     }
-
-    // CRITICAL: Call refresh immediately to show the new "LVA" or "Visit" badge
-    onRefresh(); 
-  } catch (err) {
-    console.error("Painter failed:", err);
-    alert("Could not update plan. Check your database connection.");
-  }
-};
+  };
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -80,6 +88,7 @@ const handleClick = async () => {
     onOpenMenu(e.clientX, e.clientY, teacher, monthKey, existingPlan);
   };
 
+  // 4. Styling Classes
   const getCellClass = () => {
     let base = "grid-cell ";
     if (isComplete) return base + "cell-complete";
@@ -95,17 +104,37 @@ const handleClick = async () => {
       onClick={handleClick}
       onContextMenu={handleContextMenu}
     >
-      <div className="cell-content">
-        {displayType && <span className="activity-label">{displayType}</span>}
+      {/* Container for centering content */}
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        
+        {displayType && (
+          <span className="activity-label">
+            {displayType}
+          </span>
+        )}
+        
         <div className="cell-icons">
-          {isComplete && <Lock size={10} className="lock-icon" />}
+          {isComplete && <Lock className="lock-icon" />}
+          
           {hasConflict && (
             <span title="Conflict: Supported at another location this month">
               <AlertCircle size={10} className="conflict-icon" />
             </span>
           )}
+          
           {existingPlan?.notes && <div className="notes-indicator" />}
         </div>
+
+        {/* Show initials if planned by someone else (Shared Teacher) */}
+        {existingPlan && existingPlan.trainer_id !== teacher.trainer_id && (
+          <div style={{
+            position: 'absolute', bottom: '2px', right: '2px', fontSize: '8px',
+            color: '#94a3b8', background: '#1e293b', padding: '1px 2px', borderRadius: '2px'
+          }}>
+             {/* Fallback to 'O' for Other if name missing */}
+             O
+          </div>
+        )}
       </div>
     </td>
   );
