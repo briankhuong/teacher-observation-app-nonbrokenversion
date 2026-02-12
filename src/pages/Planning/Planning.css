@@ -342,3 +342,35 @@
   cursor: pointer;
   padding: 4px 0;
 }
+
+.mutual-badge {
+  background: #f59e0b; /* Amber/Orange */
+  color: #0f172a;      /* Dark Text */
+  
+  /* Force distinct size */
+  font-size: 8px !important; 
+  line-height: 1 !important; /* Critical: Stops it from being 24px tall */
+  font-weight: 800;
+  
+  /* Sizing & Spacing */
+  padding: 3px 5px;
+  border-radius: 4px;
+  margin-left: 8px;
+  
+  /* positioning */
+  align-self: center; /* Ensures it stays vertically centered */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: help;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2); /* subtle depth */
+}
+
+/* Optional hover state */
+.mutual-badge:hover {
+  background: #fbbf24;
+  transform: scale(1.05);
+}
