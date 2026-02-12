@@ -12,8 +12,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState } from "@tanstack/react-table";
-import { Search, RefreshCw, Plus } from "lucide-react";
-// 🟢 NEW: Server URL
+import { Search, RefreshCw, Plus, Copy, ExternalLink, Check } from "lucide-react";
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 export interface TeacherRow {
@@ -696,6 +695,40 @@ const handleWorkbookLookup = async () => {
   );
 };
 
+// 🟢 NEW: Small helper component for copy feedback
+const CopyButton = ({ text, size = 14 }: { text: string; size?: number }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text).catch(err => console.error("Copy failed", err));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000); // Revert after 2s
+  };
+
+  return (
+    <button
+      type="button"
+      className="icon-button"
+      title={copied ? "Copied!" : "Copy to clipboard"}
+      onClick={handleCopy}
+      style={{
+        cursor: "pointer",
+        background: "transparent",
+        border: "none",
+        padding: "4px",
+        display: "flex",
+        alignItems: "center",
+        color: copied ? "#22c55e" : "var(--text-muted)", // Green when copied
+        opacity: copied ? 1 : 0.7,
+        transition: "all 0.2s ease"
+      }}
+    >
+      {copied ? <Check size={size} /> : <Copy size={size} />}
+    </button>
+  );
+};
+
 export const TeachersScreen: React.FC = () => {
   const { user } = useAuth();
 
@@ -886,32 +919,13 @@ result = result.filter(r => {
         header: "Email",
         cell: (info) => {
           const email = info.getValue() as string | null;
-          
-          if (!email) {
-            return <div className="entity-cell-main">—</div>;
-          }
+          if (!email) return <div className="entity-cell-main">—</div>;
 
           return (
             <div className="entity-cell-main" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{email}</span>
-              <button
-                type="button"
-                className="icon-button"
-                title="Copy email"
-                style={{ 
-                  cursor: "pointer", 
-                  background: "transparent", 
-                  border: "none", 
-                  fontSize: "14px", 
-                  opacity: 0.7 
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard.writeText(email);
-                }}
-              >
-                📋
-              </button>
+              {/* 🟢 UPDATED: Use Helper Component */}
+              <CopyButton text={email} />
             </div>
           );
         },
@@ -1018,14 +1032,13 @@ result = result.filter(r => {
         minSize: 120,
       },
       
-      {
+{
         accessorKey: "worksheet_url",
         header: "Worksheet",
         enableSorting: false,
         cell: (info) => {
           const row = info.row.original;
           
-          // 🟢 NEW: Spinner logic
           if (provisioningIds.has(row.id)) {
             return (
               <div style={{color: '#2563eb', display:'flex', alignItems:'center', gap:'6px', fontWeight:500}}>
@@ -1035,32 +1048,25 @@ result = result.filter(r => {
           }
 
           const url = info.getValue() as string | null;
-          if (!url) {
-            return <span className="entity-cell-sub">Not set</span>;
-          }
+          if (!url) return <span className="entity-cell-sub">Not set</span>;
+
           return (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <button
                 type="button"
                 className="link-button"
+                style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
                 onClick={(e) => {
                   e.stopPropagation();
                   window.open(url, "_blank", "noopener,noreferrer");
                 }}
               >
-                Open
+                <span>Open</span>
+                <ExternalLink size={12} />
               </button>
-              <button
-                type="button"
-                className="icon-button"
-                title="Copy workbook link"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard.writeText(url).catch((err) => console.error("Copy failed", err));
-                }}
-              >
-                📋
-              </button>
+
+              {/* 🟢 UPDATED: Use Helper Component */}
+              <CopyButton text={url} />
             </div>
           );
         },
@@ -1068,6 +1074,7 @@ result = result.filter(r => {
         minSize: 100,
         size: 140,
       },
+
       {
         id: "actions",
         header: () => (
