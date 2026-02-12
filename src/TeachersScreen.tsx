@@ -882,6 +882,45 @@ result = result.filter(r => {
         size: 200,
       },
       {
+        accessorKey: "email",
+        header: "Email",
+        cell: (info) => {
+          const email = info.getValue() as string | null;
+          
+          if (!email) {
+            return <div className="entity-cell-main">—</div>;
+          }
+
+          return (
+            <div className="entity-cell-main" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{email}</span>
+              <button
+                type="button"
+                className="icon-button"
+                title="Copy email"
+                style={{ 
+                  cursor: "pointer", 
+                  background: "transparent", 
+                  border: "none", 
+                  fontSize: "14px", 
+                  opacity: 0.7 
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(email);
+                }}
+              >
+                📋
+              </button>
+            </div>
+          );
+        },
+        id: "email",
+        minSize: 150,
+        size: 200,
+      },
+
+      {
         id: "school_campus",
         header: "School & Campus",
         accessorFn: (row) => `${row.school_name} ${row.campus}`,
