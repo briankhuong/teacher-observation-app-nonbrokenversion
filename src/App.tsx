@@ -13,9 +13,9 @@ import { get, set, keys, clear } from 'idb-keyval';
 import { INITIAL_INDICATORS } from "./constants"; // 🟢 NEW (Correct)
 // ... existing imports
 
+import PlanningGrid from './pages/Planning/PlanningGrid';
 
-// --- Types ---
-type Screen = "dashboard" | "workspace" | "teachers" | "schools";
+type Screen = "dashboard" | "workspace" | "teachers" | "schools" | "planning"; // 🟢 Add "planning"
 type SupportType = "Training" | "LVA" | "Visit";
 
 interface NewObservationMeta {
@@ -138,6 +138,7 @@ const handleLogout = async () => {
   const goToDashboard = () => setScreen("dashboard");
   const goToTeachers = () => setScreen("teachers");
   const goToSchools = () => setScreen("schools");
+  const goToPlanning = () => setScreen("planning"); // 🟢 New navigation helper
 
   const handleCreateObservationFromForm = (meta: NewObservationMeta) => {
     const id = meta.observationId ?? `obs-${Date.now()}`;
@@ -212,6 +213,9 @@ const handleLogout = async () => {
         </span>
           <button className="btn-ghost" onClick={goToDashboard}>
             Dashboard
+
+          </button><button className="btn-ghost" onClick={goToPlanning}>
+            Planning
           </button>
 
           <button className="btn-ghost" onClick={goToTeachers}>
@@ -255,6 +259,7 @@ const handleLogout = async () => {
         {screen === "teachers" && <TeachersScreen />}
 
         {screen === "schools" && <SchoolsScreen />}
+        {screen === "planning" && <PlanningGrid />}
       </main>
 
       {showNewObservationForm && (
