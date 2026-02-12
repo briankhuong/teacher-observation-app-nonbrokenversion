@@ -165,19 +165,39 @@ const PlanningGrid: React.FC = () => {
                       {/* Teacher Rows */}
                       {teacherList.map((teacher: any) => (
                         <tr key={teacher.id} className="teacher-row">
-                          <td className="sticky-col teacher-name" style={{ paddingLeft: '42px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                               {teacher.name}
-                               {/* Shared Teacher Dot */}
-                               {teacher.tags?.some((tag: string) => tag !== "No tag" && tag.toLowerCase() !== "inactive") && (
-                                 <div 
-                                   className="mutual-dot" 
-                                   title="Shared Teacher (Tagged by others)"
-                                   style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b' }}
-                                 ></div>
-                               )}
+                            <td className="sticky-col teacher-name" style={{ paddingLeft: '42px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px', width: '100%' }}>
+                                {/* Teacher Name (Truncated if too long) */}
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {teacher.name}
+                                </span>
+                                
+                                {/* --- SHARED TEACHER BADGE LOGIC --- */}
+                                {(() => {
+                                    // 1. Safety Check & Filter
+                                    const tags = Array.isArray(teacher.tags) ? teacher.tags : [];
+                                    const sharedTrainers = tags.filter((t: string) => 
+                                    t && t.trim() !== "" && t !== "No tag" && t.toLowerCase() !== "inactive"
+                                    );
+
+                                    // 2. Hide if no valid shared trainers
+                                    if (sharedTrainers.length === 0) return null;
+
+                                    // 3. Render Badge
+                                    return (
+                                    <span 
+                                        className="mutual-badge" 
+                                        title={`Shared with: ${sharedTrainers.join(", ")}`}
+                                    >
+                                        {/* Initials of first trainer (max 3 chars) */}
+                                        {sharedTrainers[0].trim().substring(0, 3).toUpperCase()}
+                                        {/* '+' indicator if multiple trainers */}
+                                        {sharedTrainers.length > 1 && "+"}
+                                    </span>
+                                    );
+                                })()}
                             </div>
-                          </td>
+                            </td>
                           
                           {/* Render the Interactive Cells */}
                           {months.map(m => (
