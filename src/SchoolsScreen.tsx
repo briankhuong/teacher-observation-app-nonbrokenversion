@@ -10,17 +10,24 @@ import {
   getSortedRowModel,
   flexRender,
 } from "@tanstack/react-table";
-
-import { Search, Plus, RefreshCw } from "lucide-react";
 import type {
   ColumnDef,
   SortingState,
   ColumnResizeMode,
   VisibilityState,
   Table,
+  FilterFn, // 🟢 Added FilterFn
 } from "@tanstack/react-table";
+import { Search, Plus, RefreshCw } from "lucide-react";
+import { flattenText } from "./utils/textUtils";
+const fuzzyVietnameseFilter: FilterFn<SchoolRow> = (row, columnId, value) => {
+  const itemValue = row.getValue(columnId);
+  const searchTerm = flattenText(value);
+  const targetValue = flattenText(String(itemValue || ""));
 
-// 🟢 NEW: Server URL
+  return targetValue.includes(searchTerm);
+};
+
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 export interface SchoolRow {
@@ -893,7 +900,7 @@ const [pulseResults, setPulseResults] = useState<{
     [setShowColumnMenu, provisioningIds] // 🟢 NEW: dependency on provisioningIds
   );
 
-  const table = useReactTable({
+const table = useReactTable({
     data: rows,
     columns,
     state: {
@@ -903,6 +910,8 @@ const [pulseResults, setPulseResults] = useState<{
     },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
+    // 🟢 Register the custom filter here
+    globalFilterFn: fuzzyVietnameseFilter, 
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
