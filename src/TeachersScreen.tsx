@@ -11,8 +11,10 @@ import {
   getSortedRowModel,
   flexRender,
 } from "@tanstack/react-table";
-import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState } from "@tanstack/react-table";
+import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState, FilterFn } from "@tanstack/react-table";
 import { Search, RefreshCw, Plus, Copy, ExternalLink, Check } from "lucide-react";
+import { flattenText } from "./utils/textUtils";
+
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
 export interface TeacherRow {
@@ -728,6 +730,13 @@ const CopyButton = ({ text, size = 14 }: { text: string; size?: number }) => {
     </button>
   );
 };
+const fuzzyVietnameseFilter: FilterFn<TeacherRow> = (row, columnId, value) => {
+  const itemValue = row.getValue(columnId);
+  const searchTerm = flattenText(value);
+  const targetValue = flattenText(String(itemValue || ""));
+
+  return targetValue.includes(searchTerm);
+};
 
 export const TeachersScreen: React.FC = () => {
   const { user } = useAuth();
@@ -947,16 +956,6 @@ result = result.filter(r => {
         minSize: 200,
         size: 300,
       },
-      {
-        accessorKey: "email",
-        header: "Email",
-        cell: (info) => (
-          <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
-        ),
-        id: "email",
-        minSize: 150,
-        size: 200,
-      },
 
       // 🟢 ADD: Latest Performance Column
       {
@@ -1117,16 +1116,16 @@ result = result.filter(r => {
     [setShowColumnMenu, provisioningIds]
   );
 
-  const table = useReactTable({
-    data: filteredRows,
+const table = useReactTable({
+    data: rows,
     columns,
     state: {
       sorting,
-      globalFilter: search,
-      columnVisibility,
+      globalFilter: search, 
     },
     onSortingChange: setSorting,
-    onColumnVisibilityChange: setColumnVisibility,
+    // 🟢 Register the custom filter here
+    globalFilterFn: fuzzyVietnameseFilter, 
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
