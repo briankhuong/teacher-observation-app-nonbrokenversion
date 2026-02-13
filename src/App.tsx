@@ -12,7 +12,7 @@ import { TrainerSettingsModal } from "./components/TrainerSettingsModal";
 import { get, set, keys, clear } from 'idb-keyval';
 import { INITIAL_INDICATORS } from "./constants"; // 🟢 NEW (Correct)
 // ... existing imports
-
+import { flattenText } from "./utils/textUtils";
 import PlanningGrid from './pages/Planning/PlanningGrid';
 
 type Screen = "dashboard" | "workspace" | "teachers" | "schools" | "planning"; // 🟢 Add "planning"
@@ -448,15 +448,31 @@ useEffect(() => {
     return () => { cancelled = true; };
   }, [user]);
 
-  // --- Filter Logic ---
+// --- Filter Logic ---
   const teacherSuggestions = React.useMemo(() => {
-    if (!teacherSearchTerm) return [];
-    const lower = teacherSearchTerm.toLowerCase();
-    return teachers
-      .filter(t => t.name.toLowerCase().includes(lower))
-      .slice(0, 5); // Limit to 5 for UI
-  }, [teachers, teacherSearchTerm]);
+    const term = teacherSearchTerm.trim();
+    if (!term) return [];
 
+    // 1. Flatten the search term once
+    const flattenedQuery = flattenText(term);
+    const searchWords = flattenedQuery.split(/\s+/); // Split into individual words
+
+    return teachers
+      .filter((t) => {
+        // 2. Flatten target fields
+        const targetName = flattenText(t.name);
+        const targetSchool = flattenText(t.school_name);
+        const targetCampus = flattenText(t.campus);
+
+        // 3. Create a combined searchable string
+        const combinedTarget = `${targetName} ${targetSchool} ${targetCampus}`;
+
+        // 4. Match: Ensure EVERY word in the search exists in the target
+        return searchWords.every((word) => combinedTarget.includes(word));
+      })
+      .slice(0, 5); // Keep the UI clean with top 5 results
+  }, [teachers, teacherSearchTerm]);
+  
   // Options Logic
   const schoolOptions = React.useMemo(() => {
     const names = (schools.length
