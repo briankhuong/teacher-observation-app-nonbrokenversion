@@ -17,6 +17,23 @@ import {
 } from 'lucide-react';
 import './Planning.css';
 
+
+
+// At the top of PlanningGrid.tsx
+const isSameMonth = (obsDate: string, monthKey: string) => {
+  if (!obsDate || !monthKey) return false;
+  
+  // 1. Get numbers from Observation (e.g., "2025-09-13" -> 2025 and 09)
+  const [oYear, oMonth] = obsDate.split('T')[0].split('-').map(n => parseInt(n, 10));
+  const oCoordinate = (oYear * 100) + oMonth; // Results in 202509
+
+  // 2. Get numbers from Column Key (e.g., "2025-09" -> 2025 and 09)
+  const [kYear, kMonth] = monthKey.split('-').map(n => parseInt(n, 10));
+  const kCoordinate = (kYear * 100) + kMonth; // Results in 202509
+
+  return oCoordinate === kCoordinate;
+};
+
 const PlanningGrid: React.FC = () => {
   const { user } = useAuth();
   const { groupedData, plans, obsData, months, loading, refresh } = usePlanningData(user?.id || '');
@@ -181,12 +198,15 @@ const PlanningGrid: React.FC = () => {
           const obs = obsData.find((o: any) => 
             o.grapeseed_id === t.grapeseed_id && 
             o.school_name === t.school_name && 
-            o.observation_date.startsWith(monthKey)
+            o.observation_date && // Ensure date exists
+            isSameMonth(o.observation_date, monthKey)
           );
+
           if (obs) {
+            // Count based on the actual observation, not the plan
             if (obs.support_type === 'LVA') lvaCount++;
             else if (obs.support_type === 'Visit') visitCount++;
-            return; // Stop checking this teacher/month
+            return; 
           }
 
           // 2. Check Drafts (Pending Updates)
@@ -383,13 +403,13 @@ const PlanningGrid: React.FC = () => {
                             </div>
                             </td>
                           
-                          {months.map(m => {
+                        {months.map(m => {
                             const cellKey = `${teacher.id}-${m.key}`;
                             const existingPlan = plans.find(p => p.teacher_id === teacher.id && p.month_key === m.key);
                             const isDeleted = !!(existingPlan && pendingDeletes.has(existingPlan.id));
 
                             return (
-                            <GridCell 
+                              <GridCell 
                                 key={cellKey}
                                 teacher={teacher}
                                 monthKey={m.key}
@@ -397,13 +417,17 @@ const PlanningGrid: React.FC = () => {
                                 existingPlan={existingPlan}
                                 pendingUpdate={pendingUpdates[cellKey]}
                                 isPendingDelete={isDeleted}
+                                
+                                // FIX: Use the coordinate matcher for the cell color
                                 matchingObs={obsData.find(o => 
                                     o.grapeseed_id === teacher.grapeseed_id && 
                                     o.school_name === teacher.school_name && 
-                                    o.observation_date.startsWith(m.key)
+                                    o.observation_date &&
+                                    isSameMonth(o.observation_date, m.key)
                                 )}
+                                
                                 allPlans={plans}
-                                allPendingUpdates={pendingUpdates}  // <--- ADD THIS LINE
+                                allPendingUpdates={pendingUpdates}
                                 onOpenMenu={handleOpenMenu}
                                 onQueueChange={handleQueueChange} 
                               />
