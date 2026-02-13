@@ -797,13 +797,14 @@ export const TeachersScreen: React.FC = () => {
     }
 
     // STEP 4: Filter by Month (Last Visit)
-    if (filterMonth) {
-result = result.filter(r => {
-        // 🟢 UPDATED: Use the new last_visit field
-        if (!r.last_visit) return false; 
-        return r.last_visit.startsWith(filterMonth);
-      });
-    }
+if (filterMonth) {
+  result = result.filter(r => {
+    if (!r.last_visit) return false; 
+    // Ensure both are in the same YYYY-MM format for comparison
+    const visitMonth = r.last_visit.substring(0, 7); 
+    return visitMonth === filterMonth;
+  });
+}
 
     return {
       filteredRows: result,
@@ -1117,7 +1118,7 @@ result = result.filter(r => {
   );
 
 const table = useReactTable({
-    data: rows,
+    data: filteredRows,
     columns,
     state: {
       sorting,
@@ -1694,18 +1695,18 @@ const handleSync = async () => {
                 </div>
 
                 {(filterPerformance !== 'all' || filterMonth !== '' || filterStatus !== 'active' || search !== '') && (
-                  <button 
-                    className="btn-text-danger"
-                    onClick={() => {
-                      setFilterPerformance('all');
-                      setFilterMonth('');
-                      setFilterStatus('active'); // Reset to default view
-                      setSearch('');
-                    }}
-                    style={{ fontSize: '12px', marginLeft: 'auto' }}
-                  >
-                    Clear Filters ×
-                  </button>
+                <button 
+                  className="btn-text-danger"
+                  onClick={() => {
+                    setFilterPerformance('all');
+                    setFilterMonth('');
+                    setFilterStatus('active');
+                    setSearch(''); // 🟢 This ensures the table search is also cleared
+                  }}
+                  style={{ fontSize: '12px', marginLeft: 'auto' }}
+                >
+                  Clear Filters ×
+                </button>
                 )}
               </div>
 
