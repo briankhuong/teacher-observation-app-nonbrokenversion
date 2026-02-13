@@ -45,6 +45,7 @@
 .tool-btn.active-lva { background: #3b82f6; color: white; border-color: #60a5fa; }
 .tool-btn.active-visit { background: #8b5cf6; color: white; border-color: #a78bfa; }
 .tool-btn.active-eraser { background: #ef4444; color: white; border-color: #fca5a5; }
+.sync-btn { margin-left: auto; }
 
 /* =========================================
    3. TABLE STRUCTURE
@@ -54,6 +55,7 @@
   border-collapse: separate; 
   font-size: 12px;
   width: 100%;
+  table-layout: fixed; /* KEEPS COLUMNS STABLE */
 }
 
 /* --- HEADERS --- */
@@ -68,18 +70,24 @@
   vertical-align: middle;
 }
 
+/* FIX: Increased width from 160px to 240px (+80px) */
 .sticky-col {
   position: sticky;
   left: 0;
   background: #0f172a;
   z-index: 10;
   border-right: 1px solid #334155;
+  
+  /* UPDATED WIDTH */
+  width: 240px !important;     
+  min-width: 240px !important;
+  max-width: 240px !important;
+  
+  box-sizing: border-box;
 }
 
 .first-header {
   z-index: 30 !important; 
-  min-width: 200px !important; 
-  max-width: 200px;
   text-align: left;
   padding-left: 12px !important;
 }
@@ -94,14 +102,12 @@
 .month-total { font-size: 9px; margin-top: 2px; opacity: 0.6; }
 
 /* =========================================
-   4. STRICT ROW HEIGHTS
+   4. ROW STYLES
    ========================================= */
-
-/* Common reset for all cells to prevent expansion */
 .planning-table td {
   padding: 0;
   margin: 0;
-  height: 24px; /* Strict default */
+  height: 24px;
   box-sizing: border-box;
 }
 
@@ -117,7 +123,7 @@
   background: #1e293b; 
   color: #60a5fa;
   font-weight: 700;
-  padding: 0 8px !important; /* Force override */
+  padding: 0 8px !important;
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
@@ -129,7 +135,6 @@
 
 /* Campus Sub-Header */
 .campus-row { height: 24px; }
-
 .campus-header-cell {
   background: #0f172a;
   color: #64748b;
@@ -141,17 +146,8 @@
   vertical-align: middle;
 }
 
-/* --- TEACHER ROW FIX --- */
-.teacher-row {
-  height: 24px;
-}
-
-.teacher-row td {
-  height: 24px !important; /* Force cell height */
-  line-height: 24px !important; /* Force text centering */
-  padding: 0 !important;
-}
-
+/* Teacher Row */
+.teacher-row { height: 24px; }
 .teacher-name {
   background: #0f172a;
   color: #e2e8f0;
@@ -161,8 +157,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   border-bottom: 1px solid #1e293b;
-  display: block; /* Helps behave like a div for height control */
+  display: block; 
   width: 100%;
+}
+
+/* FIX: ADD BORDERS TO EMPTY CELLS (COLLAPSED STATE FIX) */
+.header-fill {
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  border-right: 1px solid #334155; /* Adds the missing grid lines */
+}
+.campus-row .header-fill {
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  border-right: 1px solid #1e293b;
 }
 
 /* Grid Cells */
@@ -177,200 +185,61 @@
 .grid-cell:hover { background: rgba(255,255,255,0.03); }
 
 .activity-label {
-  display: flex;            
-  align-items: center;      
-  justify-content: center;  
-  width: 100%;
-  height: 100%; 
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
 }
-
-/* Badge Colors */
 .cell-lva .activity-label { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
 .cell-visit .activity-label { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
 .cell-complete .activity-label { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
 .cell-cancelled .activity-label { text-decoration: line-through; color: #64748b; }
 
-.header-fill {
-  background: #1e293b; 
-  border-bottom: 1px solid #334155;
-}
-.campus-row .header-fill {
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
+/* Update your CSS with these specific indicators */
+
+/* Orange Triangle: New/Modified Draft */
+.cell-unsaved::after {
+  content: ""; position: absolute; top: 0; left: 0; width: 0; height: 0;
+  border-top: 6px solid #f59e0b; border-right: 6px solid transparent; z-index: 5;
 }
 
-/* =========================================
-   5. ICONS & EXTRAS
-   ========================================= */
+/* Red Triangle: Pending Deletion (Add this!) */
+.cell-pending-delete::after {
+  content: ""; position: absolute; top: 0; left: 0; width: 0; height: 0;
+  border-top: 6px solid #ef4444; border-right: 6px solid transparent; z-index: 5;
+}
+
+/* Icons */
 .cell-icons {
-  position: absolute;
-  top: 0;
-  right: 0;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  padding-right: 2px;
-  pointer-events: none;
+  position: absolute; top: 0; right: 0; height: 100%;
+  display: flex; align-items: center; padding-right: 2px; pointer-events: none;
 }
-
 .conflict-icon { color: #ef4444; }
 .lock-icon { color: #4ade80; opacity: 0.8; width: 8px; height: 8px; }
-
 .notes-indicator {
-  position: absolute;
-  top: 2px; left: 2px;
-  width: 3px; height: 3px;
-  background: #f59e0b;
-  border-radius: 50%;
+  position: absolute; top: 2px; left: 2px; width: 3px; height: 3px;
+  background: #f59e0b; border-radius: 50%;
 }
 
-.mutual-dot {
-  width: 5px; height: 5px;
-  border-radius: 50%; 
-  background: #f59e0b;
-  display: inline-block;
-  margin-left: 4px;
-}
-
-.visit-badge {
-  margin-left: auto;
-  font-size: 9px;
-  background: #3b82f6;
-  color: white;
-  padding: 1px 5px;
-  border-radius: 3px;
-}
-
-/* =========================================
-   6. CONTEXT MENU
-   ========================================= */
-.menu-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  z-index: 100;
-}
-
-.planning-context-menu {
-  position: fixed;
-  z-index: 101;
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  width: 220px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-  padding: 12px;
-}
-
-.menu-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  color: #94a3b8;
-  margin-bottom: 12px;
-  border-bottom: 1px solid #334155;
-  padding-bottom: 8px;
-}
-
-.menu-section label {
-  display: block;
-  font-size: 10px;
-  text-transform: uppercase;
-  font-weight: 700;
-  color: #64748b;
-  margin-bottom: 6px;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.status-grid button {
-  background: #0f172a;
-  border: 1px solid #334155;
-  color: #f8fafc;
-  padding: 4px;
-  font-size: 11px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.status-grid button.active {
-  background: #3b82f6;
-  border-color: #3b82f6;
-}
-
-.planning-context-menu textarea {
-  width: 100%;
-  height: 60px;
-  background: #0f172a;
-  border: 1px solid #334155;
-  color: white;
-  border-radius: 4px;
-  padding: 6px;
-  font-size: 12px;
-  margin-bottom: 8px;
-  resize: none;
-}
-
-.btn-save {
-  width: 100%;
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.menu-item-danger {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #ef4444;
-  background: transparent;
-  border: none;
-  font-size: 11px;
-  cursor: pointer;
-  padding: 4px 0;
-}
-
+/* Badge (Preserved) */
 .mutual-badge {
-  background: #f59e0b; /* Amber/Orange */
-  color: #0f172a;      /* Dark Text */
-  
-  /* Force distinct size */
-  font-size: 8px !important; 
-  line-height: 1 !important; /* Critical: Stops it from being 24px tall */
-  font-weight: 800;
-  
-  /* Sizing & Spacing */
-  padding: 3px 5px;
-  border-radius: 4px;
-  margin-left: 8px;
-  
-  /* positioning */
-  align-self: center; /* Ensures it stays vertically centered */
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  cursor: help;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.2); /* subtle depth */
+  background: #f59e0b; color: #0f172a; font-size: 8px !important; line-height: 1 !important;
+  padding: 2px 4px; border-radius: 3px; margin-left: 6px; display: inline-flex; font-weight: 800; cursor: help;
+}
+.visit-badge {
+  margin-left: auto; font-size: 9px; background: #3b82f6; color: white; padding: 1px 5px; border-radius: 3px;
 }
 
-/* Optional hover state */
-.mutual-badge:hover {
-  background: #fbbf24;
-  transform: scale(1.05);
+/* Context Menu */
+.menu-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100; }
+.planning-context-menu {
+  position: fixed; z-index: 101; background: #1e293b;
+  border: 1px solid #334155; border-radius: 8px; width: 220px; padding: 12px;
 }
+.menu-header { display: flex; justify-content: space-between; color: #94a3b8; font-size: 11px; margin-bottom: 12px; }
+.status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+.status-grid button { background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 4px; font-size: 11px; border-radius: 4px; cursor: pointer; }
+.status-grid button.active { background: #3b82f6; border-color: #3b82f6; }
+.planning-context-menu textarea {
+  width: 100%; height: 60px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 4px; padding: 6px; font-size: 12px; margin-bottom: 8px; resize: none;
+}
+.btn-save { width: 100%; background: #3b82f6; color: white; border: none; padding: 6px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.menu-item-danger { width: 100%; display: flex; align-items: center; gap: 8px; color: #ef4444; background: transparent; border: none; font-size: 11px; cursor: pointer; padding: 4px 0; }
