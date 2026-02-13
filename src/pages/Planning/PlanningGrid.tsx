@@ -72,28 +72,32 @@ const PlanningGrid: React.FC = () => {
     setMenuConfig({ x, y, teacher, monthKey, plan });
   };
 
-const handleQueueChange = (action: 'upsert' | 'delete', key: string, payload?: any, id?: string) => {
+// --- ROBUST QUEUE HANDLER (Fixes the Delete/Re-plan Conflict) ---
+  const handleQueueChange = (action: 'upsert' | 'delete', key: string, payload?: any, id?: string) => {
     
-    // 1. Handle Pending Updates (Drafts)
+    // 1. Update Pending Updates (The Orange Drafts)
     setPendingUpdates(prev => {
       const next = { ...prev };
       if (action === 'delete') {
-        delete next[key]; // Completely remove the draft
+        delete next[key]; // Remove draft if deleting
       } else {
-        next[key] = payload; // Add/Update the draft
+        next[key] = payload; // Add/Update draft
       }
       return next;
     });
 
-    // 2. Handle Pending Deletes (Database IDs)
-    // Only touch this if we have a real Database ID
+    // 2. Update Pending Deletes (The Red Flags)
     if (id) {
       setPendingDeletes(prev => {
         const next = new Set(prev);
         if (action === 'delete') {
-          next.add(id); // Mark for deletion
+          // Mark for deletion
+          next.add(id); 
         } else {
-          next.delete(id); // Un-mark (if we are repainting over a delete)
+          // CRITICAL FIX: If we are Upserting (Re-planning), UN-DELETE it!
+          if (next.has(id)) {
+            next.delete(id); 
+          }
         }
         return next;
       });
