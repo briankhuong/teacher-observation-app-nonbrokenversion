@@ -1697,23 +1697,41 @@ const handleConflictResolved = async (mergedData: any) => {
   /* ------------------------------
       FILTER + SORT + GROUP
   --------------------------------- */
+const filteredAndSorted = React.useMemo(() => {
+    // 1. Internal Helper (or import this from a utils file)
+    const flattenText = (text: string | null | undefined): string => {
+      if (!text) return "";
+      return text
+        .toLowerCase()
+        .normalize("NFD")               // Decomposes accents
+        .replace(/[\u0300-\u036f]/g, "") // Strips accent marks
+        .replace(/đ/g, "d")             // Handles the unique 'đ'
+        .trim();
+    };
 
-  const filteredAndSorted = React.useMemo(() => {
     let list = [...observations];
 
-    // search
+    // 2. Enhanced Search Logic
     const q = searchText.trim().toLowerCase();
     if (q) {
+      const flattenedQuery = flattenText(q);
+      const searchWords = flattenedQuery.split(/\s+/); // Tokenize search into words
+
       list = list.filter((o) => {
-        return (
-          o.teacherName.toLowerCase().includes(q) ||
-          o.schoolName.toLowerCase().includes(q) ||
-          o.campus.toLowerCase().includes(q)
-        );
+        // Flatten the target fields for comparison
+        const targetName = flattenText(o.teacherName);
+        const targetSchool = flattenText(o.schoolName);
+        const targetCampus = flattenText(o.campus);
+
+        // Combine fields to allow cross-field searching
+        const combinedTarget = `${targetName} ${targetSchool} ${targetCampus}`;
+
+        // Ensure EVERY word in the search exists somewhere in the combined target
+        return searchWords.every(word => combinedTarget.includes(word));
       });
     }
 
-    // sort
+    // 3. Sorting (Remains unchanged to preserve visual data)
     list.sort((a, b) => {
       if (sortMode === "newest") {
         return (b.rawDate ?? 0) - (a.rawDate ?? 0);
