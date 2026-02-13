@@ -56,7 +56,7 @@ const GridCell: React.FC<GridCellProps> = ({
   const isComplete = !!matchingObs;
   const displayType = isComplete ? matchingObs.support_type : effectivePlan?.activity_type;
   
-  // 3. Handle Click
+// --- HANDLE CLICK (Logic to resurrect deleted plans) ---
   const handleClick = () => {
     if (!activeTool || isComplete) return;
 
@@ -64,10 +64,13 @@ const GridCell: React.FC<GridCellProps> = ({
 
     if (activeTool === 'Eraser') {
       if (effectivePlan) {
-        // FIX: If erasing a pending draft (no DB ID), this ensures it clears cleanly
         onQueueChange('delete', cellKey, undefined, effectivePlan.id);
       }
     } else {
+      // Prepare Payload
+      // FIX: Use existingPlan.id if effectivePlan is null (because it was pending delete)
+      const planIdToUse = effectivePlan?.id || (isPendingDelete ? existingPlan?.id : undefined);
+
       const payload = {
         trainer_id: teacher.trainer_id,
         teacher_id: teacher.id,
@@ -77,9 +80,10 @@ const GridCell: React.FC<GridCellProps> = ({
         activity_type: activeTool,
         status: 'planned',
         updated_at: new Date().toISOString(),
-        id: effectivePlan?.id 
+        id: planIdToUse 
       };
-      onQueueChange('upsert', cellKey, payload);
+      
+      onQueueChange('upsert', cellKey, payload, planIdToUse);
     }
   };
 
