@@ -162,6 +162,50 @@ const handleQueueChange = (action: 'upsert' | 'delete', key: string, payload?: a
     }
   };
 
+// --- HELPER: Calculate Effective Counts (DB + Drafts - Deletes + Completed) ---
+  const getMonthCounts = (monthKey: string) => {
+    let lvaCount = 0;
+    let visitCount = 0;
+
+    // Iterate through all teachers to check their status for this month
+    Object.values(groupedData).forEach((campuses: any) => {
+      Object.values(campuses).forEach((teachers: any) => {
+        teachers.forEach((t: any) => {
+          const cellKey = `${t.id}-${monthKey}`;
+          
+          // 1. Check Completion (Highest Priority)
+          const obs = obsData.find((o: any) => 
+            o.grapeseed_id === t.grapeseed_id && 
+            o.school_name === t.school_name && 
+            o.observation_date.startsWith(monthKey)
+          );
+          if (obs) {
+            if (obs.support_type === 'LVA') lvaCount++;
+            else if (obs.support_type === 'Visit') visitCount++;
+            return; // Stop checking this teacher/month
+          }
+
+          // 2. Check Drafts (Pending Updates)
+          const draft = pendingUpdates[cellKey];
+          if (draft) {
+             if (draft.activity_type === 'LVA') lvaCount++;
+             else if (draft.activity_type === 'Visit') visitCount++;
+             return;
+          }
+
+          // 3. Check Database Plans (if not deleted)
+          const plan = plans.find((p: any) => p.teacher_id === t.id && p.month_key === monthKey);
+          if (plan && !pendingDeletes.has(plan.id) && plan.status !== 'cancelled') {
+             if (plan.activity_type === 'LVA') lvaCount++;
+             else if (plan.activity_type === 'Visit') visitCount++;
+          }
+        });
+      });
+    });
+
+    return { lva: lvaCount, visit: visitCount };
+  };
+
   if (loading) {
     return (
       <div className="planning-loader" style={{ padding: '40px', color: '#94a3b8', textAlign: 'center' }}>
@@ -239,21 +283,43 @@ const handleQueueChange = (action: 'upsert' | 'delete', key: string, payload?: a
 
       <div className="grid-wrapper" style={{ flex: 1, overflow: 'auto' }}>
         <table className="planning-table">
-          <thead>
+<thead>
             <tr>
-              {/* CSS handles the width now (160px) */}
+              {/* Sticky Corner: Updated width to 240px */}
               <th className="sticky-col first-header">
                 School / Teacher
               </th>
-              {months.map(m => (
-                <th key={m.key} className="month-header">
-                  <div className="month-label">{m.label}</div>
-                  <div className="month-year">{m.year}</div>
-                  <div className="month-total" style={{ fontSize: '9px', opacity: 0.7, marginTop: '2px' }}>
-                    LVA: {plans.filter(p => p.month_key === m.key && p.activity_type === 'LVA').length}
-                  </div>
-                </th>
-              ))}
+              
+              {/* Month Columns */}
+              {months.map(m => {
+                // Calculate counts for this specific month
+                const counts = getMonthCounts(m.key);
+                
+                return (
+                  <th key={m.key} className="month-header">
+                    <div className="month-label">{m.label}</div>
+                    <div className="month-year">{m.year}</div>
+                    
+                    {/* UPDATED COUNTERS */}
+                    <div className="month-total" style={{ 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      gap: '8px', 
+                      fontSize: '9px', 
+                      opacity: 0.8, 
+                      marginTop: '2px',
+                      fontWeight: 500
+                    }}>
+                      <span style={{ color: counts.lva > 0 ? '#60a5fa' : 'inherit' }}>
+                        LVA: {counts.lva}
+                      </span>
+                      <span style={{ color: counts.visit > 0 ? '#a78bfa' : 'inherit' }}>
+                        Visit: {counts.visit}
+                      </span>
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           
@@ -350,11 +416,13 @@ const handleQueueChange = (action: 'upsert' | 'delete', key: string, payload?: a
         </table>
       </div>
 
+{/* --- CONTEXT MENU POPUP --- */}
       {menuConfig && (
         <PlanningContextMenu 
           config={menuConfig} 
           onClose={() => setMenuConfig(null)} 
-          onRefresh={refresh} 
+          onRefresh={refresh}
+          onQueueChange={handleQueueChange} // <--- ADD THIS PROP
         />
       )}
     </div>
