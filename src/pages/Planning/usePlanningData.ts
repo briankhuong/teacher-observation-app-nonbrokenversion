@@ -79,5 +79,5 @@ const months = useMemo(() => {
     return groups;
   }, [teachers]);
 
-  return { groupedData, plans, obsData, months, loading, refresh: loadAllData };
+  return { teachers, groupedData, plans, obsData, months, loading, refresh: loadAllData };
 };
