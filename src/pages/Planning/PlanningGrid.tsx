@@ -13,7 +13,8 @@ import {
   Calendar,
   Save,           
   ChevronsDown,   
-  ChevronsRight   
+  ChevronsRight,
+  X   
 } from 'lucide-react';
 import './Planning.css';
 
@@ -36,7 +37,7 @@ const isSameMonth = (obsDate: string, monthKey: string) => {
 
 const PlanningGrid: React.FC = () => {
   const { user } = useAuth();
-  const { groupedData, plans, obsData, months, loading, refresh } = usePlanningData(user?.id || '');
+  const {teachers, groupedData, plans, obsData, months, loading, refresh } = usePlanningData(user?.id || '');
   
   const [activeTool, setActiveTool] = useState<'LVA' | 'Visit' | 'Eraser' | null>(null);
   const [expandedSchools, setExpandedSchools] = useState<Record<string, boolean>>({});
@@ -44,6 +45,31 @@ const PlanningGrid: React.FC = () => {
   const [pendingUpdates, setPendingUpdates] = useState<Record<string, any>>({});
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
+  // --- EMAIL OUTREACH STATE ---
+  const [isEmailMode, setIsEmailMode] = useState(false);
+  const [emailFilters, setEmailFilters] = useState<{ month: string; types: string[] }>({
+    month: months[0]?.key || '',
+    types: ['LVA', 'Visit']
+  });
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+
+  // Helper to check if a teacher matches the current email filters
+  const matchesEmailFilter = (teacher: any) => {
+    if (!isEmailMode) return true; // Show everyone in planning mode
+    if (excludedIds.has(teacher.id)) return false; // Hide if "minused"
+
+    const plan = plans.find(p => p.teacher_id === teacher.id && p.month_key === emailFilters.month);
+    const obs = obsData.find(o => o.grapeseed_id === teacher.grapeseed_id && isSameMonth(o.observation_date, emailFilters.month));
+
+    // Determine activity: check Completed first, then Planned
+    const activity = obs ? obs.support_type : plan?.activity_type;
+
+    if (!activity) return false;
+    return emailFilters.types.includes(activity);
+  };
+
+
   const [hasInitializedExpand, setHasInitializedExpand] = useState(false);
 
   const [menuConfig, setMenuConfig] = useState<{ 
@@ -238,9 +264,9 @@ const PlanningGrid: React.FC = () => {
       </div>
     );
   }
-
-  return (
+return (
     <div className="planning-container">
+      {/* 1. MAIN TOOLBAR */}
       <div className="planning-toolbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: 'auto' }}>
            <div className="app-title" style={{ fontSize: '14px', color: '#f8fafc', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -248,6 +274,16 @@ const PlanningGrid: React.FC = () => {
               Planning Board
            </div>
         </div>
+
+        {/* EMAIL OUTREACH TOGGLE BUTTON */}
+        <button 
+          className={`tool-btn ${isEmailMode ? 'active-lva' : ''}`} // Reusing active style for blue highlight
+          onClick={() => setIsEmailMode(!isEmailMode)}
+          style={{ marginRight: '12px' }}
+        >
+          <Calendar size={14} style={{ marginRight: '6px' }} />
+          {isEmailMode ? 'Close Outreach' : 'Email Outreach'}
+        </button>
 
         <div className="tool-group" style={{ display: 'flex', gap: '4px', marginRight: '12px' }}>
           <button className="tool-btn" onClick={expandAll} title="Expand All Schools">
@@ -305,41 +341,92 @@ const PlanningGrid: React.FC = () => {
         </button>
       </div>
 
+      {/* 2. SLIM CONTROL CENTER (Only Visible in Email Mode) */}
+      {isEmailMode && (
+        <div className="email-control-bar">
+          <div className="control-group">
+            <span className="control-label">Target:</span>
+            <select 
+              className="control-select"
+              value={emailFilters.month} 
+              onChange={(e) => setEmailFilters(prev => ({ ...prev, month: e.target.value }))}
+            >
+              {months.map(m => <option key={m.key} value={m.key}>{m.label} {m.year}</option>)}
+            </select>
+          </div>
+
+          <div className="control-group">
+            <span className="control-label">Include:</span>
+            {['LVA', 'Visit'].map(type => (
+              <label key={type} className="control-checkbox">
+                <input 
+                  type="checkbox" 
+                  checked={emailFilters.types.includes(type)}
+                  onChange={(e) => {
+                    const next = e.target.checked 
+                      ? [...emailFilters.types, type] 
+                      : emailFilters.types.filter(t => t !== type);
+                    setEmailFilters(prev => ({ ...prev, types: next }));
+                  }}
+                />
+                {type}
+              </label>
+            ))}
+          </div>
+
+          <div style={{ flex: 1 }}></div>
+
+          <div className="control-group">
+            <span className="selection-count">
+              {selectedIds.size} Selected
+            </span>
+            <button 
+              className="tool-btn" 
+              onClick={() => {
+                const visibleIds = teachers.filter(matchesEmailFilter).map(t => t.id);
+                setSelectedIds(new Set(visibleIds));
+              }}
+            >
+              Select All
+            </button>
+            <button 
+              className="tool-btn" 
+              onClick={() => {
+                setSelectedIds(new Set());
+                setExcludedIds(new Set());
+              }}
+            >
+              Reset
+            </button>
+            <button className="email-draft-btn" disabled={selectedIds.size === 0}>
+              Draft Emails
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3. GRID AREA */}
       <div className="grid-wrapper" style={{ flex: 1, overflow: 'auto' }}>
         <table className="planning-table">
-<thead>
+          <thead>
             <tr>
-              {/* Sticky Corner: Updated width to 240px */}
+              {/* NO EXTRA COLUMN HERE - JUST THE STANDARD HEADERS */}
               <th className="sticky-col first-header">
                 School / Teacher
               </th>
               
-              {/* Month Columns */}
               {months.map(m => {
-                // Calculate counts for this specific month
                 const counts = getMonthCounts(m.key);
-                
                 return (
                   <th key={m.key} className="month-header">
                     <div className="month-label">{m.label}</div>
                     <div className="month-year">{m.year}</div>
-                    
-                    {/* UPDATED COUNTERS */}
                     <div className="month-total" style={{ 
-                      display: 'flex', 
-                      justifyContent: 'center', 
-                      gap: '8px', 
-                      fontSize: '9px', 
-                      opacity: 0.8, 
-                      marginTop: '2px',
-                      fontWeight: 500
+                      display: 'flex', justifyContent: 'center', gap: '8px', 
+                      fontSize: '9px', opacity: 0.8, marginTop: '2px', fontWeight: 500
                     }}>
-                      <span style={{ color: counts.lva > 0 ? '#60a5fa' : 'inherit' }}>
-                        LVA: {counts.lva}
-                      </span>
-                      <span style={{ color: counts.visit > 0 ? '#a78bfa' : 'inherit' }}>
-                        Visit: {counts.visit}
-                      </span>
+                      <span style={{ color: counts.lva > 0 ? '#60a5fa' : 'inherit' }}>LVA: {counts.lva}</span>
+                      <span style={{ color: counts.visit > 0 ? '#a78bfa' : 'inherit' }}>Visit: {counts.visit}</span>
                     </div>
                   </th>
                 );
@@ -349,6 +436,12 @@ const PlanningGrid: React.FC = () => {
           
           <tbody>
             {Object.entries(groupedData).map(([school, campuses]: any) => {
+              // Deep Filter Logic
+              const hasVisibleTeacherInSchool = Object.values(campuses).some((teacherList: any) => 
+                teacherList.some((t: any) => matchesEmailFilter(t))
+              );
+              if (isEmailMode && !hasVisibleTeacherInSchool) return null;
+
               const isExpanded = !!expandedSchools[school];
               const schoolVisitTotal = plans.filter(p => p.school_name === school && p.activity_type === 'Visit').length;
 
@@ -362,81 +455,117 @@ const PlanningGrid: React.FC = () => {
                            <span className="school-name-text">{school}</span>
                         </div>
                         {schoolVisitTotal > 0 && (
-                          <span className="visit-badge" style={{ fontSize: '10px', background: '#3b82f6', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>
-                            {schoolVisitTotal} Visits
-                          </span>
+                          <span className="visit-badge">{schoolVisitTotal} Visits</span>
                         )}
                       </div>
                     </td>
                     {months.map(m => <td key={m.key} className="header-fill"></td>)}
                   </tr>
 
-                  {isExpanded && Object.entries(campuses).map(([campus, teacherList]: any) => (
-                    <React.Fragment key={campus}>
-                      <tr className="campus-row">
-                        <td className="sticky-col campus-header-cell" style={{ paddingLeft: '32px', color: '#94a3b8' }}>
-                          — {campus}
-                        </td>
-                        {months.map(m => <td key={m.key} className="header-fill"></td>)}
-                      </tr>
+                  {isExpanded && Object.entries(campuses).map(([campus, teacherList]: any) => {
+                    const hasVisibleTeacherInCampus = teacherList.some((t: any) => matchesEmailFilter(t));
+                    if (isEmailMode && !hasVisibleTeacherInCampus) return null;
 
-                      {teacherList.map((teacher: any) => (
-                        <tr key={teacher.id} className="teacher-row">
-                            <td className="sticky-col teacher-name" style={{ paddingLeft: '42px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px', width: '100%' }}>
-                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {teacher.name}
-                                </span>
-                                {(() => {
-                                    const tags = Array.isArray(teacher.tags) ? teacher.tags : [];
-                                    const sharedTrainers = tags.filter((t: string) => 
-                                    t && t.trim() !== "" && t !== "No tag" && t.toLowerCase() !== "inactive"
-                                    );
-                                    if (sharedTrainers.length === 0) return null;
-                                    return (
-                                    <span className="mutual-badge" title={`Shared with: ${sharedTrainers.join(", ")}`}>
-                                        {sharedTrainers[0].trim().substring(0, 3).toUpperCase()}
-                                        {sharedTrainers.length > 1 && "+"}
-                                    </span>
-                                    );
-                                })()}
-                            </div>
-                            </td>
-                          
-                        {months.map(m => {
-                            const cellKey = `${teacher.id}-${m.key}`;
-                            const existingPlan = plans.find(p => p.teacher_id === teacher.id && p.month_key === m.key);
-                            const isDeleted = !!(existingPlan && pendingDeletes.has(existingPlan.id));
-
-                            return (
-                              <GridCell 
-                                key={cellKey}
-                                teacher={teacher}
-                                monthKey={m.key}
-                                activeTool={activeTool}
-                                existingPlan={existingPlan}
-                                pendingUpdate={pendingUpdates[cellKey]}
-                                isPendingDelete={isDeleted}
-                                
-                                // FIX: Use the coordinate matcher for the cell color
-                                matchingObs={obsData.find(o => 
-                                    o.grapeseed_id === teacher.grapeseed_id && 
-                                    o.school_name === teacher.school_name && 
-                                    o.observation_date &&
-                                    isSameMonth(o.observation_date, m.key)
-                                )}
-                                
-                                allPlans={plans}
-                                allPendingUpdates={pendingUpdates}
-                                onOpenMenu={handleOpenMenu}
-                                onQueueChange={handleQueueChange} 
-                              />
-                            );
-                          })}
+                    return (
+                      <React.Fragment key={campus}>
+                        <tr className="campus-row">
+                          <td className="sticky-col campus-header-cell">— {campus}</td>
+                          {months.map(m => <td key={m.key} className="header-fill"></td>)}
                         </tr>
-                      ))}
-                    </React.Fragment>
-                  ))}
+
+                        {teacherList.map((teacher: any) => {
+                          if (!matchesEmailFilter(teacher)) return null;
+                          const isSelected = selectedIds.has(teacher.id);
+
+                          return (
+                            <tr key={teacher.id} className={`teacher-row ${isSelected ? 'row-selected' : ''}`}>
+                              
+                              {/* TEACHER NAME CELL WITH EMBEDDED CHECKBOX */}
+                              <td className="sticky-col teacher-name">
+                                <div style={{ 
+                                  position: 'relative', 
+                                  width: '100%', height: '100%', 
+                                  display: 'flex', alignItems: 'center' 
+                                }}>
+                                  
+                                  {/* THE "GHOST" CHECKBOX - ONLY VISIBLE IN EMAIL MODE */}
+                                  {isEmailMode && (
+                                    <div 
+                                      className={`selection-toggle ${isSelected ? 'selected' : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const next = new Set(selectedIds);
+                                        if (isSelected) next.delete(teacher.id);
+                                        else next.add(teacher.id);
+                                        setSelectedIds(next);
+                                      }}
+                                    >
+                                      {isSelected && <div className="minus-icon" />}
+                                    </div>
+                                  )}
+
+                                  {/* Teacher Name Text */}
+                                  <div style={{ 
+                                    flex: 1, 
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+                                    paddingRight: '8px', 
+                                    // Transition padding so text doesn't jump abruptly
+                                    paddingLeft: isEmailMode ? '24px' : '0px', 
+                                    transition: 'padding-left 0.2s ease'
+                                  }}>
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {teacher.name}
+                                    </span>
+                                    {/* ... Badge Logic ... */}
+                                     {(() => {
+                                        const tags = Array.isArray(teacher.tags) ? teacher.tags : [];
+                                        const sharedTrainers = tags.filter((t: string) => 
+                                        t && t.trim() !== "" && t !== "No tag" && t.toLowerCase() !== "inactive"
+                                        );
+                                        if (sharedTrainers.length === 0) return null;
+                                        return (
+                                        <span className="mutual-badge" title={`Shared with: ${sharedTrainers.join(", ")}`}>
+                                            {sharedTrainers[0].trim().substring(0, 3).toUpperCase()}
+                                            {sharedTrainers.length > 1 && "+"}
+                                        </span>
+                                        );
+                                    })()}
+                                  </div>
+                                </div>
+                              </td>
+
+                              {months.map(m => {
+                                const cellKey = `${teacher.id}-${m.key}`;
+                                const existingPlan = plans.find(p => p.teacher_id === teacher.id && p.month_key === m.key);
+                                const isDeleted = !!(existingPlan && pendingDeletes.has(existingPlan.id));
+                                return (
+                                  <GridCell 
+                                    key={cellKey}
+                                    teacher={teacher}
+                                    monthKey={m.key}
+                                    activeTool={activeTool}
+                                    existingPlan={existingPlan}
+                                    pendingUpdate={pendingUpdates[cellKey]}
+                                    isPendingDelete={isDeleted}
+                                    matchingObs={obsData.find(o => 
+                                        o.grapeseed_id === teacher.grapeseed_id && 
+                                        o.school_name === teacher.school_name && 
+                                        o.observation_date &&
+                                        isSameMonth(o.observation_date, m.key)
+                                    )}
+                                    allPlans={plans}
+                                    allPendingUpdates={pendingUpdates}
+                                    onOpenMenu={handleOpenMenu}
+                                    onQueueChange={handleQueueChange} 
+                                  />
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
                 </React.Fragment>
               );
             })}
@@ -444,13 +573,12 @@ const PlanningGrid: React.FC = () => {
         </table>
       </div>
 
-{/* --- CONTEXT MENU POPUP --- */}
       {menuConfig && (
         <PlanningContextMenu 
           config={menuConfig} 
           onClose={() => setMenuConfig(null)} 
           onRefresh={refresh}
-          onQueueChange={handleQueueChange} // <--- ADD THIS PROP
+          onQueueChange={handleQueueChange} 
         />
       )}
     </div>
