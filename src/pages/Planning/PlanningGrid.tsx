@@ -220,7 +220,7 @@ const PlanningGrid: React.FC = () => {
     }
   };
 
-// --- HELPER: Calculate Effective Counts (DB + Drafts - Deletes + Completed) ---
+// --- HELPER: Calculate Effective Counts (Visible Rows Only) ---
   const getMonthCounts = (monthKey: string) => {
     let lvaCount = 0;
     let visitCount = 0;
@@ -229,24 +229,28 @@ const PlanningGrid: React.FC = () => {
     Object.values(groupedData).forEach((campuses: any) => {
       Object.values(campuses).forEach((teachers: any) => {
         teachers.forEach((t: any) => {
+          
+          // 1. VISIBILITY CHECK: If the teacher is hidden by filters, SKIP them.
+          // This ensures the counters only reflect what is on the screen.
+          if (!matchesEmailFilter(t)) return;
+
           const cellKey = `${t.id}-${monthKey}`;
           
-          // 1. Check Completion (Highest Priority)
+          // 2. Check Completion (Highest Priority)
           const obs = obsData.find((o: any) => 
             o.grapeseed_id === t.grapeseed_id && 
             o.school_name === t.school_name && 
-            o.observation_date && // Ensure date exists
+            o.observation_date && 
             isSameMonth(o.observation_date, monthKey)
           );
 
           if (obs) {
-            // Count based on the actual observation, not the plan
             if (obs.support_type === 'LVA') lvaCount++;
             else if (obs.support_type === 'Visit') visitCount++;
             return; 
           }
 
-          // 2. Check Drafts (Pending Updates)
+          // 3. Check Drafts (Pending Updates)
           const draft = pendingUpdates[cellKey];
           if (draft) {
              if (draft.activity_type === 'LVA') lvaCount++;
@@ -254,7 +258,7 @@ const PlanningGrid: React.FC = () => {
              return;
           }
 
-          // 3. Check Database Plans (if not deleted)
+          // 4. Check Database Plans (if not deleted)
           const plan = plans.find((p: any) => p.teacher_id === t.id && p.month_key === monthKey);
           if (plan && !pendingDeletes.has(plan.id) && plan.status !== 'cancelled') {
              if (plan.activity_type === 'LVA') lvaCount++;
@@ -266,7 +270,6 @@ const PlanningGrid: React.FC = () => {
 
     return { lva: lvaCount, visit: visitCount };
   };
-
   if (loading) {
     return (
       <div className="planning-loader" style={{ padding: '40px', color: '#94a3b8', textAlign: 'center' }}>
