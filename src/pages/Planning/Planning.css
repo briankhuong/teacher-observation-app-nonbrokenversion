@@ -358,3 +358,90 @@
   font-style: italic;
   margin-right: 8px;
 }
+
+/* --- MODAL LAYOUT --- */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7); z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.email-modal-container {
+  width: 900px; height: 600px; background: #0f172a;
+  border: 1px solid #334155; border-radius: 8px;
+  display: flex; overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+/* --- SIDEBAR --- */
+.modal-sidebar {
+  width: 260px; background: #1e293b; border-right: 1px solid #334155;
+  display: flex; flex-direction: column;
+}
+
+.sidebar-header { padding: 16px; border-bottom: 1px solid #334155; }
+.sidebar-header h3 { margin: 0; font-size: 14px; color: #f8fafc; }
+
+.batch-list { flex: 1; overflow-y: auto; }
+
+.batch-item {
+  display: flex; align-items: center; padding: 12px 16px;
+  cursor: pointer; border-bottom: 1px solid #334155;
+  transition: background 0.2s;
+}
+
+.batch-item:hover { background: #334155; }
+.batch-item.active { background: #3b82f6; }
+.batch-item.active .batch-school { color: white; }
+.batch-item.active .batch-type { color: #dbeafe; }
+
+.batch-icon { margin-right: 12px; color: #94a3b8; }
+.batch-item.active .batch-icon { color: white; }
+
+.batch-info { flex: 1; display: flex; flex-direction: column; }
+.batch-school { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+.batch-type { font-size: 11px; color: #94a3b8; }
+.arrow-icon { color: #64748b; opacity: 0; }
+.batch-item.active .arrow-icon { opacity: 1; color: white; }
+
+/* --- MAIN COMPOSER --- */
+.modal-main { flex: 1; display: flex; flex-direction: column; background: #0f172a; }
+
+.composer-header { padding: 16px; border-bottom: 1px solid #334155; display: flex; flex-direction: column; gap: 8px; }
+
+.header-row { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+.label { width: 30px; color: #94a3b8; font-weight: 600; text-align: right; }
+
+.recipient-pill-container { display: flex; flex-wrap: wrap; gap: 6px; }
+.recipient-pill { background: #334155; padding: 2px 8px; border-radius: 12px; font-size: 12px; color: #e2e8f0; }
+
+.header-input {
+  background: transparent; border: none; border-bottom: 1px solid #334155;
+  color: #e2e8f0; flex: 1; font-family: inherit; font-size: 13px; padding: 2px 0;
+}
+.header-input:focus { outline: none; border-color: #3b82f6; }
+
+.subject-text { font-weight: 600; color: #f8fafc; }
+
+.composer-body { flex: 1; padding: 24px; overflow-y: auto; color: #cbd5e1; font-size: 14px; line-height: 1.6; }
+
+/* --- DYNAMIC TABLES & INPUTS --- */
+.email-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+.email-table th { text-align: left; border-bottom: 1px solid #475569; padding: 8px; color: #94a3b8; }
+.email-table td { border-bottom: 1px solid #334155; padding: 8px; color: #e2e8f0; }
+.email-cell { color: #60a5fa; }
+
+.table-input, .inline-input {
+  background: #1e293b; border: 1px solid #475569; color: white;
+  padding: 4px 8px; border-radius: 4px; font-size: 12px;
+}
+.single-teacher-card { background: #1e293b; padding: 16px; border-radius: 6px; border: 1px solid #334155; margin: 12px 0; width: fit-content; }
+.info-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.info-label { width: 80px; color: #94a3b8; font-weight: 600; }
+.highlight { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #475569; }
+
+/* --- FOOTER --- */
+.composer-footer { padding: 16px; border-top: 1px solid #334155; display: flex; justify-content: flex-end; gap: 12px; }
+.btn-cancel { background: transparent; border: 1px solid #475569; color: #cbd5e1; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+.btn-copy { background: #3b82f6; border: none; color: white; padding: 8px 20px; border-radius: 6px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.btn-copy:hover { background: #2563eb; }

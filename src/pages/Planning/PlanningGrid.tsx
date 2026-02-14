@@ -17,6 +17,9 @@ import {
   X   
 } from 'lucide-react';
 import './Planning.css';
+import { groupSelectedToBatches } from './emailUtils';
+import EmailDraftModal from './EmailDraftModal';
+import type { EmailBatch } from './emailUtils';
 
 
 
@@ -37,8 +40,8 @@ const isSameMonth = (obsDate: string, monthKey: string) => {
 
 const PlanningGrid: React.FC = () => {
   const { user } = useAuth();
-  const {teachers, groupedData, plans, obsData, months, loading, refresh } = usePlanningData(user?.id || '');
-  
+  const {teachers, groupedData, plans, obsData, months, loading, refresh,schoolMap } = usePlanningData(user?.id || '');
+  const [emailDrafts, setEmailDrafts] = useState<EmailBatch[]>([]);
   const [activeTool, setActiveTool] = useState<'LVA' | 'Visit' | 'Eraser' | null>(null);
   const [expandedSchools, setExpandedSchools] = useState<Record<string, boolean>>({});
   
@@ -220,6 +223,16 @@ const PlanningGrid: React.FC = () => {
     }
   };
 
+const handleDraftEmails = () => {
+  const drafts = groupSelectedToBatches(
+    selectedIds,
+    teachers,
+    plans,
+    schoolMap,
+    emailFilters.month
+  );
+  setEmailDrafts(drafts); // Trigger the modal
+};
 // --- HELPER: Calculate Effective Counts (Visible Rows Only) ---
   const getMonthCounts = (monthKey: string) => {
     let lvaCount = 0;
@@ -412,7 +425,11 @@ return (
             >
               Reset
             </button>
-            <button className="email-draft-btn" disabled={selectedIds.size === 0}>
+            <button 
+              className="email-draft-btn" 
+              disabled={selectedIds.size === 0}
+              onClick={handleDraftEmails} // <--- ADD THIS
+            >
               Draft Emails
             </button>
           </div>
@@ -595,6 +612,14 @@ return (
           onQueueChange={handleQueueChange} 
         />
       )}
+
+      {emailDrafts.length > 0 && (
+  <EmailDraftModal 
+    isOpen={true}
+    onClose={() => setEmailDrafts([])} // Clear drafts to close
+    initialDrafts={emailDrafts}
+    />
+    )}
     </div>
   );
 };
