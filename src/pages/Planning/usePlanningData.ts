@@ -5,38 +5,55 @@ export const usePlanningData = (trainerId: string) => {
   const [teachers, setTeachers] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [obsData, setObsData] = useState<any[]>([]);
+  // NEW: Store raw school data and the lookup map
+  const [schools, setSchools] = useState<any[]>([]);
+  const [schoolMap, setSchoolMap] = useState<Record<string, any>>({});
+  
   const [loading, setLoading] = useState(true);
 
-// Inside usePlanningData.ts
-const months = useMemo(() => {
-  const monthsArray = [];
-  // Academic Year: September 2025 to August 2026
-  const startYear = 2025;
-  const startMonthIndex = 8; // September is index 8 in JS Date
+  // 1. Define the Academic Year (Sept - Aug)
+  const months = useMemo(() => {
+    const monthsArray = [];
+    const startYear = 2025;
+    const startMonthIndex = 8; // Sept (Index 8)
 
-  for (let i = 0; i < 12; i++) {
-    // Create date for the 15th to avoid any timezone/rollover bugs
-    const d = new Date(startYear, startMonthIndex + i, 15);
-    const year = d.getFullYear();
-    // Month + 1 because JS index 8 is September (9th month)
-    const monthStr = String(d.getMonth() + 1).padStart(2, '0'); 
-    
-    monthsArray.push({
-      key: `${year}-${monthStr}`, // Sept is correctly "2025-09"
-      label: d.toLocaleString('default', { month: 'short' }),
-      year: year
-    });
-  }
-  return monthsArray;
-}, []);
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(startYear, startMonthIndex + i, 15);
+      const year = d.getFullYear();
+      const monthStr = String(d.getMonth() + 1).padStart(2, '0');
+      
+      monthsArray.push({
+        key: `${year}-${monthStr}`,
+        label: d.toLocaleString('default', { month: 'short' }),
+        year: year
+      });
+    }
+    return monthsArray;
+  }, []);
 
-  const loadAllData = async () => {
+const loadAllData = async () => {
     setLoading(true);
     
-    // 1. Fetch Teachers
+    // 1. Fetch Schools (Now fetching ID)
+const { data: schoolData, error: schoolError } = await supabase
+      .from('schools')
+      .select('id, name:school_name, admin_email, am_email'); // <--- CHANGE THIS
+
+    if (schoolError) console.error('Error fetching schools:', schoolError);
+    
+    // Create the Lookup Map using ID (UUID) as the key
+    const sMap: Record<string, any> = {};
+    (schoolData || []).forEach((s: any) => {
+      if (s.id) sMap[s.id] = s; 
+    });
+
+    setSchools(schoolData || []);
+    setSchoolMap(sMap);
+
+    // 3. Fetch Teachers (UPDATED)
     const { data: teacherData } = await supabase
       .from('teachers')
-      .select('*')
+      .select('*, email, school_id') // <--- Ensure school_id is fetched
       .eq('trainer_id', trainerId)
       .order('school_name', { ascending: true });
 
@@ -46,7 +63,7 @@ const months = useMemo(() => {
     });
     setTeachers(activeTeachers);
 
-    // 2. Fetch Support Plans
+    // 4. Fetch Support Plans
     const monthKeys = months.map(m => m.key);
     const { data: planData } = await supabase
       .from('support_plans')
@@ -54,7 +71,7 @@ const months = useMemo(() => {
       .in('month_key', monthKeys);
     setPlans(planData || []);
 
-    // 3. Fetch Observations
+    // 5. Fetch Observations
     const grapeseedIds = activeTeachers.map((t: any) => t.grapeseed_id).filter(Boolean);
     if (grapeseedIds.length > 0) {
       const { data: observationData } = await supabase
@@ -79,5 +96,15 @@ const months = useMemo(() => {
     return groups;
   }, [teachers]);
 
-  return { teachers, groupedData, plans, obsData, months, loading, refresh: loadAllData };
+  return { 
+    teachers, 
+    groupedData, 
+    plans, 
+    obsData, 
+    months, 
+    schools,    // Raw array (optional use)
+    schoolMap,  // The MVP for the emailer
+    loading, 
+    refresh: loadAllData 
+  };
 };
