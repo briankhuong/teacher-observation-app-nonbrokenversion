@@ -54,13 +54,24 @@ const PlanningGrid: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
 
-  // Helper to check if a teacher matches the current email filters
+// Helper to check if a teacher matches the current email filters
   const matchesEmailFilter = (teacher: any) => {
     if (!isEmailMode) return true; // Show everyone in planning mode
     if (excludedIds.has(teacher.id)) return false; // Hide if "minused"
 
-    const plan = plans.find(p => p.teacher_id === teacher.id && p.month_key === emailFilters.month);
-    const obs = obsData.find(o => o.grapeseed_id === teacher.grapeseed_id && isSameMonth(o.observation_date, emailFilters.month));
+    // 1. STRICT PLAN CHECK: Must match the unique teacher_id for this row
+    const plan = plans.find(p => 
+      p.teacher_id === teacher.id && 
+      p.month_key === emailFilters.month
+    );
+
+    // 2. STRICT OBSERVATION CHECK: Must match Grapeseed ID AND School Name
+    // (Prevents an observation at School A from lighting up the row for School B)
+    const obs = obsData.find(o => 
+      o.grapeseed_id === teacher.grapeseed_id && 
+      o.school_name === teacher.school_name && // <--- CRITICAL FIX
+      isSameMonth(o.observation_date, emailFilters.month)
+    );
 
     // Determine activity: check Completed first, then Planned
     const activity = obs ? obs.support_type : plan?.activity_type;
