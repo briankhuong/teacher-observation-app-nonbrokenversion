@@ -224,15 +224,29 @@ const PlanningGrid: React.FC = () => {
   };
 
 const handleDraftEmails = () => {
-  const drafts = groupSelectedToBatches(
-    selectedIds,
-    teachers,
-    plans,
-    schoolMap,
-    emailFilters.month
-  );
-  setEmailDrafts(drafts); // Trigger the modal
-};
+    // 1. LOGIC FIX: Create a subset of IDs that are currently visible
+    const visibleSelectedIds = new Set<string>();
+
+    teachers.forEach(t => {
+      // A teacher must be SELECTED *and* VISIBLE (matches the active filter)
+      if (selectedIds.has(t.id) && matchesEmailFilter(t)) {
+        visibleSelectedIds.add(t.id);
+      }
+    });
+
+    // 2. Generate drafts using ONLY the visible set
+    const drafts = groupSelectedToBatches(
+      visibleSelectedIds, // <--- Key Change: Pass filtered set, not raw selectedIds
+      teachers,
+      plans,
+      schoolMap,
+      emailFilters.month
+    );
+    
+    setEmailDrafts(drafts);
+  };
+
+
 // --- HELPER: Calculate Effective Counts (Visible Rows Only) ---
   const getMonthCounts = (monthKey: string) => {
     let lvaCount = 0;
