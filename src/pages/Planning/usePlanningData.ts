@@ -37,7 +37,8 @@ const loadAllData = async () => {
     // 1. Fetch Schools (Now fetching ID)
 const { data: schoolData, error: schoolError } = await supabase
       .from('schools')
-      .select('id, name:school_name, admin_email, am_email'); // <--- CHANGE THIS
+      // CHANGE THIS LINE BELOW: Add 'official_code'
+      .select('id, name:school_name, admin_email, am_email, official_code'); 
 
     if (schoolError) console.error('Error fetching schools:', schoolError);
     
@@ -45,6 +46,7 @@ const { data: schoolData, error: schoolError } = await supabase
     const sMap: Record<string, any> = {};
     (schoolData || []).forEach((s: any) => {
       if (s.id) sMap[s.id] = s; 
+      if (s.name) sMap[s.name] = s;
     });
 
     setSchools(schoolData || []);
