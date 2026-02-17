@@ -316,14 +316,65 @@ router.post("/api/sync-teachers", async (req, res) => {
   }
 });
 
+// /* -------------------------------------------------- */
+// /* TEMPORARY HARDCODED AUTH (WITH CORRECT HEADER)     */
+// /* -------------------------------------------------- */
+// async function getMasterToken() {
+//   const url = "https://account.grapeseed.com/connect/token";
+  
+//   // 🚨 INSTRUCTION: PASTE YOUR DETAILS INSIDE THE QUOTES BELOW 🚨
+  
+//   // 1. Copy the long 'Basic ...' string from your .env.azure file
+//   const authHeader = "REMOVED"; 
+  
+//   // 2. Type your real login email
+//   const username = "brian.khuong@grapeseed.com"; 
+  
+//   // 3. Type your real login password
+//   const password = "Ngoc@123@456"; 
+  
+//   // 🚨 ------------------------------------------------------- 🚨
+
+//   console.log(`🔐 HARDCODE MODE: Logging in as ${username}...`);
+
+//   const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+
+//   const response = await fetch(url, {
+//     method: "POST",
+//     headers: {
+//       "Authorization": authHeader, // Now using the correct key!
+//       "Content-Type": "application/x-www-form-urlencoded",
+//     },
+//     body: bodyString,
+//   });
+
+//   if (!response.ok) {
+//     const txt = await response.text();
+//     throw new Error(`Master Token Failed: ${response.status} - ${txt}`);
+//   }
+//   const data = await response.json();
+//   return data.access_token;
+// }
+
 /* -------------------------------------------------- */
 /* INTERNAL HELPER: Fetch GrapeSEED Master Token      */
 /* -------------------------------------------------- */
 async function getMasterToken() {
   const url = "https://account.grapeseed.com/connect/token";
+  
+  // 1. Read from the environment file
   const authHeader = (process.env.GRAPESEED_AUTH_HEADER || "").trim();
   const username = (process.env.GRAPESEED_USERNAME || "").trim();
   const password = (process.env.GRAPESEED_PASSWORD || "").trim();
+
+  // 🕵️ DEBUG: Verify the .env file is actually loading
+  if (authHeader.length > 10) {
+    console.log(`🔐 Auth Header Loaded: ${authHeader.substring(0, 10)}...`);
+  } else {
+    console.error("❌ CRITICAL: GRAPESEED_AUTH_HEADER is missing or empty in .env!");
+  }
+  
+  console.log(`👤 Logging in as: ${username}`);
 
   const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
 
@@ -336,11 +387,14 @@ async function getMasterToken() {
     body: bodyString,
   });
 
-  if (!response.ok) throw new Error(`Master Token Failed: ${response.status}`);
+  if (!response.ok) {
+    const txt = await response.text();
+    throw new Error(`Master Token Failed: ${response.status}`);
+  }
+  
   const data = await response.json();
   return data.access_token;
 }
-
 /* -------------------------------------------------- */
 /* HELPERS                                            */
 /* -------------------------------------------------- */
@@ -872,6 +926,88 @@ router.post("/api/sync-surgical", async (req, res) => {
   } catch (err) {
     console.error("Surgical Sync Failed:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// This is the "Pocket" shared by both routes below
+let visitationCache = [];
+
+// 1. THE SYNC: Receives token from browser, fetches from GrapeSEED, fills pocket
+router.post("/api/sync-grapeseed", async (req, res) => {
+  const { userToken } = req.body;
+
+  if (!userToken) {
+    console.error("❌ Sync Error: No token received from frontend.");
+    return res.status(400).json({ error: "Missing token" });
+  }
+
+  try {
+    console.log("📡 Proxy Sync: Fetching GrapeSEED data...");
+    
+    const response = await fetch('https://services.grapeseed.com/admin/v1/visitations/channels', {
+      headers: { 'Authorization': `Bearer ${userToken}` }
+    });
+
+    if (!response.ok) {
+      throw new Error(`GrapeSEED API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    visitationCache = data; 
+    
+    console.log(`✅ CACHE REFRESHED: ${data.length} records stored.`);
+    res.json({ count: data.length });
+  } catch (err) {
+    console.error("🔥 Sync Proxy Failed:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* -------------------------------------------------- */
+/* DEBUG: IDENTITY VERIFICATION                       */
+/* -------------------------------------------------- */
+router.post("/api/match-visitation", async (req, res) => {
+  const { schoolCode, monthKey, type } = req.body;
+  const [year, month] = monthKey.split('-');
+  const targetType = type === 'Visit' ? 0 : 1;
+
+  try {
+    const token = await getMasterToken();
+    
+    console.log(`📡 Fetching dashboard...`);
+    const response = await fetch('https://services.grapeseed.com/admin/v1/visitations/channels', {
+      headers: getHeaders(token)
+    });
+
+    const data = await response.json();
+    const channels = Array.isArray(data) ? data : [];
+
+    // 🚨 THE TRUTH TELLER: Print exactly what schools the server sees
+    console.log(`\n🕵️ IDENTITY CHECK: Who am I logged in as?`);
+    console.log(`Found ${channels.length} items. Schools visible:`);
+    channels.forEach(c => console.log(` - ${(c.visitation || c).schoolName}`));
+    console.log(`-------------------------------------------\n`);
+
+    const match = channels.find(item => {
+      const v = item.visitation || item;
+      const isSchoolMatch = String(v.schoolId || "").toLowerCase() === schoolCode.toLowerCase();
+      const isTypeMatch = Number(v.type) === targetType;
+      const isMonthMatch = v.startDate && v.startDate.includes(`${year}-${month}`);
+      return isSchoolMatch && isTypeMatch && isMonthMatch && !v.isCancelled;
+    });
+
+    if (match) {
+      const v = match.visitation || match;
+      console.log(`🎯 MATCH FOUND: ${v.id}`);
+      return res.json({ match: { id: v.id, linkId: v.id } });
+    }
+
+    console.warn(`⚠️ No match found.`);
+    res.json({ match: null, reason: "Task not found." });
+
+  } catch (error) {
+    console.error("🔥 Error:", error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 export default router;

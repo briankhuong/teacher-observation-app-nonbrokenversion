@@ -22,7 +22,6 @@ import EmailDraftModal from './EmailDraftModal';
 import type { EmailBatch } from './emailUtils';
 
 
-
 // At the top of PlanningGrid.tsx
 const isSameMonth = (obsDate: string, monthKey: string) => {
   if (!obsDate || !monthKey) return false;
@@ -223,27 +222,75 @@ const PlanningGrid: React.FC = () => {
     }
   };
 
-const handleDraftEmails = () => {
-    // 1. LOGIC FIX: Create a subset of IDs that are currently visible
-    const visibleSelectedIds = new Set<string>();
+// 1. Add this constant at the top of the file (or inside the component)
+const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
 
+const handleDraftEmails = async () => {
+    console.log("🚀 STARTING DRAFT PROCESS...");
+    
+    // 1. Filter visible IDs
+    const visibleSelectedIds = new Set<string>();
     teachers.forEach(t => {
-      // A teacher must be SELECTED *and* VISIBLE (matches the active filter)
       if (selectedIds.has(t.id) && matchesEmailFilter(t)) {
         visibleSelectedIds.add(t.id);
       }
     });
 
-    // 2. Generate drafts using ONLY the visible set
-    const drafts = groupSelectedToBatches(
-      visibleSelectedIds, // <--- Key Change: Pass filtered set, not raw selectedIds
+    // 2. Create Base Batches
+    const rawDrafts = groupSelectedToBatches(
+      visibleSelectedIds,
       teachers,
       plans,
       schoolMap,
       emailFilters.month
     );
     
-    setEmailDrafts(drafts);
+    console.log(`📦 Generated ${rawDrafts.length} base drafts.`);
+
+    // 3. ENRICH WITH API LINKS
+    const enrichedDrafts = await Promise.all(rawDrafts.map(async (draft) => {
+      console.log(`🔍 Processing Draft: ${draft.schoolName} (${draft.type})`);
+      
+      // CHECK 1: Do we have the Official Code?
+      if (!draft.officialCode) {
+        console.warn(`   ❌ MISSING OFFICIAL CODE for ${draft.schoolName}. Cannot fetch link.`);
+        return draft; 
+      }
+      console.log(`   ✅ Code found: ${draft.officialCode}`);
+
+      try {
+        // FIXED LINE: Use emailFilters.month directly
+        console.log(`   📡 Calling API for ${emailFilters.month}...`);
+        
+        const response = await fetch('http://localhost:4000/api/match-visitation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schoolCode: draft.officialCode,
+            monthKey: emailFilters.month, // Use the global filter state
+            type: draft.type, 
+            coachId: user?.id
+          })
+        });
+
+        const result = await response.json();
+        console.log("   📥 API Result:", result);
+        
+        if (result.match?.linkId) {
+          console.log(`   🎉 MATCH FOUND! Link ID: ${result.match.linkId}`);
+          const link = `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${draft.officialCode}/visitations/${result.match.linkId}/teacher`;
+          return { ...draft, visitationLink: link };
+        } else {
+          console.warn(`   ⚠️ NO MATCH. Reason: ${result.reason}`);
+        }
+      } catch (err) {
+        console.error(`   🔥 API FAILURE for ${draft.schoolName}`, err);
+      }
+      
+      return draft;
+    }));
+    
+    setEmailDrafts(enrichedDrafts);
   };
 
 

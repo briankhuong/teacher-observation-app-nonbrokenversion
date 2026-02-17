@@ -57,6 +57,12 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
     let body = `Dear Partners,\n\n`;
     body += `This is to confirm the upcoming ${isLVA ? 'Lesson Video Analysis' : 'Onsite Support'} schedule for ${activeDraft.schoolName}.\n\n`;
 
+    // --- ADD THIS BLOCK ---
+    if (activeDraft.visitationLink) {
+      body += `Please view the details and teacher list here:\n${activeDraft.visitationLink}\n\n`;
+    }
+    // ---------------------
+
     // LVA: Mention Deadline ONCE at the top
     if (isLVA) {
       body += `Submission Deadline: ${activeDraft.meta.deadline || '[Select Date]'}\n\n`;
@@ -225,7 +231,25 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
 
               <p>Please let us know if you have any questions.</p>
               <p>Best regards,<br/>[Your Name]</p>
+              {activeDraft.visitationLink && (
+    <div style={{ margin: '12px 0', padding: '12px', background: '#f0f9ff', borderRadius: '6px', border: '1px solid #bae6fd' }}>
+      <p style={{ margin: '0 0 4px 0', fontSize: '12px', color: '#0284c7', fontWeight: 600 }}>
+         {activeDraft.type === 'LVA' ? 'Upload & Info Link:' : 'Visitation Details Link:'}
+      </p>
+      <a 
+        href={activeDraft.visitationLink} 
+        target="_blank" 
+        rel="noopener noreferrer"
+        style={{ fontSize: '13px', color: '#0ea5e9', textDecoration: 'underline', wordBreak: 'break-all' }}
+      >
+        {activeDraft.visitationLink}
+      </a>
+    </div>
+  )}
+  {/* ------------------------------- */}
             </div>
+            {/* --- NEW: VISUAL LINK DISPLAY --- */}
+
           </div>
 
           <div className="composer-footer">
