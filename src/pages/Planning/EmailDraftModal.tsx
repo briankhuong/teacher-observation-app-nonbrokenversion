@@ -34,7 +34,10 @@ export interface EmailBatch {
   editableTo?: string; 
   editableCc?: string;
   editableSubject?: string; // ✅ ADDED
-  meta: { deadline?: string };
+  meta: { 
+    deadline?: string; 
+    visitDate?: string; 
+  };
 }
 
 interface EmailDraftModalProps {
@@ -100,8 +103,8 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
     setDrafts(prev => prev.map(d => d.id === activeDraftId ? { ...d, [field]: value } : d));
   };
 
-  // Update Batch Meta (LVA Deadline)
-  const updateBatchMeta = (key: 'deadline', value: string) => {
+// Update Batch Meta (LVA Deadline or Visit Date)
+  const updateBatchMeta = (key: 'deadline' | 'visitDate', value: string) => {
     setDrafts(prev => prev.map(d => 
       d.id === activeDraftId ? { ...d, meta: { ...d.meta, [key]: value } } : d
     ));
@@ -116,6 +119,26 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
         teachers: draft.teachers.map(t => 
           t.id === teacherId ? { ...t, meta: { ...t.meta, classTime: value } } : t
         )
+      };
+    }));
+  };
+
+  // ✅ ADD IT RIGHT HERE
+  // Remove a teacher from the current draft
+  const removeTeacher = (teacherId: string) => {
+    setDrafts(prev => prev.map(draft => {
+      if (draft.id !== activeDraftId) return draft;
+
+      // Filter out the teacher
+      const updatedTeachers = draft.teachers.filter(t => t.id !== teacherId);
+      
+      // Update the "To" field to match the remaining teachers
+      const updatedTo = updatedTeachers.map(t => t.email).join('; ');
+
+      return {
+        ...draft,
+        teachers: updatedTeachers,
+        editableTo: updatedTo
       };
     }));
   };
@@ -141,6 +164,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
     
     // --- VISIT TEMPLATE ---
     else {
+     const visitDateText = activeDraft.meta.visitDate || '[Date]';
       body += `To better assess the progress of the students in your class at ${activeDraft.schoolName}, I’d like to visit your class on [Date]. `;
       body += `Please take a few minutes to complete the questionnaire on the GrapeSEED portal, as this will provide me with a clearer understanding of the class dynamics and support my feedback.\n\n`;
       
@@ -258,15 +282,31 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
               </div>
             )}
 
+            {/* ✅ MOVED HERE: Visit Date Picker (Applies to whole batch) */}
+            {activeDraft.type === 'Visit' && (
+              <div className="control-card">
+                 <div className="info-row">
+                    <span className="info-label">Visit Date:</span>
+                    <input 
+                      type="date" 
+                      className="inline-input"
+                      value={activeDraft.meta.visitDate || ''}
+                      onChange={(e) => updateBatchMeta('visitDate', e.target.value)}
+                    />
+                 </div>
+              </div>
+            )}
+
             {/* INPUTS: Teacher List & Visit Times */}
             <div className="teacher-table-container">
                <table className="email-table">
                   <thead>
                     <tr>
                       <th style={{ width: '30%' }}>Teacher</th>
-                      <th style={{ width: '40%' }}>Email</th>
+                      <th style={{ width: '35%' }}>Email</th>
                       {/* Only show Time column if it is a VISIT */}
                       {activeDraft.type === 'Visit' && <th>Visit Time</th>}
+                      <th style={{ width: '40px' }}></th> {/* Delete Column */}
                     </tr>
                   </thead>
                   <tbody>
@@ -274,6 +314,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
                       <tr key={t.id}>
                         <td>{t.name}</td>
                         <td className="email-cell">{t.email}</td>
+                        {/* ✅ RESTORED: Visit Time Input for each specific teacher */}
                         {activeDraft.type === 'Visit' && (
                           <td>
                              <input 
@@ -285,10 +326,24 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
                              />
                           </td>
                         )}
+                        <td style={{ textAlign: 'center' }}>
+                          <button 
+                            className="btn-icon-delete"
+                            title="Remove from email"
+                            onClick={() => removeTeacher(t.id)}
+                          >
+                            <X size={14} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                </table>
+               {activeDraft.teachers.length === 0 && (
+                 <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                   No teachers selected.
+                 </div>
+               )}
             </div>
 
             {/* PREVIEW */}
