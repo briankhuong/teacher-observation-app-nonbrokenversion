@@ -9,6 +9,7 @@ export interface EmailBatch {
   id: string;
   schoolName: string;
   officialCode?: string;
+  editableBody?: string;
   type: 'LVA' | 'Visit';
   
   // ✅ ADDED: Source fields for CC
@@ -51,7 +52,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
   const [drafts, setDrafts] = useState<EmailBatch[]>([]);
   const [activeDraftId, setActiveDraftId] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
+const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');     
   // Get Trainer Name
   const trainerName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || "Trainer";
 // Initialize drafts
@@ -76,12 +77,19 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
           const teacherText = d.teachers.length > 1 ? "teachers" : "teacher";
           subject = `[GrapeSEED] - Lesson video analysis for ${teacherText} at ${d.schoolName} in ${month}`;
         }
+        let initialBody = `I hope you’re doing well.\n\n`;
+        if (d.type === 'LVA') {
+          initialBody += `To better assess the progress of the students in your GrapeSEED class, I’d like to request a lesson video, due by ${d.meta.deadline || '[Date]'}.\n\nPlease also take a few minutes to complete the questionnaire on the GrapeSEED portal using the button below, as this will provide me with a clearer understanding of the class dynamics and support my feedback.\n\nFor the video, please ensure it is at least 20 minutes long and recorded in a single take so I can observe the full flow of your lesson. Ideally, place the camera at the back of the classroom to capture your teaching moves and, at the same time, allow me to see whether the students are engaged.`;
+        } else {
+          initialBody += `To better assess the progress of the students in your class at ${d.schoolName}, I’d like to visit your class on ${d.meta.visitDate || '[Date]'}.\n\nPlease take a few minutes to complete the questionnaire on the GrapeSEED portal using the button below, as this will provide me with a clearer understanding of the class dynamics and support my feedback.`;
+        }
 
         return {
           ...d,
           editableTo: d.teachers.map(t => t.email).join('; '),
           editableCc: ccString,     // ✅ Pre-filled CC
           editableSubject: subject, // ✅ Pre-filled Subject
+          editableBody: initialBody,
           meta: d.meta || {},
           teachers: d.teachers.map(t => ({...t, meta: t.meta || {}}))
         };
@@ -89,6 +97,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
       
       setDrafts(processedDrafts);
       setActiveDraftId(processedDrafts[0].id);
+      setActiveTab('edit');
     }
   }, [initialDrafts, isOpen]);
 
@@ -99,7 +108,7 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
   // --- HANDLERS ---
 
 // Update Headers (To/CC/Subject)
-  const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject', value: string) => {
+const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | 'editableBody', value: string) => {
     setDrafts(prev => prev.map(d => d.id === activeDraftId ? { ...d, [field]: value } : d));
   };
 
@@ -143,56 +152,92 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
     }));
   };
 
-  // --- GENERATE BODY ---
-  const generateBody = () => {
+// --- GENERATE RICH HTML BODY ---
+  const generateHtmlBody = () => {
     const isLVA = activeDraft.type === 'LVA';
     const isMultiple = activeDraft.teachers.length > 1;
     const teacherNames = activeDraft.teachers.map(t => t.name).join(', ');
     
-    // Greeting
-    const greeting = isMultiple ? "Dear Teachers," : `Dear ${teacherNames},`;
+    // CSS Styles from your template
+    const container = "max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; border: 1px solid #e5e7eb;";
+    const headerStyle = "background-color: #065f46; padding: 20px; text-align: center;";
+    const bodyStyle = "padding: 30px 25px; color: #374151; line-height: 1.6; font-size: 15px;";
+    const buttonStyle = "display: inline-block; background-color: #059669; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;";
+    const footerStyle = "background-color: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #6b7280;";
 
-    let body = `${greeting}\n\nI hope you’re doing well.\n\n`;
-
-    // --- LVA TEMPLATE ---
-    if (isLVA) {
-      body += `To better assess the progress of the students in your GrapeSEED class, I’d like to request a lesson video, due by ${activeDraft.meta.deadline || '[Date]'}. `;
-      body += `Please also take a few minutes to complete the questionnaire on the GrapeSEED portal in the link below, as this will provide me with a clearer understanding of the class dynamics and support my feedback.\n\n`;
-      body += `Link to the questionnaire: ${activeDraft.visitationLink || '[Link Missing]'}\n\n`;
-      body += `For the video, please ensure it is at least 20 minutes long and recorded in a single take so I can observe the full flow of your lesson. Ideally, place the camera at the back of the classroom to capture your teaching moves and, at the same time, allow me to see whether the students are engaged.`;
-    } 
+    const greeting = isMultiple ? "Dear Teachers," : `Dear <strong>${teacherNames}</strong>,`;
     
-    // --- VISIT TEMPLATE ---
-    else {
-     const visitDateText = activeDraft.meta.visitDate || '[Date]';
-      body += `To better assess the progress of the students in your class at ${activeDraft.schoolName}, I’d like to visit your class on [Date]. `;
-      body += `Please take a few minutes to complete the questionnaire on the GrapeSEED portal, as this will provide me with a clearer understanding of the class dynamics and support my feedback.\n\n`;
-      
-      // Inject Schedule for Visits
-      if (activeDraft.teachers.length > 0) {
-         body += `Please see the visit schedule below:\n`;
-         activeDraft.teachers.forEach(t => {
-            body += `- ${t.name}: ${t.meta?.classTime || '[Time]'}\n`;
-         });
-         body += `\n`;
-      }
+    // Convert user's raw text into HTML paragraphs
+    const userParagraphs = (activeDraft.editableBody || '')
+      .split('\n')
+      .filter(line => line.trim() !== '') // Ignore empty blank lines
+      .map(line => `<p style="margin-top: 0; margin-bottom: 16px;">${line}</p>`)
+      .join('');
 
-      body += `Please find the questionnaire in this link: ${activeDraft.visitationLink || '[Link Missing]'}`;
+    // Start building content with greeting + user's editable text
+    let content = `<p style="margin-top: 0; margin-bottom: 20px;">${greeting}</p>${userParagraphs}`;
+
+    // Inject Schedule for Visits (Locked & beautifully formatted)
+    if (!isLVA && activeDraft.teachers.length > 0) {
+       content += `<p style="margin-top: 25px;"><strong>Visit Schedule:</strong></p><ul style="background: #f8fafc; padding: 15px 15px 15px 35px; border-radius: 6px; border: 1px solid #e2e8f0; margin-top: 10px;">`;
+       activeDraft.teachers.forEach(t => {
+          content += `<li style="margin-bottom: 8px;"><strong>${t.name}</strong>: ${t.meta?.classTime || '[Time]'}</li>`;
+       });
+       content += `</ul>`;
     }
 
-    body += `\n\nThank you in advance for your time and cooperation.\n\nBest regards,\n${trainerName}`;
-    return body;
+    // Call to Action & Sign-off
+    content += `
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${activeDraft.visitationLink || '#'}" style="${buttonStyle}">📂 Open GrapeSEED Portal</a>
+      </div>
+      <p style="margin-bottom: 0;">Thank you in advance for your time and cooperation.</p>
+      <p style="margin-bottom: 0; margin-top: 10px;">Best regards,<br><strong>${trainerName}</strong></p>
+    `;
+
+    // Final HTML Assembly
+    return `
+<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 20px; background-color: #f3f4f6;">
+  <div style="${container}">
+    <div style="${headerStyle}">
+      <h2 style="margin: 0; color: #ffffff; font-size: 18px; letter-spacing: 0.5px;">${isLVA ? 'LESSON VIDEO ANALYSIS' : 'CLASS VISIT'}</h2>
+      <p style="margin: 5px 0 0; color: #a7f3d0; font-size: 13px;">${activeDraft.schoolName}</p>
+    </div>
+    <div style="${bodyStyle}">
+      ${content}
+    </div>
+    <div style="${footerStyle}">
+      GrapeSEED Vietnam Training Team
+    </div>
+  </div>
+</body>
+</html>`;
   };
 
-  const bodyPreview = generateBody();
-  const subject = `GrapeSEED ${activeDraft.type === 'LVA' ? 'Lesson Video Analysis' : 'Class Visit'} - ${activeDraft.schoolName}`;
+    const subject = `GrapeSEED ${activeDraft.type === 'LVA' ? 'Lesson Video Analysis' : 'Class Visit'} - ${activeDraft.schoolName}`;
 
- const copyToClipboard = () => {
-    // Use activeDraft.editableSubject directly
-    const text = `To: ${activeDraft.editableTo}\nCC: ${activeDraft.editableCc}\nSubject: ${activeDraft.editableSubject}\n\n${bodyPreview}`;
-    navigator.clipboard.writeText(text);
-    setCopiedId(activeDraft.id);
-    setTimeout(() => setCopiedId(null), 2000);
+    const copyToClipboard = async () => {
+    const htmlContent = generateHtmlBody();
+    
+    // Fallback for email clients that absolutely don't support HTML pasting
+    const plainTextFallback = `To: ${activeDraft.editableTo}\nCC: ${activeDraft.editableCc}\nSubject: ${activeDraft.editableSubject}\n\n(Please view this email in an HTML-compatible client.)`;
+
+    try {
+      // Create a rich text clipboard item
+      const clipboardItem = new ClipboardItem({
+        "text/plain": new Blob([plainTextFallback], { type: "text/plain" }),
+        "text/html": new Blob([htmlContent], { type: "text/html" }),
+      });
+      
+      await navigator.clipboard.write([clipboardItem]);
+      setCopiedId(activeDraft.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy rich text: ", err);
+      alert("Failed to copy rich text. Your browser might not support this feature.");
+    }
   };
 
   return (
@@ -257,111 +302,144 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
               />
             </div>
           </div>
-          {/* 2. Body / Inputs Area */}
+{/* 2. Body / Inputs Area (NOW TABBED) */}
           <div className="composer-body">
             
-            {/* LINK WARNING */}
-            {!activeDraft.visitationLink && (
-               <div className="link-warning">
-                  <AlertCircle size={14} /> Link missing. Code: {activeDraft.officialCode}
-               </div>
-            )}
-            
-            {/* INPUTS: LVA Deadline */}
-            {activeDraft.type === 'LVA' && (
-              <div className="control-card">
-                 <div className="info-row">
-                    <span className="info-label">Video Deadline:</span>
-                    <input 
-                      type="date" 
-                      className="inline-input"
-                      value={activeDraft.meta.deadline || ''}
-                      onChange={(e) => updateBatchMeta('deadline', e.target.value)}
-                    />
-                 </div>
+            {/* TABS NAVIGATION */}
+            <div className="tabs-header">
+              <button 
+                className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`}
+                onClick={() => setActiveTab('edit')}
+              >
+                Edit Details
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'preview' ? 'active' : ''}`}
+                onClick={() => setActiveTab('preview')}
+              >
+                Preview Email
+              </button>
+            </div>
+
+            {/* TAB 1: EDIT DETAILS */}
+            {activeTab === 'edit' && (
+              <div className="tab-content">
+                {/* LINK WARNING */}
+                {!activeDraft.visitationLink && (
+                  <div className="link-warning">
+                      <AlertCircle size={14} /> Link missing. Code: {activeDraft.officialCode}
+                  </div>
+                )}
+                
+                {/* INPUTS: LVA Deadline */}
+                {activeDraft.type === 'LVA' && (
+                  <div className="control-card">
+                    <div className="info-row">
+                        <span className="info-label">Video Deadline:</span>
+                        <input 
+                          type="date" 
+                          className="inline-input"
+                          value={activeDraft.meta.deadline || ''}
+                          onChange={(e) => updateBatchMeta('deadline', e.target.value)}
+                        />
+                    </div>
+                  </div>
+                )}
+
+                {/* INPUTS: Visit Date */}
+                {activeDraft.type === 'Visit' && (
+                  <div className="control-card">
+                    <div className="info-row">
+                        <span className="info-label">Visit Date:</span>
+                        <input 
+                          type="date" 
+                          className="inline-input"
+                          value={activeDraft.meta.visitDate || ''}
+                          onChange={(e) => updateBatchMeta('visitDate', e.target.value)}
+                        />
+                    </div>
+                  </div>
+                )}
+
+                {/* INPUTS: Teacher List & Visit Times */}
+                <div className="teacher-table-container">
+                  <table className="email-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '30%' }}>Teacher</th>
+                          <th style={{ width: '35%' }}>Email</th>
+                          {activeDraft.type === 'Visit' && <th>Visit Time</th>}
+                          <th style={{ width: '40px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeDraft.teachers.map(t => (
+                          <tr key={t.id}>
+                            <td>{t.name}</td>
+                            <td className="email-cell">{t.email}</td>
+                            {activeDraft.type === 'Visit' && (
+                              <td>
+                                <input 
+                                  type="text" 
+                                  className="table-input" 
+                                  placeholder="e.g. 09:00 - 09:40"
+                                  value={t.meta?.classTime || ''}
+                                  onChange={(e) => updateTeacherMeta(t.id, e.target.value)}
+                                />
+                              </td>
+                            )}
+                            <td style={{ textAlign: 'center' }}>
+                              <button 
+                                className="btn-icon-delete"
+                                title="Remove from email"
+                                onClick={() => removeTeacher(t.id)}
+                              >
+                                <X size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                  </table>
+                  {activeDraft.teachers.length === 0 && (
+                    <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                      No teachers selected.
+                    </div>
+                  )}
+                </div>
+                {/* ✅ NEW: Editable Email Message */}
+                <div className="control-card" style={{ marginTop: '16px' }}>
+                  <div style={{ marginBottom: '8px', fontSize: '13px', fontWeight: 600, color: '#64748b' }}>
+                    Email Message (Editable):
+                  </div>
+                  <textarea 
+                    className="preview-textarea" 
+                    value={activeDraft.editableBody || ''} 
+                    onChange={(e) => updateHeader('editableBody', e.target.value)}
+                    style={{ height: '180px', background: '#fff' }}
+                  />
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#94a3b8' }}>
+                    *Note: The greeting, schedule table, and portal button are injected automatically in the Preview.
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* ✅ MOVED HERE: Visit Date Picker (Applies to whole batch) */}
-            {activeDraft.type === 'Visit' && (
-              <div className="control-card">
-                 <div className="info-row">
-                    <span className="info-label">Visit Date:</span>
-                    <input 
-                      type="date" 
-                      className="inline-input"
-                      value={activeDraft.meta.visitDate || ''}
-                      onChange={(e) => updateBatchMeta('visitDate', e.target.value)}
-                    />
-                 </div>
-              </div>
-            )}
-
-            {/* INPUTS: Teacher List & Visit Times */}
-            <div className="teacher-table-container">
-               <table className="email-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: '30%' }}>Teacher</th>
-                      <th style={{ width: '35%' }}>Email</th>
-                      {/* Only show Time column if it is a VISIT */}
-                      {activeDraft.type === 'Visit' && <th>Visit Time</th>}
-                      <th style={{ width: '40px' }}></th> {/* Delete Column */}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeDraft.teachers.map(t => (
-                      <tr key={t.id}>
-                        <td>{t.name}</td>
-                        <td className="email-cell">{t.email}</td>
-                        {/* ✅ RESTORED: Visit Time Input for each specific teacher */}
-                        {activeDraft.type === 'Visit' && (
-                          <td>
-                             <input 
-                               type="text" 
-                               className="table-input" 
-                               placeholder="e.g. 09:00 - 09:40"
-                               value={t.meta?.classTime || ''}
-                               onChange={(e) => updateTeacherMeta(t.id, e.target.value)}
-                             />
-                          </td>
-                        )}
-                        <td style={{ textAlign: 'center' }}>
-                          <button 
-                            className="btn-icon-delete"
-                            title="Remove from email"
-                            onClick={() => removeTeacher(t.id)}
-                          >
-                            <X size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-               </table>
-               {activeDraft.teachers.length === 0 && (
-                 <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
-                   No teachers selected.
-                 </div>
-               )}
-            </div>
-
-            {/* PREVIEW */}
-            <div className="body-preview">
-              <textarea 
-                 className="preview-textarea" 
-                 value={bodyPreview} 
-                 readOnly 
-              />
-            </div>
-
-            {/* VISUAL LINK BUTTON */}
-            {activeDraft.visitationLink && (
-              <div className="link-display">
-                 <ExternalLink size={14} />
-                 <a href={activeDraft.visitationLink} target="_blank" rel="noreferrer">
-                    Open Portal Link
-                 </a>
+{/* TAB 2: PREVIEW EMAIL */}
+            {activeTab === 'preview' && (
+              <div className="tab-content" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div 
+                  className="html-preview-container"
+                  style={{ 
+                    flex: 1, 
+                    overflowY: 'auto', 
+                    background: '#f3f4f6', 
+                    padding: '20px', 
+                    borderRadius: '8px',
+                    border: '1px solid #e2e8f0'
+                  }}
+                  dangerouslySetInnerHTML={{ __html: generateHtmlBody() }}
+                />
               </div>
             )}
 
