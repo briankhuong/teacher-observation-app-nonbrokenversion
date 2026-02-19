@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Copy, Check, ChevronRight, Mail, ExternalLink, AlertCircle } from 'lucide-react';
+import { X, Copy, Check, ChevronRight, Mail, ExternalLink, AlertCircle,ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import './EmailDraftModal.css';
-
 // src/pages/Planning/EmailDraftModal.tsx
 
 export interface EmailBatch {
@@ -152,6 +151,33 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
       };
     }));
   };
+// Move a teacher up or down in the list
+  const moveTeacher = (teacherId: string, direction: 'up' | 'down') => {
+    setDrafts(prev => prev.map(draft => {
+      if (draft.id !== activeDraftId) return draft;
+
+      const index = draft.teachers.findIndex(t => t.id === teacherId);
+      if (index < 0) return draft; 
+      if (direction === 'up' && index === 0) return draft; 
+      if (direction === 'down' && index === draft.teachers.length - 1) return draft; 
+
+      const newTeachers = [...draft.teachers];
+      const swapIndex = direction === 'up' ? index - 1 : index + 1;
+      
+      // Execute the swap
+      [newTeachers[index], newTeachers[swapIndex]] = [newTeachers[swapIndex], newTeachers[index]];
+
+      // Update the editableTo field to match the new order
+      const updatedTo = newTeachers.map(t => t.email).join('; ');
+
+      return {
+        ...draft,
+        teachers: newTeachers,
+        editableTo: updatedTo
+      };
+    }));
+  };
+
 
 // --- GENERATE RICH HTML BODY ---
   const generateHtmlBody = () => {
@@ -374,42 +400,65 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
                 {/* INPUTS: Teacher List & Visit Times */}
                 <div className="teacher-table-container">
                   <table className="email-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: '30%' }}>Teacher</th>
-                          <th style={{ width: '35%' }}>Email</th>
-                          {activeDraft.type === 'Visit' && <th>Visit Time</th>}
-                          <th style={{ width: '40px' }}></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeDraft.teachers.map(t => (
-                          <tr key={t.id}>
-                            <td>{t.name}</td>
-                            <td className="email-cell">{t.email}</td>
-                            {activeDraft.type === 'Visit' && (
-                              <td>
-                                <input 
-                                  type="text" 
-                                  className="table-input" 
-                                  placeholder="e.g. 09:00 - 09:40"
-                                  value={t.meta?.classTime || ''}
-                                  onChange={(e) => updateTeacherMeta(t.id, e.target.value)}
-                                />
-                              </td>
-                            )}
-                            <td style={{ textAlign: 'center' }}>
-                              <button 
-                                className="btn-icon-delete"
-                                title="Remove from email"
-                                onClick={() => removeTeacher(t.id)}
-                              >
-                                <X size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
+<thead>
+                    <tr>
+                      <th style={{ width: '30%' }}>Teacher</th>
+                      <th style={{ width: '35%' }}>Email</th>
+                      {activeDraft.type === 'Visit' && <th>Visit Time</th>}
+                      {/* Increased width to fit 3 buttons */}
+                      <th style={{ width: '90px', textAlign: 'center' }}>Actions</th> 
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Add 'index' to the map function parameters */}
+                    {activeDraft.teachers.map((t, index) => (
+                      <tr key={t.id}>
+                        <td>{t.name}</td>
+                        <td className="email-cell">{t.email}</td>
+                        {activeDraft.type === 'Visit' && (
+                          <td>
+                             <input 
+                               type="text" 
+                               className="table-input" 
+                               placeholder="e.g. 09:00 - 09:40"
+                               value={t.meta?.classTime || ''}
+                               onChange={(e) => updateTeacherMeta(t.id, e.target.value)}
+                             />
+                          </td>
+                        )}
+                       {/* ✅ FIXED ACTION COLUMN: Wrapping buttons in a flex div */}
+                        <td style={{ verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', alignItems: 'center' }}>
+                            <button 
+                              className="btn-icon-action"
+                              title="Move Up"
+                              onClick={() => moveTeacher(t.id, 'up')}
+                              disabled={index === 0}
+                              style={{ opacity: index === 0 ? 0.3 : 1, cursor: index === 0 ? 'default' : 'pointer' }}
+                            >
+                              <ChevronUp size={16} />
+                            </button>
+                            <button 
+                              className="btn-icon-action"
+                              title="Move Down"
+                              onClick={() => moveTeacher(t.id, 'down')}
+                              disabled={index === activeDraft.teachers.length - 1}
+                              style={{ opacity: index === activeDraft.teachers.length - 1 ? 0.3 : 1, cursor: index === activeDraft.teachers.length - 1 ? 'default' : 'pointer' }}
+                            >
+                              <ChevronDown size={16} />
+                            </button>
+                            <button 
+                              className="btn-icon-delete"
+                              title="Remove from email"
+                              onClick={() => removeTeacher(t.id)}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
                   </table>
                   {activeDraft.teachers.length === 0 && (
                     <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>

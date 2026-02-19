@@ -415,3 +415,19 @@
 .tab-content {
   animation: fadeIn 0.2s ease-out;
 }
+.btn-icon-action {
+  background: none;
+  border: none;
+  color: #64748b;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-icon-action:hover:not(:disabled) {
+  background-color: #e2e8f0;
+  color: #0f172a;
+}
