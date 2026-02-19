@@ -77,11 +77,12 @@ const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
           const teacherText = d.teachers.length > 1 ? "teachers" : "teacher";
           subject = `[GrapeSEED] - Lesson video analysis for ${teacherText} at ${d.schoolName} in ${month}`;
         }
+        // 4. Generate Default Body Text (Using Tokens)
         let initialBody = `I hope you’re doing well.\n\n`;
         if (d.type === 'LVA') {
-          initialBody += `To better assess the progress of the students in your GrapeSEED class, I’d like to request a lesson video, due by ${d.meta.deadline || '[Date]'}.\n\nPlease also take a few minutes to complete the questionnaire on the GrapeSEED portal using the button below, as this will provide me with a clearer understanding of the class dynamics and support my feedback.\n\nFor the video, please ensure it is at least 20 minutes long and recorded in a single take so I can observe the full flow of your lesson. Ideally, place the camera at the back of the classroom to capture your teaching moves and, at the same time, allow me to see whether the students are engaged.`;
+          initialBody += `To better assess the progress of the students in your GrapeSEED class, I’d like to request a lesson video, due by {{DATE}}.\n\nPlease also take a few minutes to complete the questionnaire on the GrapeSEED portal using the button below, as this will provide me with a clearer understanding of the class dynamics and support my feedback.\n\nFor the video, please ensure it is at least 20 minutes long and recorded in a single take so I can observe the full flow of your lesson. Ideally, place the camera at the back of the classroom to capture your teaching moves and, at the same time, allow me to see whether the students are engaged.`;
         } else {
-          initialBody += `To better assess the progress of the students in your class at ${d.schoolName}, I’d like to visit your class on ${d.meta.visitDate || '[Date]'}.\n\nPlease take a few minutes to complete the questionnaire on the GrapeSEED portal using the button below, as this will provide me with a clearer understanding of the class dynamics and support my feedback.`;
+          initialBody += `To better assess the progress of the students in your class at ${d.schoolName}, I’d like to visit your class on {{DATE}}.\n\nPlease take a few minutes to complete the questionnaire on the GrapeSEED portal using the button below, as this will provide me with a clearer understanding of the class dynamics and support my feedback.`;
         }
 
         return {
@@ -165,10 +166,19 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
     const buttonStyle = "display: inline-block; background-color: #059669; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;";
     const footerStyle = "background-color: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #6b7280;";
 
-    const greeting = isMultiple ? "Dear Teachers," : `Dear <strong>${teacherNames}</strong>,`;
+    const greeting = isMultiple ? "Dear Teachers," : `Dear ${teacherNames},`;
     
+    // --- TOKEN REPLACEMENT LOGIC ---
+    // Get the date from the picker, or show a fallback if they haven't picked one yet
+    const rawDate = isLVA ? activeDraft.meta.deadline : activeDraft.meta.visitDate;
+    const formattedDate = rawDate ? rawDate : '[Select a Date in Edit Tab]';
+
+    // Swap {{DATE}} with the actual date (wrapped in bold tags for styling)
+    let processedText = activeDraft.editableBody || '';
+    processedText = processedText.replace(/\{\{DATE\}\}/g, `<strong>${formattedDate}</strong>`);
+
     // Convert user's raw text into HTML paragraphs
-    const userParagraphs = (activeDraft.editableBody || '')
+    const userParagraphs = processedText
       .split('\n')
       .filter(line => line.trim() !== '') // Ignore empty blank lines
       .map(line => `<p style="margin-top: 0; margin-bottom: 16px;">${line}</p>`)
@@ -407,7 +417,7 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
                     </div>
                   )}
                 </div>
-                {/* ✅ NEW: Editable Email Message */}
+                {/* Editable Email Message */}
                 <div className="control-card" style={{ marginTop: '16px' }}>
                   <div style={{ marginBottom: '8px', fontSize: '13px', fontWeight: 600, color: '#64748b' }}>
                     Email Message (Editable):
@@ -418,8 +428,9 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
                     onChange={(e) => updateHeader('editableBody', e.target.value)}
                     style={{ height: '180px', background: '#fff' }}
                   />
-                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#94a3b8' }}>
-                    *Note: The greeting, schedule table, and portal button are injected automatically in the Preview.
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
+                    <strong>*Note:</strong> Leave <strong>{`{{DATE}}`}</strong> in your text. It will automatically be replaced by the date you selected above when previewing or sending.<br/>
+                    The greeting, schedule table, and portal button are injected automatically.
                   </div>
                 </div>
               </div>
