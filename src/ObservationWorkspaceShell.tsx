@@ -2663,6 +2663,156 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
         </>
         )}
         <div className="workspace-container">
+           {showAdminPreview && adminPreview ? (
+                <div className="export-preview-panel admin-preview">
+                  <div className="export-preview-header">
+                    <div className="flex-grow"> 
+                      <div className="export-preview-title">
+                        Admin export preview
+                      </div>
+                      <div className="export-preview-sub">
+                        {adminPreview.schoolName} • {adminPreview.teacherName}
+                        {adminPreview.fileDate
+                          ? ` • ${adminPreview.fileDate}`
+                          : null}
+                      </div>
+                    </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    {/* 🟢 NEW BUTTON: Runs the AI on demand */}
+                      <button
+                        type="button"
+                        className={`btn ${isRecording ? 'pulse-red' : ''}`}
+                        onClick={() => isRecording ? stopRecording('admin') : startRecording()}
+                        disabled={isTranscribing || isGeneratingSummary}
+                        style={{
+                          background: isRecording ? "#ef4444" : "transparent",
+                          border: "1px solid #f59e0b",
+                          color: isRecording ? "white" : "#f59e0b"
+                        }}
+                      >
+                        {isTranscribing ? "⌛ Transcribing..." : isRecording ? "🛑 Stop Recording" : "🎤 Record Summary"}
+                      </button>
+                      
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={handleGenerateAiSummary}
+                        disabled={isGeneratingSummary}
+                        style={{ 
+                          background: "linear-gradient(135deg, #f59e0b, #d97706)", // Amber/Orange
+                          color: "white",
+                          border: "none"
+                        }} 
+                      >
+                        {isGeneratingSummary ? "Generating..." : "✨ Generate AI Summary"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary" 
+                        onClick={handleAdminReviewSave} 
+                        style={{ backgroundColor: 'var(--color-primary)' }} 
+                      >
+                        Save Translated Summary
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => setShowAdminPreview(false)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 🟢 NEW: Side-by-side flex container */}
+                  <div style={{ display: "flex", gap: "16px", marginBottom: 16 }}>
+                    
+                    {/* LEFT SIDE: Read-Only Reference Data */}
+                    <div
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        flexDirection: "column",
+                        padding: 10,
+                        borderRadius: 10,
+                        border: "1px solid rgba(148, 163, 184, 0.35)",
+                        background: "rgba(15, 23, 42, 0.9)",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                        Flagged Feedback Reference
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
+                        Read-only text from indicators marked for the Admin report.
+                      </div>
+                      <textarea
+                        readOnly
+                        value={indicators
+                          .filter(ind => ind.includeInTrainerSummary)
+                          .map(ind => `[${ind.number}] ${ind.title}\n${ind.commentText.trim()}`)
+                          .join("\n\n")}
+                        style={{
+                          width: "100%",
+                          resize: "none",
+                          borderRadius: 8,
+                          border: "1px solid rgba(51,65,85,0.9)",
+                          background: "rgba(15, 23, 42, 0.5)",
+                          color: "#94a3b8",
+                          padding: 8,
+                          fontSize: 12,
+                          lineHeight: 1.4,
+                          flexGrow: 1,
+                          minHeight: "300px"
+                        }}
+                      />
+                    </div>
+
+                    {/* RIGHT SIDE: Editable Trainer Summary */}
+                    <div
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        flexDirection: "column",
+                        padding: 10,
+                        borderRadius: 10,
+                        border: "1px solid rgba(148, 163, 184, 0.35)",
+                        background: "rgba(15, 23, 42, 0.9)",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                        Trainer summary (Admin sheet – merged cell E5–E18)
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
+                        Built automatically from indicators you checked as <em>Trainer summary</em>. You can edit / translate it here before exporting.
+                      </div>
+                      <textarea
+                        value={adminPreview.trainerSummary ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setAdminPreview((prev) =>
+                            prev ? { ...prev, trainerSummary: value } : prev
+                          );
+                        }}
+                        style={{
+                          width: "100%",
+                          resize: "vertical",
+                          borderRadius: 8,
+                          border: "1px solid rgba(51,65,85,0.9)",
+                          background: "#020617",
+                          color: "var(--text)",
+                          padding: 8,
+                          fontSize: 12,
+                          lineHeight: 1.4,
+                          flexGrow: 1,
+                          minHeight: "300px"
+                        }}
+                      />
+                    </div>
+                    
+                  </div>              
+                </div>
+              ) : (
+                <>
           {isDesktopMode ? (
               <div 
                 className="pc-scroll-feed" 
@@ -2810,7 +2960,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               </div>
             ) : (
             <div className="canvas-card">
-              {!showAdminPreview && (
+
                 <>
               <div className="canvas-header">
 
@@ -3293,7 +3443,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               />
             </div>
             </>
-              )}
+             
             </div>
             )}
               {showExportPreview && exportPreview && (
@@ -3659,156 +3809,9 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                     })()}
                   </div>
                 </div>
-              )}  
-              {showAdminPreview && adminPreview && (
-                <div className="export-preview-panel admin-preview">
-                  <div className="export-preview-header">
-                    <div className="flex-grow"> 
-                      <div className="export-preview-title">
-                        Admin export preview
-                      </div>
-                      <div className="export-preview-sub">
-                        {adminPreview.schoolName} • {adminPreview.teacherName}
-                        {adminPreview.fileDate
-                          ? ` • ${adminPreview.fileDate}`
-                          : null}
-                      </div>
-                    </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    {/* 🟢 NEW BUTTON: Runs the AI on demand */}
-                      <button
-                        type="button"
-                        className={`btn ${isRecording ? 'pulse-red' : ''}`}
-                        onClick={() => isRecording ? stopRecording('admin') : startRecording()}
-                        disabled={isTranscribing || isGeneratingSummary}
-                        style={{
-                          background: isRecording ? "#ef4444" : "transparent",
-                          border: "1px solid #f59e0b",
-                          color: isRecording ? "white" : "#f59e0b"
-                        }}
-                      >
-                        {isTranscribing ? "⌛ Transcribing..." : isRecording ? "🛑 Stop Recording" : "🎤 Record Summary"}
-                      </button>
-                      
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={handleGenerateAiSummary}
-                        disabled={isGeneratingSummary}
-                        style={{ 
-                          background: "linear-gradient(135deg, #f59e0b, #d97706)", // Amber/Orange
-                          color: "white",
-                          border: "none"
-                        }} 
-                      >
-                        {isGeneratingSummary ? "Generating..." : "✨ Generate AI Summary"}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary" 
-                        onClick={handleAdminReviewSave} 
-                        style={{ backgroundColor: 'var(--color-primary)' }} 
-                      >
-                        Save Translated Summary
-                      </button>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => setShowAdminPreview(false)}
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 🟢 NEW: Side-by-side flex container */}
-                  <div style={{ display: "flex", gap: "16px", marginBottom: 16 }}>
-                    
-                    {/* LEFT SIDE: Read-Only Reference Data */}
-                    <div
-                      style={{
-                        flex: 1,
-                        display: "flex",
-                        flexDirection: "column",
-                        padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid rgba(148, 163, 184, 0.35)",
-                        background: "rgba(15, 23, 42, 0.9)",
-                      }}
-                    >
-                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                        Flagged Feedback Reference
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
-                        Read-only text from indicators marked for the Admin report.
-                      </div>
-                      <textarea
-                        readOnly
-                        value={indicators
-                          .filter(ind => ind.includeInTrainerSummary)
-                          .map(ind => `[${ind.number}] ${ind.title}\n${ind.commentText.trim()}`)
-                          .join("\n\n")}
-                        style={{
-                          width: "100%",
-                          resize: "none",
-                          borderRadius: 8,
-                          border: "1px solid rgba(51,65,85,0.9)",
-                          background: "rgba(15, 23, 42, 0.5)",
-                          color: "#94a3b8",
-                          padding: 8,
-                          fontSize: 12,
-                          lineHeight: 1.4,
-                          flexGrow: 1,
-                          minHeight: "300px"
-                        }}
-                      />
-                    </div>
-
-                    {/* RIGHT SIDE: Editable Trainer Summary */}
-                    <div
-                      style={{
-                        flex: 1,
-                        display: "flex",
-                        flexDirection: "column",
-                        padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid rgba(148, 163, 184, 0.35)",
-                        background: "rgba(15, 23, 42, 0.9)",
-                      }}
-                    >
-                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                        Trainer summary (Admin sheet – merged cell E5–E18)
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
-                        Built automatically from indicators you checked as <em>Trainer summary</em>. You can edit / translate it here before exporting.
-                      </div>
-                      <textarea
-                        value={adminPreview.trainerSummary ?? ""}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setAdminPreview((prev) =>
-                            prev ? { ...prev, trainerSummary: value } : prev
-                          );
-                        }}
-                        style={{
-                          width: "100%",
-                          resize: "vertical",
-                          borderRadius: 8,
-                          border: "1px solid rgba(51,65,85,0.9)",
-                          background: "#020617",
-                          color: "var(--text)",
-                          padding: 8,
-                          fontSize: 12,
-                          lineHeight: 1.4,
-                          flexGrow: 1,
-                          minHeight: "300px"
-                        }}
-                      />
-                    </div>
-                    
-                  </div>              
-                </div>
-              )}
+              )} 
+              </>  
+           )} 
         </div>
       </section>
       {showScratchpad && (
