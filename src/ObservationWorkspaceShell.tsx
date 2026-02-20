@@ -2183,30 +2183,32 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               >
                 {isAiPolishing ? "✨ Polishing..." : "✨ Polish All"}
               </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={handleConvertAllInk}
-                disabled={isLocked || isBatchOcrRunning || isAiPolishing}
-                style={{
-                  // Distinct color (e.g., Orange/Amber)
-                  background: isBatchOcrRunning 
-                    ? "#d97706" 
-                    : "linear-gradient(135deg, #f59e0b, #b45309)", 
-                  border: "none",
-                  color: "white",
-                  marginLeft: 8,
-                  fontWeight: 500,
-                  minWidth: 100 // Prevent resize jitter when text changes
-                }}
-              >
-                {isBatchOcrRunning ? (
-                  <span>⌛ {batchOcrProgress || "Processing..."}</span>
-                ) : (
-                  "📝 Convert All"
+                {!isDesktopMode && (
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={handleConvertAllInk}
+                    disabled={isLocked || isBatchOcrRunning || isAiPolishing}
+                    style={{
+                      // Distinct color (e.g., Orange/Amber)
+                      background: isBatchOcrRunning 
+                        ? "#d97706" 
+                        : "linear-gradient(135deg, #f59e0b, #b45309)", 
+                      border: "none",
+                      color: "white",
+                      marginLeft: 8,
+                      fontWeight: 500,
+                      minWidth: 100 // Prevent resize jitter when text changes
+                    }}
+                  >
+                    {isBatchOcrRunning ? (
+                      <span>⌛ {batchOcrProgress || "Processing..."}</span>
+                    ) : (
+                      "📝 Convert All"
+                    )}
+                  </button>
                 )}
-              </button>
-
+              {/* 
               <button
                 className="btn"
                 type="button"
@@ -2214,7 +2216,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 style={{ fontWeight: 600 }}
               >
                 {isLocked ? "Reopen as Draft" : "Mark Completed"}
-              </button>
+              </button> */}
               <button className="btn" type="button" onClick={handleExportPreview}>
                 Preview (teacher)
               </button>
