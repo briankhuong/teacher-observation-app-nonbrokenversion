@@ -1,8 +1,9 @@
+// src/pages/Planning/EmailDraftModal.tsx
 import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, ChevronRight, Mail, ExternalLink, AlertCircle,ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import './EmailDraftModal.css';
-// src/pages/Planning/EmailDraftModal.tsx
+import { sendGraphEmail } from '../../msal/graphEmail';
 
 export interface EmailBatch {
   id: string;
@@ -51,7 +52,8 @@ const EmailDraftModal: React.FC<EmailDraftModalProps> = ({ isOpen, onClose, init
   const [drafts, setDrafts] = useState<EmailBatch[]>([]);
   const [activeDraftId, setActiveDraftId] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');     
+const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');    
+const [isSending, setIsSending] = useState(false); 
   // Get Trainer Name
   const trainerName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || "Trainer";
 // Initialize drafts
@@ -252,9 +254,9 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
 </html>`;
   };
 
-    const subject = `GrapeSEED ${activeDraft.type === 'LVA' ? 'Lesson Video Analysis' : 'Class Visit'} - ${activeDraft.schoolName}`;
+const subject = `GrapeSEED ${activeDraft.type === 'LVA' ? 'Lesson Video Analysis' : 'Class Visit'} - ${activeDraft.schoolName}`;
 
-    const copyToClipboard = async () => {
+const copyToClipboard = async () => {
     const htmlContent = generateHtmlBody();
     
     // Fallback for email clients that absolutely don't support HTML pasting
@@ -273,6 +275,45 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
     } catch (err) {
       console.error("Failed to copy rich text: ", err);
       alert("Failed to copy rich text. Your browser might not support this feature.");
+    }
+};
+
+// --- SEND VIA MS GRAPH API ---
+  const handleSend = async () => {
+    // Split by either semicolon or comma, trim whitespace, and remove empty strings
+    const toAddresses = (activeDraft.editableTo || '').split(/[;,]+/).map(s => s.trim()).filter(Boolean);
+    const ccAddresses = (activeDraft.editableCc || '').split(/[;,]+/).map(s => s.trim()).filter(Boolean);
+    const subject = activeDraft.editableSubject || '';
+
+    if (toAddresses.length === 0) {
+      alert("Please enter at least one email address in the 'To' field.");
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      // 1. Generate the final HTML
+      const htmlContent = generateHtmlBody();
+      
+      // 2. Send via Office 365
+      await sendGraphEmail(toAddresses, ccAddresses, subject, htmlContent);
+      alert("✅ Email sent successfully!");
+      
+      // 3. Remove the sent draft from the queue
+      const remainingDrafts = drafts.filter(d => d.id !== activeDraftId);
+      if (remainingDrafts.length > 0) {
+        setDrafts(remainingDrafts);
+        setActiveDraftId(remainingDrafts[0].id);
+        setActiveTab('edit');
+      } else {
+        onClose(); // Close the modal if that was the last draft
+      }
+      
+    } catch (error: any) {
+      console.error("Send failed", error);
+      alert(`❌ Failed to send: ${error.message}`);
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -505,14 +546,39 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
 
           </div>
 
-          {/* 3. Footer */}
+{/* 3. Footer */}
           <div className="composer-footer">
-            <button className="btn-cancel" onClick={onClose}>Close</button>
-            <button className="btn-copy" onClick={copyToClipboard}>
-              {copiedId === activeDraft.id ? <Check size={16} /> : <Copy size={16} />}
-              {copiedId === activeDraft.id ? 'Copied!' : 'Copy to Clipboard'}
+            <button 
+              className="btn-cancel" 
+              onClick={onClose} 
+              disabled={isSending}
+            >
+              Close
             </button>
+            
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button 
+                className="btn-copy" 
+                onClick={copyToClipboard} 
+                disabled={isSending}
+                style={{ backgroundColor: '#64748b' }} // Dark gray for the secondary action
+              >
+                {copiedId === activeDraft.id ? <Check size={16} /> : <Copy size={16} />}
+                {copiedId === activeDraft.id ? 'Copied!' : 'Copy to Clipboard'}
+              </button>
+
+              {/* ✅ NEW SEND BUTTON */}
+              <button 
+                className="btn-copy" 
+                onClick={handleSend} 
+                disabled={isSending}
+                style={{ backgroundColor: '#2563eb', minWidth: '160px', justifyContent: 'center' }} 
+              >
+                {isSending ? 'Sending...' : 'Send via Office 365 →'}
+              </button>
+            </div>
           </div>
+
         </div>
       </div>
     </div>

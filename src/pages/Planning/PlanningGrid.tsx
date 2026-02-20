@@ -262,12 +262,15 @@ const handleDraftEmails = async () => {
         // FIXED LINE: Use emailFilters.month directly
         console.log(`   📡 Calling API for ${emailFilters.month}...`);
         
-        const response = await fetch('http://localhost:4000/api/match-visitation', {
+        // Fallback to localhost just in case the env var isn't set locally
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+
+        const response = await fetch(`${API_BASE_URL}/api/match-visitation`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             schoolCode: draft.officialCode,
-            monthKey: emailFilters.month, // Use the global filter state
+            monthKey: emailFilters.month, 
             type: draft.type, 
             coachId: user?.id
           })
