@@ -49,6 +49,7 @@ const PlanningGrid: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   // --- EMAIL OUTREACH STATE ---
   const [isEmailMode, setIsEmailMode] = useState(false);
+  const [isGeneratingDrafts, setIsGeneratingDrafts] = useState(false);
   const [emailFilters, setEmailFilters] = useState<{ month: string; types: string[] }>({
     month: months[0]?.key || '',
     types: ['LVA', 'Visit']
@@ -227,6 +228,7 @@ const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
 
 const handleDraftEmails = async () => {
     console.log("🚀 STARTING DRAFT PROCESS...");
+    setIsGeneratingDrafts(true); // ✅ Start loading UI
     
     // 1. Filter visible IDs
     const visibleSelectedIds = new Set<string>();
@@ -247,56 +249,66 @@ const handleDraftEmails = async () => {
     
     console.log(`📦 Generated ${rawDrafts.length} base drafts.`);
 
-    // 3. ENRICH WITH API LINKS
-    const enrichedDrafts = await Promise.all(rawDrafts.map(async (draft) => {
-      console.log(`🔍 Processing Draft: ${draft.schoolName} (${draft.type})`);
-      
-      // CHECK 1: Do we have the Official Code?
-      if (!draft.officialCode) {
-        console.warn(`   ❌ MISSING OFFICIAL CODE for ${draft.schoolName}. Cannot fetch link.`);
-        return draft; 
-      }
-      console.log(`   ✅ Code found: ${draft.officialCode}`);
+    // ✅ Set up 15-second timeout controller for Render cold starts
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      try {
-        // FIXED LINE: Use emailFilters.month directly
-        console.log(`   📡 Calling API for ${emailFilters.month}...`);
+    try {
+      // 3. ENRICH WITH API LINKS
+      const enrichedDrafts = await Promise.all(rawDrafts.map(async (draft) => {
+        console.log(`🔍 Processing Draft: ${draft.schoolName} (${draft.type})`);
         
-        // Fallback to localhost just in case the env var isn't set locally
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
-
-        const response = await fetch(`${API_BASE_URL}/api/match-visitation`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            schoolCode: draft.officialCode,
-            monthKey: emailFilters.month, 
-            type: draft.type, 
-            coachId: user?.id
-          })
-        });
-
-        const result = await response.json();
-        console.log("   📥 API Result:", result);
-        
-        if (result.match?.linkId) {
-          console.log(`   🎉 MATCH FOUND! Link ID: ${result.match.linkId}`);
-          const link = `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${draft.officialCode}/visitations/${result.match.linkId}/teacher`;
-          return { ...draft, visitationLink: link };
-        } else {
-          console.warn(`   ⚠️ NO MATCH. Reason: ${result.reason}`);
+        if (!draft.officialCode) {
+          console.warn(`   ❌ MISSING OFFICIAL CODE for ${draft.schoolName}. Cannot fetch link.`);
+          return draft; 
         }
-      } catch (err) {
-        console.error(`   🔥 API FAILURE for ${draft.schoolName}`, err);
-      }
+
+        try {
+          // ✅ Use dynamic environment variable
+          const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+
+          const response = await fetch(`${API_BASE_URL}/api/match-visitation`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              schoolCode: draft.officialCode,
+              monthKey: emailFilters.month, 
+              type: draft.type, 
+              coachId: user?.id
+            }),
+            signal: controller.signal // ✅ Attach the abort signal
+          });
+
+          const result = await response.json();
+          
+          if (result.match?.linkId) {
+            const link = `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${draft.officialCode}/visitations/${result.match.linkId}/teacher`;
+            return { ...draft, visitationLink: link };
+          }
+        } catch (err: any) {
+          // ✅ If it's a timeout, bubble it up to the main catch block
+          if (err.name === 'AbortError') throw err;
+          console.error(`   🔥 API FAILURE for ${draft.schoolName}`, err);
+        }
+        
+        return draft;
+      }));
       
-      return draft;
-    }));
-    
-    setEmailDrafts(enrichedDrafts);
+      clearTimeout(timeoutId); // ✅ Clear the timeout if we finish in time
+      setEmailDrafts(enrichedDrafts);
+
+    } catch (err: any) {
+      // ✅ Handle the timeout alert specifically
+      if (err.name === 'AbortError') {
+        alert("⏱️ The server is waking up from sleep (taking longer than 15s). Please wait a moment and click 'Draft Emails' again.");
+      } else {
+        console.error("Draft generation failed:", err);
+        alert("❌ Failed to generate drafts. Please check your connection and try again.");
+      }
+    } finally {
+      setIsGeneratingDrafts(false); // ✅ Stop loading UI no matter what happens
+    }
   };
-
-
 // --- HELPER: Calculate Effective Counts (Visible Rows Only) ---
   const getMonthCounts = (monthKey: string) => {
     let lvaCount = 0;
@@ -491,10 +503,14 @@ return (
             </button>
             <button 
               className="email-draft-btn" 
-              disabled={selectedIds.size === 0}
-              onClick={handleDraftEmails} // <--- ADD THIS
+              disabled={selectedIds.size === 0 || isGeneratingDrafts}
+              onClick={handleDraftEmails}
+              style={{ 
+                opacity: (selectedIds.size === 0 || isGeneratingDrafts) ? 0.7 : 1, 
+                cursor: isGeneratingDrafts ? 'wait' : 'pointer' 
+              }}
             >
-              Draft Emails
+              {isGeneratingDrafts ? 'Generating...' : 'Draft Emails'}
             </button>
           </div>
         </div>
