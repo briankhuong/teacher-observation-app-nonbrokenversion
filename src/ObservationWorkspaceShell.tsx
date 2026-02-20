@@ -1558,6 +1558,7 @@ const handleAdminPreview = async () => {
 
     setAdminPreview(finalModel);
     setShowAdminPreview(true);
+    setIsCanvasVisible(false);
   };
 
 const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
@@ -2637,7 +2638,10 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
         {/* RIGHT: active indicator + comments (canvas placeholder for now) */}
         <div className="workspace-container">
           <div className="canvas-card">
+            {!showAdminPreview && (
+              <>
             <div className="canvas-header">
+
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button 
                   type="button" 
@@ -3116,6 +3120,8 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               onTouchStart={startTextareaResize}
             />
           </div>
+          </>
+        )}
 {/* 🔍 PREVIEW MODAL (Uniform Buttons & Resizable Inputs) */}
 {showExportPreview && exportPreview && (
   <div className="scratchpad-backdrop"
@@ -3481,7 +3487,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
     </div>
   </div>
 )}
-            {showAdminPreview && adminPreview && (
+{showAdminPreview && adminPreview && (
               <div className="export-preview-panel admin-preview">
                 <div className="export-preview-header">
                   <div className="flex-grow"> 
@@ -3541,57 +3547,92 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                     </button>
                   </div>
                 </div>
-                <div
-                  style={{
-                    marginBottom: 16,
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid rgba(148, 163, 184, 0.35)",
-                    background: "rgba(15, 23, 42, 0.9)",
-                  }}
-                >
+
+                {/* 🟢 NEW: Side-by-side flex container */}
+                <div style={{ display: "flex", gap: "16px", marginBottom: 16 }}>
+                  
+                  {/* LEFT SIDE: Read-Only Reference Data */}
                   <div
                     style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      marginBottom: 4,
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      padding: 10,
+                      borderRadius: 10,
+                      border: "1px solid rgba(148, 163, 184, 0.35)",
+                      background: "rgba(15, 23, 42, 0.9)",
                     }}
                   >
-                    Trainer summary (Admin sheet – merged cell E5–E18)
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                      Flagged Feedback Reference
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
+                      Read-only text from indicators marked for the Admin report.
+                    </div>
+                    <textarea
+                      readOnly
+                      value={indicators
+                        .filter(ind => ind.includeInTrainerSummary)
+                        .map(ind => `[${ind.number}] ${ind.title}\n${ind.commentText.trim()}`)
+                        .join("\n\n")}
+                      style={{
+                        width: "100%",
+                        resize: "none",
+                        borderRadius: 8,
+                        border: "1px solid rgba(51,65,85,0.9)",
+                        background: "rgba(15, 23, 42, 0.5)",
+                        color: "#94a3b8",
+                        padding: 8,
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                        flexGrow: 1,
+                        minHeight: "300px"
+                      }}
+                    />
                   </div>
+
+                  {/* RIGHT SIDE: Editable Trainer Summary */}
                   <div
                     style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      marginBottom: 6,
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      padding: 10,
+                      borderRadius: 10,
+                      border: "1px solid rgba(148, 163, 184, 0.35)",
+                      background: "rgba(15, 23, 42, 0.9)",
                     }}
                   >
-                    Built automatically from indicators you checked as{" "}
-                    <em>Trainer summary</em>. You can edit / translate it here before
-                    exporting.
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                      Trainer summary (Admin sheet – merged cell E5–E18)
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6 }}>
+                      Built automatically from indicators you checked as <em>Trainer summary</em>. You can edit / translate it here before exporting.
+                    </div>
+                    <textarea
+                      value={adminPreview.trainerSummary ?? ""}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setAdminPreview((prev) =>
+                          prev ? { ...prev, trainerSummary: value } : prev
+                        );
+                      }}
+                      style={{
+                        width: "100%",
+                        resize: "vertical",
+                        borderRadius: 8,
+                        border: "1px solid rgba(51,65,85,0.9)",
+                        background: "#020617",
+                        color: "var(--text)",
+                        padding: 8,
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                        flexGrow: 1,
+                        minHeight: "300px"
+                      }}
+                    />
                   </div>
-                  <textarea
-                    value={adminPreview.trainerSummary ?? ""}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setAdminPreview((prev) =>
-                        prev ? { ...prev, trainerSummary: value } : prev
-                      );
-                    }}
-                    rows={15}
-                    style={{
-                      width: "100%",
-                      resize: "vertical",
-                      borderRadius: 8,
-                      border: "1px solid rgba(51,65,85,0.9)",
-                      background: "#020617",
-                      color: "var(--text)",
-                      padding: 8,
-                      fontSize: 12,
-                      lineHeight: 1.4,
-                      minHeight: "300px"
-                    }}
-                  />
+                  
                 </div>              
               </div>
             )}
