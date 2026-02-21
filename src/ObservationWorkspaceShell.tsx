@@ -2251,22 +2251,30 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
                 >
                   {isAiPolishing ? "✨..." : "✨ AI Polish"}
                 </button>
-                <button 
-                  type="button" 
-                  className={`btn ${isRecording && activeRowId === ind.id ? 'pulse-red' : ''}`} 
+                {/* Record Button */}
+                <button  
+                  type="button"  
+                  className="btn"
                   onClick={(e) => { 
                     e.stopPropagation(); 
-                    if (isRecording) stopRecording('indicator'); 
-                    else startRecording();
-                  }} 
-                  disabled={isTranscribing}
-                  style={{
-                    background: (isRecording && activeRowId === ind.id) ? "#ef4444" : "transparent",
-                    color: (isRecording && activeRowId === ind.id) ? "white" : "#f59e0b",
-                    border: "1px solid #f59e0b"
+                    setActiveIndex(idx); 
+                    isRecording ? stopRecording('indicator') : startRecording(); 
+                  }}
+                  style={{ 
+                    // Red background ONLY if this specific card is recording
+                    background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
+                    border: "1px solid var(--accent)",
+                    color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
+                    padding: "4px 12px", fontSize: 12, borderRadius: 20
                   }}
                 >
-                  {isTranscribing && activeRowId === ind.id ? "⌛..." : isRecording ? "🛑 Stop" : "🎤 Record"}
+                  {/* 🟢 THE FIX: Only show "Stop" if this index is the active recording one */}
+                  {isTranscribing && activeIndex === idx 
+                    ? "⌛..." 
+                    : (isRecording && activeIndex === idx) 
+                      ? "🛑 Stop" 
+                      : "🎤 Rec"
+                  }
                 </button>
               </div>
               <textarea
