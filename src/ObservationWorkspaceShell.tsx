@@ -2181,6 +2181,7 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
   const isPinned = pinnedRowIds.has(ind.id);
   const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
   const hasText = ind.commentText?.trim().length > 0;
+  const [isHovered, setIsHovered] = useState(false);
 
   const handleClick = () => {
     setActiveIndex(idx); 
@@ -2189,17 +2190,25 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
   };
 
   return (
-    <div 
+  <div
       key={ind.id} 
       className={`pc-row ${isExpanded ? "active" : ""}`}
       onClick={handleClick}
+      onMouseEnter={() => setIsHovered(true)}  // <--- ADD THIS
+      onMouseLeave={() => setIsHovered(false)} // <--- ADD THIS
       style={{
-        background: isExpanded ? "rgba(30, 41, 59, 0.9)" : "var(--bg-card)",
+        // 🟢 THE FIX: Change this background logic
+        background: isExpanded 
+          ? "rgba(30, 41, 59, 0.9)" 
+          : isHovered 
+            ? "rgba(51, 65, 85, 0.4)" // Highlight color on hover
+            : "var(--bg-card)",
+            
         border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
         padding: '12px 16px',
         borderRadius: '10px',
         marginBottom: '8px',
-        transition: "all 0.2s ease",
+        transition: "all 0.2s ease", // This ensures the hover is smooth
         cursor: "pointer",
         boxShadow: isExpanded ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
       }}
