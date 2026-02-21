@@ -3946,6 +3946,10 @@ const handleClick = () => {
       key={ind.id} 
       className={`pc-row ${isExpanded ? "active" : ""}`}
       onClick={handleClick}
+      onDoubleClick={(e) => {
+      e.stopPropagation();
+      togglePin(e, ind.id); // 📌 Double click to Pin/Unpin
+    }}
       onMouseEnter={() => setIsHovered(true)} 
       onMouseLeave={() => setIsHovered(false)}
       style={{
