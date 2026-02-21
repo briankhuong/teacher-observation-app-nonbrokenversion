@@ -359,8 +359,12 @@ function hasUserProgress(indicators: IndicatorState[]): boolean {
 export const ObservationWorkspaceShell: React.FC<
   ObservationWorkspaceProps
 > = ({ observationMeta, onBack, isOnline, isSyncing, setIsSyncing }) => {
-  const { user } = useAuth();
-  const trainerName = 
+const { user } = useAuth();
+const [indicators, setIndicators] =
+  useState<IndicatorState[]>(INITIAL_INDICATORS);
+const [activeRowId, setActiveRowId] = useState<string | null>(indicators[0]?.id || null);
+
+const trainerName = 
     user?.user_metadata?.full_name || 
     user?.user_metadata?.name || 
     user?.user_metadata?.display_name || 
@@ -394,6 +398,8 @@ const [isBatchOcrRunning, setIsBatchOcrRunning] = useState(false);
 const [batchOcrProgress, setBatchOcrProgress] = useState(""); // e.g., "Processing batch 1 of 3..."
 const [rescuedIds, setRescuedIds] = useState<{ teacher_id?: string; grapeseed_id?: string | null }>({});
 const [isMetadataReady, setIsMetadataReady] = useState(false);
+
+
 
 
 // Helper to extract IDs like "1.1", "3.4" from any messy string
@@ -746,8 +752,7 @@ useEffect(() => {
   isTextareaResizing, doTextareaResize, stopTextareaResize
 ]);
 
-const [indicators, setIndicators] =
-  useState<IndicatorState[]>(INITIAL_INDICATORS);
+
 
 const [previewEdits, setPreviewEdits] = useState<Record<string, { strengths: string, growths: string }>>({});
 const [activeIndex, setActiveIndex] = useState(0);
@@ -2406,224 +2411,84 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               </div>
 
               <div className="indicator-list">
-                {indicators.map((ind, idx) => {
-                  if (filterMode === "good" && !ind.good) return null;
-                  if (filterMode === "growth" && !ind.growth) return null;
-                  if (filterMode === "favorites" && !ind.favorite) return null;
-                  
-                  const showDescription = sidebarWidth > 380; 
-                  const showAdminLabel = sidebarWidth > 300; 
-                  const isDescExpanded = expandedDesc[ind.id];
+              {indicators.map((ind, idx) => {
+                // Apply existing filters
+                if (filterMode === "good" && !ind.good) return null;
+                if (filterMode === "growth" && !ind.growth) return null;
+                if (filterMode === "favorites" && !ind.favorite) return null;
 
-                  return (
-                    <div
-                      key={ind.id}
-                      data-indicator-id={ind.id}
-                      className={`indicator-row ${idx === activeIndex ? "active" : ""}`}
-                      onClick={() => {
-                        if (canvasDirty) {
-                          handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
-                          setCanvasDirty(false);
-                        }
-                        setActiveIndex(idx);
-                      }}
-                      style={{
-                        display: "flex",
-                        flexDirection: "column", 
-                        alignItems: "flex-start", 
-                        gap: 8, 
-                        padding: "12px 14px"
-                      }}
-                    >
-                      {/* --- TITLE (Wrapping Enabled) --- */}
-                      <div 
-                        className="indicator-title" 
-                        style={{ 
-                          width: "100%",
-                          whiteSpace: "normal", // 🟢 ALLOW WRAPPING
-                          textAlign: "left",
-                          fontSize: 14,
-                          fontWeight: 700,
-                          lineHeight: 1.3,
-                          color: "#f8fafc"
-                        }}
-                      >
-                        <span style={{ marginRight: 6, opacity: 0.8 }}>{ind.number}</span>
+                const isExpanded = activeRowId === ind.id;
+
+                return (
+                  <div 
+                    key={ind.id} 
+                    className={`pc-indicator-row ${isExpanded ? "expanded" : "compact"}`}
+                    onClick={() => setActiveRowId(ind.id)}
+                    style={{
+                      padding: isExpanded ? '20px' : '12px 20px',
+                      borderRadius: '12px',
+                      background: isExpanded ? "rgba(30, 41, 59, 0.8)" : "var(--bg-card)",
+                      border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
+                      transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+                      cursor: isExpanded ? "default" : "pointer",
+                      marginBottom: '8px',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {/* --- ROW HEADER (Always Visible) --- */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ fontSize: isExpanded ? 16 : 14, fontWeight: 700, color: "#f8fafc" }}>
+                        <span style={{ marginRight: 10, opacity: 0.5 }}>{ind.number}</span>
                         {ind.title}
                       </div>
 
-                      {/* --- DESCRIPTION --- */}
-                      {showDescription && (
-                        <div style={{ width: "100%", paddingLeft: 0, marginTop: 2 }}>
-                          <div
-                            style={isDescExpanded ? {
-                              // EXPANDED
-                              display: "block",
-                              whiteSpace: "pre-wrap",
-                              color: "#cbd5e1", 
-                              fontSize: 12, 
-                              lineHeight: 1.5,
-                              marginBottom: 4,
-                              overflow: "visible"
-                            } : {
-                              // COLLAPSED
-                              display: "-webkit-box",
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: "vertical",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "pre-wrap",
-                              color: "#cbd5e1", 
-                              fontSize: 12, 
-                              lineHeight: 1.5,
-                              marginBottom: 4
-                            }} 
-                          >
-                            {/* ⚠️ NOTE: If this text looks short, your browser is loading old saved draft data. */}
+                      {/* Status Icons (Visible when collapsed) */}
+                      {!isExpanded && (
+                        <div style={{ display: 'flex', gap: 8, opacity: 0.6 }}>
+                          {ind.strokes?.length > 0 && <span>✏️</span>}
+                          {ind.commentText?.trim().length > 0 && <span>📝</span>}
+                          {ind.ocrUsed && <span>🤖</span>}
+                          {ind.good && <span style={{ color: '#22c55e' }}>●</span>}
+                          {ind.growth && <span style={{ color: '#ef4444' }}>●</span>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* --- EXPANDABLE BODY (Phase 1: The Reveal) --- */}
+                    <div style={{ 
+                      maxHeight: isExpanded ? '1000px' : '0px', 
+                      opacity: isExpanded ? 1 : 0,
+                      transition: "all 0.3s ease-in-out",
+                      marginTop: isExpanded ? 16 : 0
+                    }}>
+                      {isExpanded && (
+                        <>
+                          <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 16, lineHeight: 1.5 }}>
                             {ind.description}
                           </div>
                           
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleDescription(ind.id);
-                            }}
-                            style={{ 
-                              background: "none", 
-                              border: "none", 
-                              padding: "4px 0",
-                              color: "var(--accent)", 
-                              fontSize: 12,
-                              fontWeight: 600,
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 4
-                            }}
-                          >
-                            {isDescExpanded ? (
-                              <>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
-                                See less
-                              </>
-                            ) : (
-                              <>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-                                See more
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      )}
-
-                      {/* --- ICONS --- */}
-                      <div 
-                        className="indicator-actions" 
-                        style={{ 
-                          marginTop: 4, 
-                          display: "flex", 
-                          alignItems: "center", 
-                          justifyContent: "flex-start", 
-                          gap: 10,
-                          width: "100%"
-                        }}
-                      >
-                        <div className="indicator-status-dots" onClick={(e) => e.stopPropagation()}>
-                          {ind.strokes && ind.strokes.length > 0 && <span className="indicator-dot indicator-dot-ink" />}
-                          {ind.commentText && ind.commentText.trim().length > 0 && <span className="indicator-dot indicator-dot-comment" />}
-                          {ind.ocrUsed && <span className="indicator-dot indicator-dot-ocr" />}
-                        </div>
-
-                        {showDescription && (
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={(e) => { e.stopPropagation(); toggleFavorite(idx); }}
-                          >
-                            {ind.favorite ? "⭐" : "☆"}
-                          </button>
-                        )}
-
-                        <button
-                          type="button"
-                          className={`btn rating-btn rating-good ${ind.good ? "rating-selected" : ""}`}
-                          onClick={(e) => { e.stopPropagation(); toggleGood(idx); }}
-                        >
-                          ✓
-                        </button>
-
-                        <button
-                          type="button"
-                          className={`btn rating-btn rating-growth ${ind.growth ? "rating-selected" : ""}`}
-                          onClick={(e) => { e.stopPropagation(); toggleGrowth(idx); }}
-                        >
-                          ✕
-                        </button>
-                        {/* 🟢 NEW: Insert Pre-Comment Button (Styled & Always Visible) */}
-                        {ind.hasPreComment && (
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={(e) => { e.stopPropagation(); insertPreComment(idx); }}
-                            title="Insert default comment"
+                          {/* YOUR EXISTING TOOLS GO HERE:
+                            - Good/Growth buttons
+                            - Record/AI Polish buttons
+                            - Textarea
+                          */}
+                          <textarea
+                            autoFocus
+                            value={ind.commentText}
+                            onChange={(e) => handleCommentChange(idx, e.target.value)}
+                            placeholder="Type comments here..."
                             style={{
-                              // Match the size/shape of the Good/Growth buttons
-                              width: 32, 
-                              height: 32,
-                              padding: 0,
-                              borderRadius: "50%", // Circular
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              background: "transparent",
-                              border: "1px solid #475569", // Muted border color
-                              color: "#94a3b8",            // Muted icon color
-                              transition: "all 0.2s"
+                              width: "100%", minHeight: 120, borderRadius: 10, padding: 12,
+                              fontSize: 13, background: "#020617", color: "var(--text)",
+                              border: "1px solid #334155", resize: "vertical", outline: "none"
                             }}
-                            // Add hover effect via inline styles or class if you prefer
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.borderColor = "#60a5fa"; // Blue on hover
-                              e.currentTarget.style.color = "#60a5fa";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.borderColor = "#475569";
-                              e.currentTarget.style.color = "#94a3b8";
-                            }}
-                          >
-                            {/* Chat Bubble with Dots Icon */}
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
-                              {/* Small dots inside */}
-                              <circle cx="8" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
-                              <circle cx="12" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
-                              <circle cx="16" cy="11" r="0.5" fill="currentColor" stroke="none"></circle>
-                            </svg>
-                          </button>
-                        )}
-
-                        <label
-                          onClick={(e) => e.stopPropagation()}
-                          style={{
-                            marginLeft: "auto", 
-                            display: "flex", alignItems: "center", gap: 6,
-                            fontSize: 10, color: "var(--text-muted)", cursor: "pointer",
-                            whiteSpace: "nowrap"
-                          }}
-                          title="Include in Admin Report"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!!ind.includeInTrainerSummary}
-                            onChange={() => toggleIncludeInTrainerSummary(idx)}
-                            style={{ width: 14, height: 14, accentColor: "var(--accent)" }}
                           />
-                          {showAdminLabel && <span>Admin report</span>}
-                        </label>
-                      </div>
+                        </>
+                      )}
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })}
               </div> 
             </div>
         {/* 2. THE VISIBLE RESIZE HANDLE (Updated visual state) */}
@@ -2816,150 +2681,118 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               ) : (
                 <>
           {isDesktopMode ? (
-              <div 
-                className="pc-scroll-feed" 
-                style={{ 
-                  overflowY: 'auto', 
-                  padding: '24px', 
-                  display: 'flex', 
-                  flexDirection: "column", 
-                  gap: '20px',
-                  height: '100%' 
-                }}
-              >
-                {indicators.map((ind, idx) => {
-                  // Apply existing sidebar filters to the feed
-                  if (filterMode === "good" && !ind.good) return null;
-                  if (filterMode === "growth" && !ind.growth) return null;
-                  if (filterMode === "favorites" && !ind.favorite) return null;
+          <div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
+            {indicators.map((ind, idx) => {
+              if (filterMode === "good" && !ind.good) return null;
+              if (filterMode === "growth" && !ind.growth) return null;
+              if (filterMode === "favorites" && !ind.favorite) return null;
 
-                  return (
-                    <div 
-                      key={ind.id} 
-                      className="pc-indicator-card"
-                      onClick={() => setActiveIndex(idx)}
-                      style={{
-                        padding: '20px',
-                        borderRadius: '12px',
-                        background: idx === activeIndex ? "rgba(30, 41, 59, 0.8)" : "var(--bg-card)",
-                        border: idx === activeIndex ? "1px solid var(--accent)" : "1px solid #334155",
-                        transition: "all 0.2s",
-                        boxShadow: idx === activeIndex ? "0 4px 20px rgba(0,0,0,0.3)" : "none"
-                      }}
-                    >
-                      {/* 1. Card Title & Description */}
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc", marginBottom: 6 }}>
-                        <span style={{ marginRight: 10, opacity: 0.5 }}>{ind.number}</span>
-                        {ind.title}
-                      </div>
-                      <div style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 16, lineHeight: 1.5 }}>
-                        {ind.description}
-                      </div>
+              const isExpanded = activeRowId === ind.id;
 
-                      {/* 2. Button Row: Good | Growth | Comment | Admin | Record | AI Polish */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-                        
-                        {/* Good Toggle */}
-                        <button 
-                          type="button" 
-                          onClick={(e) => { e.stopPropagation(); toggleGood(idx); }}
-                          style={{ 
-                            width: 32, height: 32, borderRadius: "50%", padding: 0,
-                            background: ind.good ? "var(--color-good, #22c55e)" : "transparent",
-                            border: ind.good ? "none" : "1px solid #334155",
-                            color: ind.good ? "white" : "#94a3b8", cursor: "pointer"
-                          }}
-                        >✓</button>
-                        
-                        {/* Growth Toggle */}
-                        <button 
-                          type="button" 
-                          onClick={(e) => { e.stopPropagation(); toggleGrowth(idx); }}
-                          style={{ 
-                            width: 32, height: 32, borderRadius: "50%", padding: 0,
-                            background: ind.growth ? "var(--color-growth, #ef4444)" : "transparent",
-                            border: ind.growth ? "none" : "1px solid #334155",
-                            color: ind.growth ? "white" : "#94a3b8", cursor: "pointer"
-                          }}
-                        >✕</button>
+              return (
+                <div 
+                  key={ind.id} 
+                  className={`pc-row ${isExpanded ? "active" : ""}`}
+                  onClick={() => setActiveRowId(ind.id)}
+                  style={{
+                    background: isExpanded ? "rgba(30, 41, 59, 0.8)" : "var(--bg-card)",
+                    border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
+                    padding: '12px 16px',
+                    borderRadius: '10px',
+                    marginBottom: '8px',
+                    transition: "all 0.2s ease-in-out",
+                    cursor: "pointer"
+                  }}
+                >
+                  {/* --- ROW HEADER (Always Visible) --- */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      {/* Indicators left-border status color */}
+                      <div style={{ 
+                        width: 4, height: 24, borderRadius: 2,
+                        background: ind.good ? "#22c55e" : ind.growth ? "#ef4444" : "#475569" 
+                      }} />
+                      <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 13 }}>{ind.number}</span>
+                      <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: 14 }}>{ind.title}</span>
+                    </div>
 
-                        {/* Comment Icon (Insert Pre-comment) */}
-                        {ind.hasPreComment && (
-                          <button 
-                            type="button" 
-                            onClick={(e) => { e.stopPropagation(); insertPreComment(idx); }}
-                            style={{ width: 32, height: 32, borderRadius: "50%", padding: 0, border: "1px solid #475569", background: "transparent", color: "#94a3b8", cursor: "pointer" }}
-                          >💬</button>
-                        )}
+                    {/* ⚡ PHASE 2: QUICK-MARK ACTION GUTTER */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      
+                      {/* Status Icons (Tiny visual progress) */}
+                      {!isExpanded && (
+                        <div style={{ display: "flex", gap: 6, marginRight: 12, opacity: 0.4 }}>
+                          {ind.strokes?.length > 0 && <span title="Has Drawing">✏️</span>}
+                          {ind.commentText?.trim().length > 0 && <span title="Has Text">📝</span>}
+                        </div>
+                      )}
 
-                        {/* Admin Report Checkbox */}
-                        <label onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", cursor: "pointer", marginLeft: 4 }}>
-                          <input 
-                            type="checkbox" 
-                            checked={!!ind.includeInTrainerSummary} 
-                            onChange={() => toggleIncludeInTrainerSummary(idx)} 
-                            style={{ accentColor: "var(--accent)", cursor: "pointer" }}
-                          />
-                          Admin
-                        </label>
-
-                        {/* Vertical Divider */}
-                        <div style={{ width: 1, height: 20, background: "#334155", margin: "0 4px" }} />
-
-                        {/* Record Button */}
-                        <button 
-                          type="button" 
-                          className="btn"
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setActiveIndex(idx); 
-                            isRecording ? stopRecording('indicator') : startRecording(); 
-                          }}
-                          style={{ 
-                            background: isRecording && activeIndex === idx ? "#ef4444" : "transparent",
-                            border: "1px solid var(--accent)",
-                            color: isRecording && activeIndex === idx ? "white" : "var(--accent)",
-                            padding: "4px 12px", fontSize: 12, borderRadius: 6
-                          }}
-                        >
-                          {isTranscribing && activeIndex === idx ? "⌛..." : isRecording && activeIndex === idx ? "🛑 Stop" : "🎤 Rec"}
-                        </button>
-
-                        {/* AI Polish Button */}
-                        <button 
-                          type="button" 
-                          className="btn"
-                          onClick={(e) => { e.stopPropagation(); setActiveIndex(idx); handlePolishWithAi(); }}
-                          disabled={isAiPolishing || ind.commentText.trim().length < 5}
-                          style={{ border: "1px solid #475569", padding: "4px 12px", fontSize: 12, borderRadius: 6 }}
-                        >
-                          {isAiPolishing && activeIndex === idx ? "✨ Polishing..." : "✨ AI Polish"}
-                        </button>
-                      </div>
-
-                      {/* 3. Textarea */}
-                      <textarea
-                        value={ind.commentText}
-                        onFocus={() => setActiveIndex(idx)}
-                        onChange={(e) => handleCommentChange(idx, e.target.value)}
-                        placeholder="Type comments here..."
+                      {/* Quick Good Toggle */}
+                      <button
+                        type="button"
+                        className="quick-btn"
+                        onClick={(e) => { e.stopPropagation(); toggleGood(idx); }}
                         style={{
-                          width: "100%", 
-                          minHeight: 100, 
-                          borderRadius: 10, 
-                          padding: 12, 
-                          fontSize: 13,
-                          background: "#020617", 
-                          color: "var(--text)", 
-                          border: "1px solid #334155", 
-                          resize: "vertical",
-                          outline: "none"
+                          width: 28, height: 28, borderRadius: "50%", border: "1px solid #334155",
+                          background: ind.good ? "#22c55e" : "transparent",
+                          color: ind.good ? "white" : "#94a3b8", fontSize: 12
                         }}
+                      >✓</button>
+
+                      {/* Quick Growth Toggle */}
+                      <button
+                        type="button"
+                        className="quick-btn"
+                        onClick={(e) => { e.stopPropagation(); toggleGrowth(idx); }}
+                        style={{
+                          width: 28, height: 28, borderRadius: "50%", border: "1px solid #334155",
+                          background: ind.growth ? "#ef4444" : "transparent",
+                          color: ind.growth ? "white" : "#94a3b8", fontSize: 12
+                        }}
+                      >✕</button>
+
+                      {/* Quick Admin Toggle */}
+                      <input 
+                        type="checkbox"
+                        checked={!!ind.includeInTrainerSummary}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleIncludeInTrainerSummary(idx)}
+                        style={{ marginLeft: 4, accentColor: "var(--accent)" }}
                       />
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+
+                  {/* --- EXPANDABLE BODY --- */}
+                  {isExpanded && (
+                    <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
+                      <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: 12 }}>{ind.description}</p>
+                      
+                      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                        <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); handlePolishWithAi(); }} disabled={isAiPolishing || ind.commentText.length < 5}>
+                          {isAiPolishing ? "✨..." : "✨ AI Polish"}
+                        </button>
+                        <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); startRecording(); }}>
+                          🎤 Record
+                        </button>
+                      </div>
+
+                      <textarea
+                        autoFocus
+                        value={ind.commentText}
+                        onChange={(e) => handleCommentChange(idx, e.target.value)}
+                        style={{
+                          width: "100%", minHeight: 120, background: "#020617", color: "white",
+                          padding: 12, borderRadius: 8, border: "1px solid #475569", outline: "none"
+                        }}
+                        placeholder="Type your observations here..."
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
             ) : (
             <div className="canvas-card">
 
