@@ -368,15 +368,15 @@ const [activeRowId, setActiveRowId] = useState<string | null>(indicators[0]?.id 
 // Tracks which rows are "Locked" (Pinned state)
 const [pinnedRowIds, setPinnedRowIds] = useState<Set<string>>(new Set());
 
-// 🟢 Helper to toggle a row's expansion (Accordion Logic)
+// 🟢 FIXED: Unified Accordion Logic for BOTH PC and iPad modes
 const handleRowToggle = (id: string) => {
   setOpenRowIds(prev => {
     const next = new Set(prev);
     if (next.has(id)) {
-      // If it's already open AND not pinned, we can close it
+      // If clicking an already open row, close it (unless it's pinned)
       if (!pinnedRowIds.has(id)) next.delete(id);
     } else {
-      // Opening a new one: Clear all OTHER unpinned rows first
+      // 🟢 ACCORDION: Clear all other unpinned rows before opening the new one
       next.forEach(openId => {
         if (!pinnedRowIds.has(openId)) next.delete(openId);
       });
@@ -384,6 +384,25 @@ const handleRowToggle = (id: string) => {
     }
     return next;
   });
+  // Keep activeRowId in sync for highlighting
+  setActiveRowId(id);
+};
+
+// 🟢 FIXED: Master Command logic
+const handleToggleAll = () => {
+  const allIds = indicators.map(ind => ind.id);
+  // Strictly check if EVERY row is open
+  const isEverythingOpen = openRowIds.size === indicators.length;
+
+  if (isEverythingOpen) {
+    // If full, collapse everything
+    setOpenRowIds(new Set());
+    setPinnedRowIds(new Set()); 
+    setActiveRowId(null);
+  } else {
+    // If NOT full (even if 1 is open), force everything to open
+    setOpenRowIds(new Set(allIds));
+  }
 };
 
 // 🟢 Helper to toggle a pin
@@ -2826,7 +2845,18 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               ) : (
                 <>
           {isDesktopMode ? (
-<div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
+  <div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
+    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+{/* 🟢 FIXED: Synchronized PC mode label with the master logic */}
+<button 
+  type="button" 
+  className="btn" 
+  onClick={handleToggleAll}
+  style={{ background: "rgba(30, 41, 59, 0.5)", border: "1px solid #334155", color: "#94a3b8", fontSize: 12 }}
+>
+  {openRowIds.size === indicators.length ? "▲ Collapse All Rows" : "▼ Expand All Rows"}
+</button>
+    </div>
     {indicators.map((ind, idx) => {
       if (filterMode === "good" && !ind.good) return null;
       if (filterMode === "growth" && !ind.growth) return null;
@@ -2859,7 +2889,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
         />
       );
     })}
-  </div>
+</div>
             ) : (
             <div className="canvas-card">
 
@@ -3878,8 +3908,10 @@ const IndicatorRow = React.memo(({
   insertPreComment, toggleGood, toggleGrowth, toggleIncludeInTrainerSummary,
   handlePolishWithAi, startRecording, stopRecording, handleCommentChange
 }: IndicatorRowProps) => {
-   // ... rest of the component body
-  const isExpanded = isSidebar ? openRowIds.has(ind.id) : (activeRowId === ind.id || pinnedRowIds.has(ind.id));
+const isExpanded = 
+  openRowIds.has(ind.id) ||   // 🟢 Priority: Global Expand/Collapse state
+  activeRowId === ind.id ||   // Individual selection
+  pinnedRowIds.has(ind.id);   // Individual pins
   const isPinned = pinnedRowIds.has(ind.id);
   const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
   const hasText = ind.commentText?.trim().length > 0;
@@ -3900,11 +3932,14 @@ useEffect(() => {
     }
   }, [isExpanded, isSidebar]);
 
-  const handleClick = () => {
-    setActiveIndex(idx); 
-    if (isSidebar) handleRowToggle(ind.id);
-    else setActiveRowId(ind.id);
-  };
+// 🟢 FIXED: Removed the out-of-scope 'indicators' reference
+const handleClick = () => {
+  // We use the 'idx' prop passed from the parent map instead of searching the array
+  setActiveIndex(idx); 
+  
+  // Triggers the accordion logic in the parent shell
+  handleRowToggle(ind.id); 
+};
 
   return (
   <div
