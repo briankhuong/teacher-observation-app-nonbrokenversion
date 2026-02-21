@@ -2175,154 +2175,6 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
     </>
   );
 
-// 🟢 REFACTORED UNIFIED ROW COMPONENT
-const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, idx: number, isSidebar?: boolean }) => {
-  const isExpanded = isSidebar ? openRowIds.has(ind.id) : (activeRowId === ind.id || pinnedRowIds.has(ind.id));
-  const isPinned = pinnedRowIds.has(ind.id);
-  const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
-  const hasText = ind.commentText?.trim().length > 0;
-  const [isHovered, setIsHovered] = useState(false);
-
-  // 🟢 WARNING LOGIC: Proactive checks for PC Mode
-  const isMissingComment = (ind.good || ind.growth) && !hasText;
-  const needsReview = !!(ind.ocrPendingReview || ind.aiPendingReview);
-  const convertInk = !!(hasInk && !ind.ocrUsed);
-
-  const handleClick = () => {
-    setActiveIndex(idx); 
-    if (isSidebar) handleRowToggle(ind.id);
-    else setActiveRowId(ind.id);
-  };
-
-  return (
-  <div
-      key={ind.id} 
-      className={`pc-row ${isExpanded ? "active" : ""}`}
-      onClick={handleClick}
-      onMouseEnter={() => setIsHovered(true)} 
-      onMouseLeave={() => setIsHovered(false)}
-      style={{
-        background: isExpanded 
-          ? "rgba(30, 41, 59, 0.9)" 
-          : isHovered 
-            ? "rgba(51, 65, 85, 0.4)" 
-            : "var(--bg-card)",
-            
-        border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
-        padding: '12px 16px',
-        borderRadius: '10px',
-        marginBottom: '8px',
-        transition: "all 0.2s ease",
-        cursor: "pointer",
-        boxShadow: isExpanded ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 4, height: 24, borderRadius: 2, background: ind.good ? "#22c55e" : ind.growth ? "#ef4444" : "#475569" }} />
-          <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 13 }}>{ind.number}</span>
-          <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: 14 }}>{ind.title}</span>
-
-          {/* 🟢 UNIFIED PILL CONTAINER */}
-          <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
-              {/* Standard Status (Only when Collapsed) */}
-              {!isExpanded && (
-                <>
-                    {hasInk && <span style={pillStyle("#3b82f6")}>Ink</span>}
-                    {hasText && <span style={pillStyle("#a855f7")}>Text</span>}
-                    {ind.ocrUsed && <span style={pillStyle("#eab308")}>OCR</span>}
-                </>
-              )}
-
-              {/* Warnings (Always visible in PC Mode) */}
-              {!isSidebar && (
-                <>
-                    {isMissingComment && <span style={pillStyle("#ef4444")}>Missing Comment</span>}
-                    {needsReview && <span style={pillStyle("#eab308")}>Needs Review</span>}
-                    {convertInk && <span style={pillStyle("#3b82f6")}>Convert Ink</span>}
-                </>
-              )}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {ind.hasPreComment && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); insertPreComment(idx); }}
-              style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", opacity: 0.6 }}>💬</button>
-          )}
-          <button type="button" onClick={(e) => { e.stopPropagation(); toggleGood(idx); }} style={quickMarkStyle(ind.good, "#22c55e")}>✓</button>
-          <button type="button" onClick={(e) => { e.stopPropagation(); toggleGrowth(idx); }} style={quickMarkStyle(ind.growth, "#ef4444")}>✕</button>
-          
-          <button type="button" onClick={(e) => togglePin(e, ind.id)}
-            style={{ background: "none", border: "none", fontSize: 16, opacity: isPinned ? 1 : 0.2, filter: isPinned ? "none" : "grayscale(1)" }}>📌</button>
-
-          <input type="checkbox" checked={!!ind.includeInTrainerSummary} onClick={(e) => e.stopPropagation()} onChange={() => toggleIncludeInTrainerSummary(idx)}
-             style={{ marginLeft: 4, accentColor: "var(--accent)" }} />
-        </div>
-      </div>
-
-      {isExpanded && (
-        <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
-          <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: isSidebar ? 0 : 12 }}>{ind.description}</p>
-          
-          {!isSidebar && (
-            <>
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <button 
-                  type="button" 
-                  className="btn" 
-                  onClick={(e) => { e.stopPropagation(); handlePolishWithAi(); }} 
-                  disabled={isAiPolishing || ind.commentText.length < 5}
-                >
-                  {isAiPolishing ? "✨..." : "✨ AI Polish"}
-                </button>
-                <button  
-                  type="button"  
-                  className="btn"
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    setActiveIndex(idx); 
-                    isRecording ? stopRecording('indicator') : startRecording(); 
-                  }}
-                  style={{ 
-                    background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
-                    border: "1px solid var(--accent)",
-                    color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
-                    padding: "4px 12px", fontSize: 12, borderRadius: 20
-                  }}
-                >
-                  {isTranscribing && activeIndex === idx 
-                    ? "⌛..." 
-                    : (isRecording && activeIndex === idx) 
-                      ? "🛑 Stop" 
-                      : "🎤 Rec"
-                  }
-                </button>
-              </div>
-              <textarea
-                autoFocus
-                value={ind.commentText}
-                onChange={(e) => handleCommentChange(idx, e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                style={{ 
-                    width: "100%", 
-                    minHeight: 120, 
-                    background: "#020617", 
-                    color: "white", 
-                    padding: 12, 
-                    borderRadius: 8, 
-                    border: isMissingComment ? "1px solid #ef4444" : needsReview ? "1px solid #eab308" : "1px solid #475569" 
-                }}
-                placeholder="Type your observations here..."
-              />
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
   return (
     <div className="workspace-root">
       <div className="workspace-top-bar"
@@ -2974,15 +2826,40 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
               ) : (
                 <>
           {isDesktopMode ? (
-            <div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
-              {indicators.map((ind, idx) => {
-                if (filterMode === "good" && !ind.good) return null;
-                if (filterMode === "growth" && !ind.growth) return null;
-                if (filterMode === "favorites" && !ind.favorite) return null;
-                // 🟢 Use the new component with isSidebar=false
-                return <IndicatorRow key={ind.id} ind={ind} idx={idx} isSidebar={false} />;
-              })}
-            </div>
+<div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
+    {indicators.map((ind, idx) => {
+      if (filterMode === "good" && !ind.good) return null;
+      if (filterMode === "growth" && !ind.growth) return null;
+      if (filterMode === "favorites" && !ind.favorite) return null;
+
+      return (
+        <IndicatorRow 
+          key={ind.id} 
+          ind={ind} 
+          idx={idx} 
+          activeRowId={activeRowId}
+          openRowIds={openRowIds}
+          pinnedRowIds={pinnedRowIds}
+          activeIndex={activeIndex}
+          isAiPolishing={isAiPolishing}
+          isRecording={isRecording}
+          isTranscribing={isTranscribing}
+          setActiveIndex={setActiveIndex}
+          handleRowToggle={handleRowToggle}
+          setActiveRowId={setActiveRowId}
+          togglePin={togglePin}
+          insertPreComment={insertPreComment}
+          toggleGood={toggleGood}
+          toggleGrowth={toggleGrowth}
+          toggleIncludeInTrainerSummary={toggleIncludeInTrainerSummary}
+          handlePolishWithAi={handlePolishWithAi}
+          startRecording={startRecording}
+          stopRecording={stopRecording}
+          handleCommentChange={handleCommentChange}
+        />
+      );
+    })}
+  </div>
             ) : (
             <div className="canvas-card">
 
@@ -3967,4 +3844,167 @@ const quickMarkStyle = (active: boolean, color: string) => ({
   display: "flex",
   alignItems: "center",
   justifyContent: "center"
+});
+
+interface IndicatorRowProps {
+  ind: IndicatorState;
+  idx: number;
+  isSidebar?: boolean;
+  activeRowId: string | null;
+  openRowIds: Set<string>;
+  pinnedRowIds: Set<string>;
+  activeIndex: number;
+  isAiPolishing: boolean;
+  isRecording: boolean;
+  isTranscribing: boolean;
+  setActiveIndex: (idx: number) => void;
+  handleRowToggle: (id: string) => void;
+  setActiveRowId: (id: string) => void;
+  togglePin: (e: React.MouseEvent, id: string) => void;
+  insertPreComment: (idx: number) => void;
+  toggleGood: (idx: number) => void;
+  toggleGrowth: (idx: number) => void;
+  toggleIncludeInTrainerSummary: (idx: number) => void;
+  handlePolishWithAi: () => void;
+  startRecording: () => void;
+  stopRecording: (target: 'indicator' | 'admin') => void;
+  handleCommentChange: (idx: number, val: string) => void;
+}  
+// 🟢 REFACTORED UNIFIED ROW COMPONENT
+const IndicatorRow = React.memo(({ 
+  ind, idx, isSidebar = false, activeRowId, openRowIds, pinnedRowIds, 
+  activeIndex, isAiPolishing, isRecording, isTranscribing,
+  setActiveIndex, handleRowToggle, setActiveRowId, togglePin,
+  insertPreComment, toggleGood, toggleGrowth, toggleIncludeInTrainerSummary,
+  handlePolishWithAi, startRecording, stopRecording, handleCommentChange
+}: IndicatorRowProps) => {
+   // ... rest of the component body
+  const isExpanded = isSidebar ? openRowIds.has(ind.id) : (activeRowId === ind.id || pinnedRowIds.has(ind.id));
+  const isPinned = pinnedRowIds.has(ind.id);
+  const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
+  const hasText = ind.commentText?.trim().length > 0;
+  const [isHovered, setIsHovered] = useState(false);
+
+  // 🟢 STABILIZER: Ref for the textarea to replace jumpy autoFocus
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 🟢 WARNING LOGIC: (Identical to your snippet)
+  const isMissingComment = (ind.good || ind.growth) && !hasText;
+  const needsReview = !!(ind.ocrPendingReview || ind.aiPendingReview);
+  const convertInk = !!(hasInk && !ind.ocrUsed);
+
+  // 🟢 STABILIZER: Focus without scrolling when expanding
+useEffect(() => {
+    if (isExpanded && !isSidebar && textareaRef.current) {
+      textareaRef.current.focus({ preventScroll: true });
+    }
+  }, [isExpanded, isSidebar]);
+
+  const handleClick = () => {
+    setActiveIndex(idx); 
+    if (isSidebar) handleRowToggle(ind.id);
+    else setActiveRowId(ind.id);
+  };
+
+  return (
+  <div
+      key={ind.id} 
+      className={`pc-row ${isExpanded ? "active" : ""}`}
+      onClick={handleClick}
+      onMouseEnter={() => setIsHovered(true)} 
+      onMouseLeave={() => setIsHovered(false)}
+      style={{
+        background: isExpanded ? "rgba(30, 41, 59, 0.9)" : isHovered ? "rgba(51, 65, 85, 0.4)" : "var(--bg-card)",
+        border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
+        padding: '12px 16px',
+        borderRadius: '10px',
+        marginBottom: '8px',
+        transition: "all 0.2s ease",
+        cursor: "pointer",
+        boxShadow: isExpanded ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 4, height: 24, borderRadius: 2, background: ind.good ? "#22c55e" : ind.growth ? "#ef4444" : "#475569" }} />
+          <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 13 }}>{ind.number}</span>
+          <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: 14 }}>{ind.title}</span>
+
+          <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
+              {!isExpanded && (
+                <>
+                    {hasInk && <span style={pillStyle("#3b82f6")}>Ink</span>}
+                    {hasText && <span style={pillStyle("#a855f7")}>Text</span>}
+                    {ind.ocrUsed && <span style={pillStyle("#eab308")}>OCR</span>}
+                </>
+              )}
+              {!isSidebar && (
+                <>
+                    {isMissingComment && <span style={pillStyle("#ef4444")}>Missing Comment</span>}
+                    {needsReview && <span style={pillStyle("#eab308")}>Needs Review</span>}
+                    {convertInk && <span style={pillStyle("#3b82f6")}>Convert Ink</span>}
+                </>
+              )}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {ind.hasPreComment && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); insertPreComment(idx); }}
+              style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", opacity: 0.6 }}>💬</button>
+          )}
+          <button type="button" onClick={(e) => { e.stopPropagation(); toggleGood(idx); }} style={quickMarkStyle(ind.good, "#22c55e")}>✓</button>
+          <button type="button" onClick={(e) => { e.stopPropagation(); toggleGrowth(idx); }} style={quickMarkStyle(ind.growth, "#ef4444")}>✕</button>
+          
+          {/* 🟢 FIXED: Added e.stopPropagation() to prevent Pinning from triggering handleClick/Expansion */}
+          <button type="button" onClick={(e) => { e.stopPropagation(); togglePin(e, ind.id); }}
+            style={{ background: "none", border: "none", fontSize: 16, opacity: isPinned ? 1 : 0.2, filter: isPinned ? "none" : "grayscale(1)" }}>📌</button>
+
+          <input type="checkbox" checked={!!ind.includeInTrainerSummary} onClick={(e) => e.stopPropagation()} onChange={() => toggleIncludeInTrainerSummary(idx)}
+             style={{ marginLeft: 4, accentColor: "var(--accent)" }} />
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
+          <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: isSidebar ? 0 : 12 }}>{ind.description}</p>
+          
+          {!isSidebar && (
+            <>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <button type="button" className="btn" onClick={(e) => { e.stopPropagation();setActiveIndex(idx); handlePolishWithAi(); }} disabled={isAiPolishing || ind.commentText.length < 5}>
+                  {isAiPolishing ? "✨..." : "✨ AI Polish"}
+                </button>
+                <button type="button" className="btn" onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setActiveIndex(idx); 
+                    isRecording ? stopRecording('indicator') : startRecording(); 
+                  }}
+                  style={{ 
+                    background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
+                    border: "1px solid var(--accent)",
+                    color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
+                    padding: "4px 12px", fontSize: 12, borderRadius: 20
+                  }}
+                >
+                  {isTranscribing && activeIndex === idx ? "⌛..." : (isRecording && activeIndex === idx) ? "🛑 Stop" : "🎤 Rec"}
+                </button>
+              </div>
+              <textarea
+                ref={textareaRef} // 🟢 STABILIZER: Controlled focus
+                value={ind.commentText}
+                onChange={(e) => handleCommentChange(idx, e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                style={{ 
+                    width: "100%", minHeight: 120, background: "#020617", color: "white", padding: 12, borderRadius: 8, 
+                    border: isMissingComment ? "1px solid #ef4444" : needsReview ? "1px solid #eab308" : "1px solid #475569" 
+                }}
+                placeholder="Type your observations here..."
+              />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 });
