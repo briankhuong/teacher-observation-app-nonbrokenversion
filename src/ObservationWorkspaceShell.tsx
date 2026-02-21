@@ -2183,6 +2183,11 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
   const hasText = ind.commentText?.trim().length > 0;
   const [isHovered, setIsHovered] = useState(false);
 
+  // 🟢 WARNING LOGIC: Proactive checks for PC Mode
+  const isMissingComment = (ind.good || ind.growth) && !hasText;
+  const needsReview = !!(ind.ocrPendingReview || ind.aiPendingReview);
+  const convertInk = !!(hasInk && !ind.ocrUsed);
+
   const handleClick = () => {
     setActiveIndex(idx); 
     if (isSidebar) handleRowToggle(ind.id);
@@ -2194,21 +2199,20 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
       key={ind.id} 
       className={`pc-row ${isExpanded ? "active" : ""}`}
       onClick={handleClick}
-      onMouseEnter={() => setIsHovered(true)}  // <--- ADD THIS
-      onMouseLeave={() => setIsHovered(false)} // <--- ADD THIS
+      onMouseEnter={() => setIsHovered(true)} 
+      onMouseLeave={() => setIsHovered(false)}
       style={{
-        // 🟢 THE FIX: Change this background logic
         background: isExpanded 
           ? "rgba(30, 41, 59, 0.9)" 
           : isHovered 
-            ? "rgba(51, 65, 85, 0.4)" // Highlight color on hover
+            ? "rgba(51, 65, 85, 0.4)" 
             : "var(--bg-card)",
             
         border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
         padding: '12px 16px',
         borderRadius: '10px',
         marginBottom: '8px',
-        transition: "all 0.2s ease", // This ensures the hover is smooth
+        transition: "all 0.2s ease",
         cursor: "pointer",
         boxShadow: isExpanded ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
       }}
@@ -2219,13 +2223,26 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
           <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 13 }}>{ind.number}</span>
           <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: 14 }}>{ind.title}</span>
 
-          {!isExpanded && (
-            <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
-                {hasInk && <span style={pillStyle("#3b82f6")}>Ink</span>}
-                {hasText && <span style={pillStyle("#a855f7")}>Text</span>}
-                {ind.ocrUsed && <span style={pillStyle("#eab308")}>OCR</span>}
-            </div>
-          )}
+          {/* 🟢 UNIFIED PILL CONTAINER */}
+          <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
+              {/* Standard Status (Only when Collapsed) */}
+              {!isExpanded && (
+                <>
+                    {hasInk && <span style={pillStyle("#3b82f6")}>Ink</span>}
+                    {hasText && <span style={pillStyle("#a855f7")}>Text</span>}
+                    {ind.ocrUsed && <span style={pillStyle("#eab308")}>OCR</span>}
+                </>
+              )}
+
+              {/* Warnings (Always visible in PC Mode) */}
+              {!isSidebar && (
+                <>
+                    {isMissingComment && <span style={pillStyle("#ef4444")}>Missing Comment</span>}
+                    {needsReview && <span style={pillStyle("#eab308")}>Needs Review</span>}
+                    {convertInk && <span style={pillStyle("#3b82f6")}>Convert Ink</span>}
+                </>
+              )}
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2246,7 +2263,6 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
 
       {isExpanded && (
         <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
-          {/* 🟢 THE FIX: Only show the description if in Sidebar. Hide all editor tools. */}
           <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: isSidebar ? 0 : 12 }}>{ind.description}</p>
           
           {!isSidebar && (
@@ -2260,7 +2276,6 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
                 >
                   {isAiPolishing ? "✨..." : "✨ AI Polish"}
                 </button>
-                {/* Record Button */}
                 <button  
                   type="button"  
                   className="btn"
@@ -2270,14 +2285,12 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
                     isRecording ? stopRecording('indicator') : startRecording(); 
                   }}
                   style={{ 
-                    // Red background ONLY if this specific card is recording
                     background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
                     border: "1px solid var(--accent)",
                     color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
                     padding: "4px 12px", fontSize: 12, borderRadius: 20
                   }}
                 >
-                  {/* 🟢 THE FIX: Only show "Stop" if this index is the active recording one */}
                   {isTranscribing && activeIndex === idx 
                     ? "⌛..." 
                     : (isRecording && activeIndex === idx) 
@@ -2291,7 +2304,15 @@ const IndicatorRow = ({ ind, idx, isSidebar = false }: { ind: IndicatorState, id
                 value={ind.commentText}
                 onChange={(e) => handleCommentChange(idx, e.target.value)}
                 onClick={(e) => e.stopPropagation()}
-                style={{ width: "100%", minHeight: 120, background: "#020617", color: "white", padding: 12, borderRadius: 8, border: ind.ocrPendingReview ? "1px solid #facc15" : "1px solid #475569" }}
+                style={{ 
+                    width: "100%", 
+                    minHeight: 120, 
+                    background: "#020617", 
+                    color: "white", 
+                    padding: 12, 
+                    borderRadius: 8, 
+                    border: isMissingComment ? "1px solid #ef4444" : needsReview ? "1px solid #eab308" : "1px solid #475569" 
+                }}
                 placeholder="Type your observations here..."
               />
             </>
