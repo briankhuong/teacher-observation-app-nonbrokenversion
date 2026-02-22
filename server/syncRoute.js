@@ -42,193 +42,39 @@ async function pMap(array, mapper, { concurrency = 20 } = {}) {
 
 router.post("/api/sync-teachers", async (req, res) => {
   const { token, userId } = req.body;
-  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
-
-  const startTime = Date.now();
-  const logs = [];
-  const log = (m) => { console.log(m); logs.push(m); };
-  const touchedTeacherIds = new Set();
-
-  try {
-    /* 1. TRAINER IDENTITY (Exact split logic) */
-    const { data: { user: trainerUser }, error: userErr } = await supabase.auth.admin.getUserById(userId);
-    if (userErr || !trainerUser) throw new Error("Trainer not found");
-    const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0]; 
-    log(`👤 Syncing for Trainer: "${myName}"`);
-
-    /* 2. GET ALL ACTIVE SCHOOLS */
-    const { data: dbSchools, error: schoolsErr } = await supabase
-      .from("schools")
-      .select("id, school_name, campus_name, official_code, campus_id")
-      .eq("trainer_id", userId)
-      .eq("disabled", false);
-
-    if (schoolsErr) throw new Error(`DB Error: ${schoolsErr.message}`);
-    if (!dbSchools || dbSchools.length === 0) return res.json({ success: true, logs: ["⚠️ No schools."] });
-
-    /* PHASE 1: ORPHAN ALIGNMENT (Text Clues) */
-    const { data: orphans } = await supabase.from("teachers").select("*").eq("trainer_id", userId).is("school_id", null);
-    if (orphans?.length > 0) {
-      const alignmentUpdates = orphans.map(t => {
-        const tText = clean(`${t.school_name} ${t.campus}`);
-        let best = { id: null, score: 0, name: "", campus: "" };
-        dbSchools.forEach(s => {
-          const sText = clean(`${s.school_name} ${s.campus_name}`);
-          const score = (tText === sText) ? 1.0 : getSimilarity(tText, sText);
-          if (score > best.score) best = { id: s.id, score, name: s.school_name, campus: s.campus_name };
-        });
-        return (best.score >= 0.9) ? { id: t.id, school_id: best.id, school_name: best.name, campus: best.campus, updated_at: new Date() } : null;
-      }).filter(Boolean);
-      if (alignmentUpdates.length > 0) await supabase.from("teachers").upsert(alignmentUpdates);
+  /* -------------------------------------------------- */
+  /* INTERNAL HELPER: Fetch GrapeSEED Master Token      */
+  /* -------------------------------------------------- */
+  async function getMasterToken() {
+    const url = "https://account.grapeseed.com/connect/token";
+    // 1. Read from the environment file
+    const authHeader = (process.env.GRAPESEED_AUTH_HEADER || "").trim();
+    const username = (process.env.GRAPESEED_USERNAME || "").trim();
+    const password = (process.env.GRAPESEED_PASSWORD || "").trim();
+    // 🕵️ DEBUG: Verify the .env file is actually loading
+    if (authHeader.length > 10) {
+      console.log(`🔐 Auth Header Loaded: ${authHeader.substring(0, 10)}...`);
+    } else {
+      console.error("❌ CRITICAL: GRAPESEED_AUTH_HEADER is missing or empty in .env!");
     }
-
-    /* MASTER LOOP: MULTI-SILO PROCESSOR */
-    await pMap(dbSchools, async (schoolRow) => {
-        const schoolLogPrefix = `[${schoolRow.school_name}]`;
-        let targetCampusId = schoolRow.campus_id;
-
-        try {
-            /* PHASE 2: BUILDING REPAIR (GEOGRAPHY) */
-            const apiCResp = await fetch(`https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/campuses/accessiblecampuses`, { headers: getHeaders(token) });
-            if (!apiCResp.ok) return;
-            const apiCampuses = await apiCResp.json();
-            const targetApiCamp = apiCampuses.find(c => c.id === targetCampusId) || 
-                                  apiCampuses.find(c => clean(c.name) === clean(schoolRow.campus_name));
-
-            if (!targetApiCamp) return log(`${schoolLogPrefix} ❌ Campus not found.`);
-
-            if (targetCampusId !== targetApiCamp.id) {
-                await supabase.from("schools").update({ campus_id: targetApiCamp.id }).eq("id", schoolRow.id);
-                targetCampusId = targetApiCamp.id;
-            }
-
-            /* PHASE 3: SOURCE OF TRUTH (TRIPLE-NULL NET) */
-            const [classResp, { data: allPotentialTeachers }] = await Promise.all([
-                fetch(`https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`, { headers: getHeaders(token) }),
-                supabase.from("teachers").select("*").or(`school_id.eq.${schoolRow.id},school_name.eq."${schoolRow.school_name}"`)
-            ]);
-
-            const classData = await classResp.json();
-            const apiClasses = classData.schoolClasses || classData || [];
-            
-            // Empty Class Alert
-            supabase.from("schools").update({ has_empty_class: apiClasses.some(c => !c.teacherId) }).eq("id", schoolRow.id).then();
-
-            const apiActiveIds = new Set();
-            apiClasses.forEach(c => {
-                if (c.teacherId) apiActiveIds.add(c.teacherId.toLowerCase());
-                if (c.substituteTeacherIds) c.substituteTeacherIds.forEach(id => apiActiveIds.add(id.toLowerCase()));
-            });
-
-            const emailToApiId = new Map();
-            const apiProfiles = await pMap([...apiActiveIds], async (id) => {
-                const r = await fetch(`https://services.grapeseed.com/account/v1/users?ids=${id}`, { headers: getHeaders(token) });
-                const d = await r.json();
-                return Array.isArray(d) ? d[0] : d;
-            }, { concurrency: 10 });
-            apiProfiles.forEach(p => { if (p?.email) emailToApiId.set(p.email.toLowerCase().trim(), p.id.toLowerCase()); });
-
-            const updatesToSave = [];
-            const insertsToSave = [];
-
-            /* PHASE 4: RESOLUTION (ORIGINAL TAG LOGIC TRANSLANTED) */
-            const sandboxCandidates = (allPotentialTeachers || []).filter(t => t.campus_id === targetCampusId || !t.campus_id);
-
-            await pMap(sandboxCandidates, async (t) => {
-                let gseedId = (t.grapeseed_id || "").toLowerCase();
-                const cleanEmail = (t.email || "").toLowerCase().trim();
-
-                // DETECTIVE HEAL: Bridge ID via Email Phonebook
-                if (!gseedId && emailToApiId.has(cleanEmail)) {
-                    gseedId = emailToApiId.get(cleanEmail);
-                }
-
-                const isActive = apiActiveIds.has(gseedId);
-                let finalTags = Array.isArray(t.tags) ? t.tags : [];
-
-                if (isActive) {
-                    // --- START ORIGINAL TAG SIEVE ---
-                    let rawTagObjects = [];
-                    if (gseedId && gseedId !== "null" && gseedId !== "") {
-                        const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
-                        if (tagResp.ok) {
-                            const tData = await tagResp.json();
-                            // UNIVERSAL PARSER (COPY-PASTE)
-                            if (tData.tags) rawTagObjects = tData.tags; 
-                            else if (tData.entityTags) rawTagObjects = tData.entityTags; 
-                            else if (Array.isArray(tData)) {
-                                if (tData[0] && (tData[0].tags || tData[0].entityTags)) rawTagObjects = tData[0].tags || tData[0].entityTags;
-                                else rawTagObjects = tData;
-                            }
-                        }
-                    }
-
-                    const rawNames = rawTagObjects
-                        .map(tag => (tag.name || "").trim())
-                        .filter(name => isNaN(Number(name))) 
-                        .map(name => clean(name).split(" ")[0]); 
-
-                    const hasMe = rawNames.some(n => n === myName);
-                    const others = [...new Set(rawNames.filter(n => n !== myName))];
-
-                    if (others.length > 0) {
-                        finalTags = others; 
-                    } else {
-                        if (hasMe) finalTags = []; 
-                        else finalTags = ["No tag"];
-                    }
-                    // --- END ORIGINAL TAG SIEVE ---
-                } else {
-                    // --- ORIGINAL INACTIVE APPENDAGE LOGIC ---
-                    const currentClean = finalTags.filter(tag => tag.toLowerCase() !== "inactive");
-                    finalTags = [...currentClean, "Inactive"];
-                }
-
-                updatesToSave.push({
-                    id: t.id,
-                    trainer_id: userId,
-                    name: t.name,
-                    email: t.email,
-                    grapeseed_id: gseedId,
-                    campus_id: targetCampusId,
-                    school_id: schoolRow.id,
-                    school_name: schoolRow.school_name,
-                    campus: schoolRow.campus_name,
-                    tags: finalTags,
-                    updated_at: new Date()
-                });
-                touchedTeacherIds.add(t.id);touchedTeacherIds.add(t.id);
-            }, { concurrency: 20 });
-
-            /* PHASE 5: THE CLONER (NEW INSTANCES) */
-            const siloIds = new Set(updatesToSave.map(u => u.grapeseed_id).filter(id => id));
-            const missingIds = [...apiActiveIds].filter(id => !siloIds.has(id));
-
-            for (const id of missingIds) {
-                const profile = apiProfiles.find(p => p && p.id.toLowerCase() === id);
-                if (profile) {
-                    // NEW DISCOVERY TAG PROCESSING (PARALLEL FETCH)
-                    const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
-                    let rawT = [];
-                    if (tagResp.ok) {
-                        const d = await tagResp.json();
-                        rawT = d.tags || d.entityTags || (Array.isArray(d) ? d[0]?.tags : []);
-                    }
-                    const pNames = (rawT || []).map(tag => (tag.name || "").trim()).filter(n => isNaN(Number(n))).map(n => clean(n).split(" ")[0]);
-                    const others = [...new Set(pNames.filter(n => n !== myName))];
-                    const cloneTags = others.length > 0 ? others : (pNames.includes(myName) ? [] : ["No tag"]);
-
-                    insertsToSave.push({
-                        trainer_id: userId,
-                        grapeseed_id: id,
-                        name: profile.name,
-                        email: (profile.email || "").toLowerCase().trim(),
-                        school_id: schoolRow.id,
-                        school_name: schoolRow.school_name,
-                        campus: schoolRow.campus_name,
-                        campus_id: targetCampusId,
-                        tags: cloneTags,
-                        created_at: new Date(),
+    console.log(`👤 Logging in as: ${username}`);
+    const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": authHeader,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: bodyString,
+    });
+    if (!response.ok) {
+      const txt = await response.text();
+      throw new Error(`Master Token Failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return data.access_token;
+  }
+  // ...existing code...
                         updated_at: new Date()
                     });
                     log(`${schoolLogPrefix} ✨ [CLONED] ${profile.name}`);
@@ -316,6 +162,7 @@ router.post("/api/sync-teachers", async (req, res) => {
   }
 });
 
+<<<<<<< HEAD
 /* -------------------------------------------------- */
 /* INTERNAL HELPER: Fetch GrapeSEED Master Token      */
 /* -------------------------------------------------- */
@@ -1342,6 +1189,8 @@ router.post("/api/sync-teachers", async (req, res) => {
 });
 
 
+=======
+>>>>>>> feature/frontfetch
 /* -------------------------------------------------- */
 /* INTERNAL HELPER: Fetch GrapeSEED Master Token      */
 /* -------------------------------------------------- */
