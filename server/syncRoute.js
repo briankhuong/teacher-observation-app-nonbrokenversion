@@ -316,46 +316,6 @@ router.post("/api/sync-teachers", async (req, res) => {
   }
 });
 
-// /* -------------------------------------------------- */
-// /* TEMPORARY HARDCODED AUTH (WITH CORRECT HEADER)     */
-// /* -------------------------------------------------- */
-// async function getMasterToken() {
-//   const url = "https://account.grapeseed.com/connect/token";
-  
-//   // 🚨 INSTRUCTION: PASTE YOUR DETAILS INSIDE THE QUOTES BELOW 🚨
-  
-//   // 1. Copy the long 'Basic ...' string from your .env.azure file
-//   const authHeader = "Basic Z3JhcGVzZWVkLmdlbmVyYWw6RjAwOEM5OUY1MDFDNDg3M0E4RDczNjIxQUI4OEYxMEU="; 
-  
-//   // 2. Type your real login email
-//   const username = "brian.khuong@grapeseed.com"; 
-  
-//   // 3. Type your real login password
-//   const password = "Ngoc@123@456"; 
-  
-//   // 🚨 ------------------------------------------------------- 🚨
-
-//   console.log(`🔐 HARDCODE MODE: Logging in as ${username}...`);
-
-//   const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-
-//   const response = await fetch(url, {
-//     method: "POST",
-//     headers: {
-//       "Authorization": authHeader, // Now using the correct key!
-//       "Content-Type": "application/x-www-form-urlencoded",
-//     },
-//     body: bodyString,
-//   });
-
-//   if (!response.ok) {
-//     const txt = await response.text();
-//     throw new Error(`Master Token Failed: ${response.status} - ${txt}`);
-//   }
-//   const data = await response.json();
-//   return data.access_token;
-// }
-
 /* -------------------------------------------------- */
 /* INTERNAL HELPER: Fetch GrapeSEED Master Token      */
 /* -------------------------------------------------- */
