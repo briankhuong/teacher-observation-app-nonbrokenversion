@@ -963,21 +963,72 @@ router.post("/api/sync-grapeseed", async (req, res) => {
   }
 });
 
+
+/* -------------------------------------------------- */
+/* NEW: User-Specific GrapeSEED Login                 */
+/* -------------------------------------------------- */
+router.post("/api/login-grapeseed", async (req, res) => {
+    const { email, password } = req.body;
+    const authHeader = (process.env.GRAPESEED_AUTH_HEADER || "").trim();
+
+    if (!email || !password) {
+        return res.status(400).json({ error: "Missing email or password." });
+    }
+    if (!authHeader) {
+        console.error("❌ CRITICAL: GRAPESEED_AUTH_HEADER missing in .env");
+        return res.status(500).json({ error: "Server misconfiguration." });
+    }
+
+    try {
+        const url = "https://account.grapeseed.com/connect/token";
+        const bodyString = `grant_type=password&scope=offline_access basicinfo openid&username=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`;
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Authorization": authHeader,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: bodyString,
+        });
+
+        if (!response.ok) {
+            return res.status(401).json({ error: "Invalid GrapeSEED email or password." });
+        }
+
+        const data = await response.json();
+        res.json({ access_token: data.access_token });
+    } catch (error) {
+        console.error("Server Error during GrapeSEED Login:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 /* -------------------------------------------------- */
 /* DEBUG: IDENTITY VERIFICATION                       */
 /* -------------------------------------------------- */
 router.post("/api/match-visitation", async (req, res) => {
-  const { schoolCode, monthKey, type } = req.body;
+  const { schoolCode, monthKey, type, userToken } = req.body; 
   const [year, month] = monthKey.split('-');
   const targetType = type === 'Visit' ? 0 : 1;
 
+  if (!userToken) {
+    return res.status(401).json({ error: "Unauthorized: Missing GrapeSEED user token." });
+  }
+
   try {
-    const token = await getMasterToken();
+    console.log(`📡 Fetching dashboard using trainer's token...`);
     
-    console.log(`📡 Fetching dashboard...`);
     const response = await fetch('https://services.grapeseed.com/admin/v1/visitations/channels', {
-      headers: getHeaders(token)
+      headers: getHeaders(userToken) 
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ GrapeSEED API Rejected Token: ${response.status} - ${errorText}`);
+      // Return 401 so the frontend knows to pop the login modal again if needed
+      return res.status(401).json({ error: "GrapeSEED API Error", details: errorText });
+    }
 
     const data = await response.json();
     const channels = Array.isArray(data) ? data : [];
@@ -1002,7 +1053,7 @@ router.post("/api/match-visitation", async (req, res) => {
       return res.json({ match: { id: v.id, linkId: v.id } });
     }
 
-    console.warn(`⚠️ No match found.`);
+    console.warn(`⚠️ No match found for ${schoolCode}.`);
     res.json({ match: null, reason: "Task not found." });
 
   } catch (error) {
@@ -1010,4 +1061,5 @@ router.post("/api/match-visitation", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 export default router;
