@@ -3990,9 +3990,9 @@ const {
   isDragging
 } = useSortable({ id: ind.id });
 
-// 🟢 FIXED: Defined the style variable using the destructured properties
 const style = {
-  transform: CSS.Transform.toString(transform),
+  // 🟢 FIXED: Use Translate instead of Transform to prevent text stretching
+  transform: CSS.Translate.toString(transform), 
   transition,
   zIndex: isDragging ? 100 : 1,
   opacity: isDragging ? 0.5 : 1,
@@ -4053,7 +4053,7 @@ return (
         <div style={{ width: 4, height: 24, borderRadius: 2, background: ind.good ? "#22c55e" : ind.growth ? "#ef4444" : "#475569" }} />
         <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 13 }}>{ind.number}</span>
         <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: 14 }}>{ind.title}</span>
-        
+
           <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
               {!isExpanded && (
                 <>
