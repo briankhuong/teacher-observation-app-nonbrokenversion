@@ -14,7 +14,8 @@ import {
   Save,           
   ChevronsDown,   
   ChevronsRight,
-  X   
+  X,
+  Search   
 } from 'lucide-react';
 import './Planning.css';
 import { groupSelectedToBatches } from './emailUtils';
@@ -57,6 +58,20 @@ const PlanningGrid: React.FC = () => {
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+
+  // --- NEW SEARCH STATE & HELPER ---
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const matchesSearch = (teacher: any, schoolName: string, campusName: string) => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase().trim();
+    return (
+      (teacher.name || '').toLowerCase().includes(query) ||
+      (teacher.email || '').toLowerCase().includes(query) ||
+      schoolName.toLowerCase().includes(query) ||
+      campusName.toLowerCase().includes(query)
+    );
+  };
 
 // Helper to check if a teacher matches the current email filters
   const matchesEmailFilter = (teacher: any) => {
@@ -397,6 +412,21 @@ return (
            </div>
         </div>
 
+      {/* --- NEW SEARCH BAR --- */}
+           <div style={{ position: 'relative', marginLeft: '16px' }}>
+             <Search size={14} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+             <input 
+               type="text"
+               placeholder="Search teacher, school, campus..."
+               value={searchQuery}
+               onChange={(e) => setSearchQuery(e.target.value)}
+               style={{
+                 background: '#0f172a', border: '1px solid #334155', borderRadius: '4px',
+                 color: '#e2e8f0', padding: '4px 8px 4px 28px', fontSize: '12px', width: '220px', outline: 'none'
+               }}
+             />
+           </div>  
+
         {/* EMAIL OUTREACH TOGGLE BUTTON */}
         <button 
           className={`tool-btn ${isEmailMode ? 'active-lva' : ''}`} // Reusing active style for blue highlight
@@ -566,11 +596,14 @@ return (
           
           <tbody>
             {Object.entries(groupedData).map(([school, campuses]: any) => {
-              // Deep Filter Logic
+              // Deep Filter Logic: Check email mode AND search query
               const hasVisibleTeacherInSchool = Object.values(campuses).some((teacherList: any) => 
-                teacherList.some((t: any) => matchesEmailFilter(t))
+                teacherList.some((t: any) => 
+                  matchesEmailFilter(t) && matchesSearch(t, school, Object.keys(campuses)[0] || '')
+                )
               );
-              if (isEmailMode && !hasVisibleTeacherInSchool) return null;
+              
+              if (!hasVisibleTeacherInSchool) return null; // Hides empty schools entirely
 
               const isExpanded = !!expandedSchools[school];
               const schoolVisitTotal = plans.filter(p => p.school_name === school && p.activity_type === 'Visit').length;
@@ -592,9 +625,13 @@ return (
                     {months.map(m => <td key={m.key} className="header-fill"></td>)}
                   </tr>
 
-                  {isExpanded && Object.entries(campuses).map(([campus, teacherList]: any) => {
-                    const hasVisibleTeacherInCampus = teacherList.some((t: any) => matchesEmailFilter(t));
-                    if (isEmailMode && !hasVisibleTeacherInCampus) return null;
+                    {isExpanded && Object.entries(campuses).map(([campus, teacherList]: any) => {
+                    // Filter Campus: Check email mode AND search query
+                    const hasVisibleTeacherInCampus = teacherList.some((t: any) => 
+                      matchesEmailFilter(t) && matchesSearch(t, school, campus)
+                    );
+                    
+                    if (!hasVisibleTeacherInCampus) return null; // Hides empty campuses entirely
 
                     return (
                       <React.Fragment key={campus}>
@@ -603,8 +640,9 @@ return (
                           {months.map(m => <td key={m.key} className="header-fill"></td>)}
                         </tr>
 
-                        {teacherList.map((teacher: any) => {
-                          if (!matchesEmailFilter(teacher)) return null;
+                    {teacherList.map((teacher: any) => {
+                          // Filter Teacher
+                          if (!matchesEmailFilter(teacher) || !matchesSearch(teacher, school, campus)) return null;
                           const isSelected = selectedIds.has(teacher.id);
 
                           return (

@@ -48,75 +48,60 @@
 .sync-btn { margin-left: auto; }
 
 /* =========================================
-   3. TABLE STRUCTURE
+   3. TABLE STRUCTURE (UNIFIED COLLAPSED GRID)
    ========================================= */
 .planning-table {
+  border-collapse: collapse;   /* 🔥 Critical fix */
   border-spacing: 0;
-  border-collapse: separate; 
   font-size: 12px;
   width: 100%;
-  table-layout: fixed; /* KEEPS COLUMNS STABLE */
+  table-layout: fixed;
 }
 
-/* --- HEADERS --- */
+/* Single consistent border for ALL cells */
+.planning-table th,
+.planning-table td {
+border: 0.5px solid #3d4756;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  vertical-align: middle;
+  height: 28px;
+}
+
+.planning-table td.cell-lva,
+.planning-table td.cell-visit {
+  border: 0.5px solid #9c9494;
+}
+
 .planning-table thead th {
   position: sticky;
   top: 0;
   background: #1e293b;
   z-index: 20; 
   border-bottom: 1px solid #475569;
-  padding: 0;
   height: 32px; 
-  vertical-align: middle;
 }
 
-/* FIX: Increased width from 160px to 240px (+80px) */
 .sticky-col {
   position: sticky;
   left: 0;
   background: #0f172a;
   z-index: 10;
-  border-right: 1px solid #334155;
-  
-  /* UPDATED WIDTH */
+  /* Match grid thinness */
   width: 240px !important;     
-  min-width: 240px !important;
+  min-width: 240px !important; 
   max-width: 240px !important;
-  
-  box-sizing: border-box;
 }
-
-.first-header {
-  z-index: 30 !important; 
-  text-align: left;
-  padding-left: 12px !important;
-}
-
-.month-header {
-  min-width: 70px;
-  text-align: center;
-  color: #94a3b8;
-}
-.month-label { font-weight: 700; color: #e2e8f0; font-size: 11px; }
-.month-year { font-size: 9px; opacity: 0.7; }
-.month-total { font-size: 9px; margin-top: 2px; opacity: 0.6; }
 
 /* =========================================
-   4. ROW STYLES
+   4. ROW STYLES (UNIFORM 28PX)
    ========================================= */
-.planning-table td {
-  padding: 0;
-  margin: 0;
-  height: 24px;
-  box-sizing: border-box;
+.school-row, .campus-row, .teacher-row {
+  height: 28px !important;
 }
 
-/* School Group Header */
-.school-row {
-  background: #1e293b;
-  cursor: pointer;
-  height: 28px; 
-}
+.school-row { background: #1e293b; cursor: pointer; }
 .school-row:hover td { background: #334155; }
 
 .school-header-cell {
@@ -125,29 +110,15 @@
   font-weight: 700;
   padding: 0 8px !important;
   font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  border-bottom: 1px solid #334155;
-  height: 28px;
-  vertical-align: middle;
 }
 
-/* Campus Sub-Header */
-.campus-row { height: 24px; }
 .campus-header-cell {
   background: #0f172a;
   color: #64748b;
   font-style: italic;
-  font-size: 10px;
   padding-left: 20px !important;
-  border-bottom: 1px solid #1e293b;
-  height: 24px;
-  vertical-align: middle;
 }
 
-/* Teacher Row */
-.teacher-row { height: 24px; }
 .teacher-name {
   background: #0f172a;
   color: #e2e8f0;
@@ -156,40 +127,33 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-bottom: 1px solid #1e293b;
   display: block; 
   width: 100%;
+  line-height: 28px;
+  /* NO BORDER OVERRIDE HERE */
 }
 
-/* FIX: ADD BORDERS TO EMPTY CELLS (COLLAPSED STATE FIX) */
-.header-fill {
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
-  border-right: 1px solid #334155; /* Adds the missing grid lines */
-}
-.campus-row .header-fill {
-  background: #0f172a;
-  border-bottom: 1px solid #1e293b;
-  border-right: 1px solid #1e293b;
+/* Fix: Ensures collapsed schools show the full grid lines */
+.header-fill { 
+  background: inherit; 
+  display: table-cell; 
+  min-width: 70px;
+  /* NO BORDER OVERRIDE HERE */
 }
 
-/* Grid Cells */
 .grid-cell {
-  border-right: 1px solid #1e293b;
-  border-bottom: 1px solid #1e293b;
   width: 70px;
-  vertical-align: middle;
   cursor: pointer;
   position: relative;
+  /* NO BORDER OVERRIDE HERE */
 }
-.grid-cell:hover { background: rgba(255,255,255,0.03); }
 
 .activity-label {
   display: flex; align-items: center; justify-content: center;
   width: 100%; height: 100%; font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
 }
-.cell-lva .activity-label { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
-.cell-visit .activity-label { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
+.cell-lva .activity-label { background: rgba(59, 130, 246, 0.15); color: #ffffff; }
+.cell-visit .activity-label { background: rgba(139, 92, 246, 0.15); color: #ffffff; }
 .cell-complete .activity-label { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
 .cell-cancelled .activity-label { text-decoration: line-through; color: #64748b; }
 
@@ -445,3 +409,38 @@
 .btn-cancel { background: transparent; border: 1px solid #475569; color: #cbd5e1; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
 .btn-copy { background: #3b82f6; border: none; color: white; padding: 8px 20px; border-radius: 6px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .btn-copy:hover { background: #2563eb; }
+
+/* --- ROW & CELL HOVER LOGIC (FIXED THIN GRID) --- */
+
+/* 1. Highlight the ROW */
+.planning-table tbody tr:hover td:not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled) { 
+  background-color: rgba(133, 183, 28, 0.15) !important;
+}
+
+/* 2. Highlight the COLUMN */
+.planning-table:has(td:nth-child(2):hover) tbody tr td:nth-child(2):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(3):hover) tbody tr td:nth-child(3):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(4):hover) tbody tr td:nth-child(4):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(5):hover) tbody tr td:nth-child(5):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(6):hover) tbody tr td:nth-child(6):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(7):hover) tbody tr td:nth-child(7):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(8):hover) tbody tr td:nth-child(8):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(9):hover) tbody tr td:nth-child(9):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(10):hover) tbody tr td:nth-child(10):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(11):hover) tbody tr td:nth-child(11):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(12):hover) tbody tr td:nth-child(12):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table:has(td:nth-child(13):hover) tbody tr td:nth-child(13):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled) {
+  background-color: rgba(133, 183, 28, 0.15) !important;
+}
+
+/* 3. THE FOCUS CELL (SOLID PURPLE #541B86) */
+.planning-table tbody tr td:hover:not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
+.planning-table tbody tr.school-row:hover td:hover,
+.planning-table tbody tr.campus-row:hover td:hover {
+  background-color: #541B86 !important;
+  /* box-shadow keeps the thin grid visible while drawing the focus box */
+  box-shadow: inset 0 0 0 1px #541B86;
+  color: white !important;
+  z-index: 50;
+  position: relative;
+}
