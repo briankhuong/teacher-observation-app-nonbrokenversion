@@ -1,4 +1,21 @@
 // src/ObservationWorkspaceShell.tsx
+import {
+  DndContext, 
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core'; // 🟢 FIXED: Separated as a type import
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { exportTeacherExcel } from "./exportTeacherExcel";
 import { CanvasPad } from "./CanvasPad";
 import React, { useEffect, useRef, useState, useCallback } from "react";
@@ -341,10 +358,15 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
   };
 }
 
-function normalizeIndicators(raw: any): any[] {
-  if (Array.isArray(raw)) return raw;
-  if (raw && Array.isArray(raw.indicators)) return raw.indicators;
-  return [];
+// Find your normalizeIndicators function or update the load logic:
+function normalizeIndicators(raw: any): IndicatorState[] {
+  const data = Array.isArray(raw) ? raw : (raw?.indicators || []);
+  
+  // 🟢 SEEDING: Ensure every item has a sortOrder
+  return data.map((ind: any, index: number) => ({
+    ...ind,
+    sortOrder: typeof ind.sortOrder === 'number' ? ind.sortOrder : (index + 1) * 1000
+  }));
 }
 
 function hasUserProgress(indicators: IndicatorState[]): boolean {
@@ -386,6 +408,31 @@ const handleRowToggle = (id: string) => {
   });
   // Keep activeRowId in sync for highlighting
   setActiveRowId(id);
+};
+
+const handleDragEnd = (event: DragEndEvent) => {
+  const { active, over } = event;
+  if (!over || active.id === over.id) return;
+
+  setIndicators((items) => {
+    const oldIndex = items.findIndex((i) => i.id === active.id);
+    const newIndex = items.findIndex((i) => i.id === over.id);
+    const newArray = arrayMove(items, oldIndex, newIndex);
+
+    // 🟢 FIXED: Cast to 'any' to bypass TS interface error locally
+    const prevItem = newArray[newIndex - 1] as any;
+    const nextItem = newArray[newIndex + 1] as any;
+    
+    let newOrder: number;
+    if (!prevItem) newOrder = nextItem.sortOrder / 2;
+    else if (!nextItem) newOrder = prevItem.sortOrder + 1000;
+    else newOrder = (prevItem.sortOrder + nextItem.sortOrder) / 2;
+
+    (newArray[newIndex] as any).sortOrder = newOrder;
+    
+    isDirtyRef.current = true; 
+    return newArray;
+  });
 };
 
 // 🟢 FIXED: Master Command logic
@@ -2844,52 +2891,60 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 </div>
               ) : (
                 <>
-          {isDesktopMode ? (
-  <div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
-    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-{/* 🟢 FIXED: Synchronized PC mode label with the master logic */}
-<button 
-  type="button" 
-  className="btn" 
-  onClick={handleToggleAll}
-  style={{ background: "rgba(30, 41, 59, 0.5)", border: "1px solid #334155", color: "#94a3b8", fontSize: 12 }}
->
-  {openRowIds.size === indicators.length ? "▲ Collapse All Rows" : "▼ Expand All Rows"}
-</button>
-    </div>
-    {indicators.map((ind, idx) => {
-      if (filterMode === "good" && !ind.good) return null;
-      if (filterMode === "growth" && !ind.growth) return null;
-      if (filterMode === "favorites" && !ind.favorite) return null;
+{isDesktopMode ? (
+  <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+    <div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+        <button 
+          type="button" 
+          className="btn" 
+          onClick={handleToggleAll}
+          style={{ background: "rgba(30, 41, 59, 0.5)", border: "1px solid #334155", color: "#94a3b8", fontSize: 12 }}
+        >
+          {openRowIds.size === indicators.length ? "▲ Collapse All Rows" : "▼ Expand All Rows"}
+        </button>
+      </div>
+      
+      {/* 🟢 FIXED: Add SortableContext wrapper and sort the map */}
+      <SortableContext items={indicators.map(i => i.id)} strategy={verticalListSortingStrategy}>
+        {indicators
+          .slice() // Copy array before sorting
+          .sort((a, b) => ((a as any).sortOrder || 0) - ((b as any).sortOrder || 0))
+          .map((ind, idx) => {
+            if (filterMode === "good" && !ind.good) return null;
+            if (filterMode === "growth" && !ind.growth) return null;
+            if (filterMode === "favorites" && !ind.favorite) return null;
 
-      return (
-        <IndicatorRow 
-          key={ind.id} 
-          ind={ind} 
-          idx={idx} 
-          activeRowId={activeRowId}
-          openRowIds={openRowIds}
-          pinnedRowIds={pinnedRowIds}
-          activeIndex={activeIndex}
-          isAiPolishing={isAiPolishing}
-          isRecording={isRecording}
-          isTranscribing={isTranscribing}
-          setActiveIndex={setActiveIndex}
-          handleRowToggle={handleRowToggle}
-          setActiveRowId={setActiveRowId}
-          togglePin={togglePin}
-          insertPreComment={insertPreComment}
-          toggleGood={toggleGood}
-          toggleGrowth={toggleGrowth}
-          toggleIncludeInTrainerSummary={toggleIncludeInTrainerSummary}
-          handlePolishWithAi={handlePolishWithAi}
-          startRecording={startRecording}
-          stopRecording={stopRecording}
-          handleCommentChange={handleCommentChange}
-        />
-      );
-    })}
-</div>
+            return (
+              <IndicatorRow 
+                key={ind.id} 
+                ind={ind} 
+                idx={idx} 
+                activeRowId={activeRowId}
+                openRowIds={openRowIds}
+                pinnedRowIds={pinnedRowIds}
+                activeIndex={activeIndex}
+                isAiPolishing={isAiPolishing}
+                isRecording={isRecording}
+                isTranscribing={isTranscribing}
+                setActiveIndex={setActiveIndex}
+                handleRowToggle={handleRowToggle}
+                setActiveRowId={setActiveRowId}
+                togglePin={togglePin}
+                insertPreComment={insertPreComment}
+                toggleGood={toggleGood}
+                toggleGrowth={toggleGrowth}
+                toggleIncludeInTrainerSummary={toggleIncludeInTrainerSummary}
+                handlePolishWithAi={handlePolishWithAi}
+                startRecording={startRecording}
+                stopRecording={stopRecording}
+                handleCommentChange={handleCommentChange}
+              />
+            );
+        })}
+      </SortableContext>
+    </div>
+  </DndContext>
             ) : (
             <div className="canvas-card">
 
@@ -3916,6 +3971,7 @@ const isExpanded =
   const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
   const hasText = ind.commentText?.trim().length > 0;
   const [isHovered, setIsHovered] = useState(false);
+  
 
   // 🟢 STABILIZER: Ref for the textarea to replace jumpy autoFocus
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -3925,50 +3981,79 @@ const isExpanded =
   const needsReview = !!(ind.ocrPendingReview || ind.aiPendingReview);
   const convertInk = !!(hasInk && !ind.ocrUsed);
 
-  // 🟢 STABILIZER: Focus without scrolling when expanding
-useEffect(() => {
-    if (isExpanded && !isSidebar && textareaRef.current) {
-      textareaRef.current.focus({ preventScroll: true });
-    }
-  }, [isExpanded, isSidebar]);
+const {
+  attributes,
+  listeners,
+  setNodeRef,
+  transform,
+  transition,
+  isDragging
+} = useSortable({ id: ind.id });
 
-// 🟢 FIXED: Removed the out-of-scope 'indicators' reference
+// 🟢 FIXED: Defined the style variable using the destructured properties
+const style = {
+  transform: CSS.Transform.toString(transform),
+  transition,
+  zIndex: isDragging ? 100 : 1,
+  opacity: isDragging ? 0.5 : 1,
+};
+
+// 🟢 STABILIZER: Focus without scrolling when expanding
+useEffect(() => {
+  if (isExpanded && !isSidebar && textareaRef.current) {
+    textareaRef.current.focus({ preventScroll: true });
+  }
+}, [isExpanded, isSidebar]);
+
 const handleClick = () => {
-  // We use the 'idx' prop passed from the parent map instead of searching the array
   setActiveIndex(idx); 
-  
-  // Triggers the accordion logic in the parent shell
   handleRowToggle(ind.id); 
 };
 
-  return (
+return (
   <div
-      key={ind.id} 
-      className={`pc-row ${isExpanded ? "active" : ""}`}
-      onClick={handleClick}
-      onDoubleClick={(e) => {
+    ref={setNodeRef} /* 🟢 FIXED: Attach DND Ref */
+    key={ind.id} 
+    className={`pc-row ${isExpanded ? "active" : ""}`}
+    onClick={handleClick}
+    onDoubleClick={(e) => {
       e.stopPropagation();
-      togglePin(e, ind.id); // 📌 Double click to Pin/Unpin
+      togglePin(e, ind.id);
     }}
-      onMouseEnter={() => setIsHovered(true)} 
-      onMouseLeave={() => setIsHovered(false)}
-      style={{
-        background: isExpanded ? "rgba(30, 41, 59, 0.9)" : isHovered ? "rgba(51, 65, 85, 0.4)" : "var(--bg-card)",
-        border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
-        padding: '12px 16px',
-        borderRadius: '10px',
-        marginBottom: '8px',
-        transition: "all 0.2s ease",
-        cursor: "pointer",
-        boxShadow: isExpanded ? "0 4px 12px rgba(0,0,0,0.3)" : "none",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 4, height: 24, borderRadius: 2, background: ind.good ? "#22c55e" : ind.growth ? "#ef4444" : "#475569" }} />
-          <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 13 }}>{ind.number}</span>
-          <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: 14 }}>{ind.title}</span>
+    onMouseEnter={() => setIsHovered(true)} 
+    onMouseLeave={() => setIsHovered(false)}
+    style={{
+      ...style, /* 🟢 FIXED: Inject DND transforms here */
+      background: isExpanded ? "rgba(30, 41, 59, 0.9)" : isHovered ? "rgba(51, 65, 85, 0.4)" : "var(--bg-card)",
+      border: isExpanded ? "1px solid var(--accent)" : "1px solid #334155",
+      padding: '12px 16px',
+      borderRadius: '10px',
+      marginBottom: '8px',
+      transition: isDragging ? "none" : "all 0.2s ease", /* Prevent transition stutter while dragging */
+      cursor: "pointer",
+      boxShadow: isExpanded ? "0 4px 12px rgba(0,0,0,0.3)" : isDragging ? "0 10px 20px rgba(0,0,0,0.5)" : "none",
+    }}
+  >
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        
+        {/* 🟢 FIXED: The Draggable Grip Handle */}
+        <div 
+          {...attributes} 
+          {...listeners}
+          onClick={(e) => e.stopPropagation()} // Stop accordion toggle when grabbing
+          style={{ cursor: isDragging ? 'grabbing' : 'grab', padding: '4px', touchAction: 'none', display: 'flex', alignItems: 'center' }}
+        >
+          <svg width="12" height="18" viewBox="0 0 12 18" fill={isHovered ? "#94a3b8" : "#475569"}>
+            <circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="8" r="1.5" /><circle cx="2" cy="14" r="1.5" />
+            <circle cx="8" cy="2" r="1.5" /><circle cx="8" cy="8" r="1.5" /><circle cx="8" cy="14" r="1.5" />
+          </svg>
+        </div>
 
+        <div style={{ width: 4, height: 24, borderRadius: 2, background: ind.good ? "#22c55e" : ind.growth ? "#ef4444" : "#475569" }} />
+        <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 13 }}>{ind.number}</span>
+        <span style={{ fontWeight: 600, color: "#f8fafc", fontSize: 14 }}>{ind.title}</span>
+        
           <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
               {!isExpanded && (
                 <>

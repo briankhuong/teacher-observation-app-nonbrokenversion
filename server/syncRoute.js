@@ -39,7 +39,6 @@ async function pMap(array, mapper, { concurrency = 20 } = {}) {
   return Promise.all(results);
 }
 
-
 router.post("/api/sync-teachers", async (req, res) => {
   const { token, userId } = req.body;
   const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
@@ -922,7 +921,6 @@ router.post("/api/sync-grapeseed", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 /* -------------------------------------------------- */
 /* NEW: User-Specific GrapeSEED Login                 */
