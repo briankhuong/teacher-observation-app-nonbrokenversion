@@ -33,6 +33,7 @@ import type {
   Stroke, 
   IndicatorState 
 } from "./constants";
+import { Pin, ArrowUpToLine } from 'lucide-react';
 
 // Add to imports
 import { stitchHandwritingBatches } from "./utils/imageStitcher";
@@ -434,6 +435,26 @@ const handleDragEnd = (event: DragEndEvent) => {
     return newArray;
   });
 };
+
+// 🟢 NEW: Send to Top Logic (PC Only)
+const handleSendToTop = useCallback((id: string) => {
+  setIndicators((prev) => {
+    // 1. Find the current absolute minimum sortOrder in the list
+    const currentMin = Math.min(...prev.map(i => (i as any).sortOrder || 0));
+    
+    // 2. Subtract 1000 to guarantee it rockets past the current #1 item
+    const newTopOrder = currentMin - 1000;
+
+    // 3. Apply it to the target indicator
+    const nextArray = prev.map(ind => 
+      ind.id === id ? { ...ind, sortOrder: newTopOrder } : ind
+    );
+    
+    // 4. Trigger auto-save
+    isDirtyRef.current = true;
+    return nextArray;
+  });
+}, []);
 
 // 🟢 FIXED: Master Command logic
 const handleToggleAll = () => {
@@ -2906,11 +2927,16 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
       </div>
       
       {/* 🟢 FIXED: Add SortableContext wrapper and sort the map */}
+{/* 🟢 FIXED: Add SortableContext wrapper and sort the map */}
       <SortableContext items={indicators.map(i => i.id)} strategy={verticalListSortingStrategy}>
         {indicators
           .slice() // Copy array before sorting
           .sort((a, b) => ((a as any).sortOrder || 0) - ((b as any).sortOrder || 0))
-          .map((ind, idx) => {
+          .map((ind, sortedIdx) => {
+            
+            // 🟢 FIXED: Calculate the true index in the original state array
+            const globalIndex = indicators.findIndex(x => x.id === ind.id);
+
             if (filterMode === "good" && !ind.good) return null;
             if (filterMode === "growth" && !ind.growth) return null;
             if (filterMode === "favorites" && !ind.favorite) return null;
@@ -2919,7 +2945,8 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               <IndicatorRow 
                 key={ind.id} 
                 ind={ind} 
-                idx={idx} 
+                // 🟢 FIXED: Pass globalIndex so text, buttons, and toggles update the correct row
+                idx={globalIndex} 
                 activeRowId={activeRowId}
                 openRowIds={openRowIds}
                 pinnedRowIds={pinnedRowIds}
@@ -2939,6 +2966,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 startRecording={startRecording}
                 stopRecording={stopRecording}
                 handleCommentChange={handleCommentChange}
+                handleSendToTop={handleSendToTop}
               />
             );
         })}
@@ -3954,6 +3982,7 @@ interface IndicatorRowProps {
   startRecording: () => void;
   stopRecording: (target: 'indicator' | 'admin') => void;
   handleCommentChange: (idx: number, val: string) => void;
+  handleSendToTop: (id: string) => void;
 }  
 // 🟢 REFACTORED UNIFIED ROW COMPONENT
 const IndicatorRow = React.memo(({ 
@@ -3961,7 +3990,7 @@ const IndicatorRow = React.memo(({
   activeIndex, isAiPolishing, isRecording, isTranscribing,
   setActiveIndex, handleRowToggle, setActiveRowId, togglePin,
   insertPreComment, toggleGood, toggleGrowth, toggleIncludeInTrainerSummary,
-  handlePolishWithAi, startRecording, stopRecording, handleCommentChange
+  handlePolishWithAi, startRecording, stopRecording, handleCommentChange, handleSendToTop
 }: IndicatorRowProps) => {
 const isExpanded = 
   openRowIds.has(ind.id) ||   // 🟢 Priority: Global Expand/Collapse state
@@ -4080,10 +4109,56 @@ return (
           <button type="button" onClick={(e) => { e.stopPropagation(); toggleGood(idx); }} style={quickMarkStyle(ind.good, "#22c55e")}>✓</button>
           <button type="button" onClick={(e) => { e.stopPropagation(); toggleGrowth(idx); }} style={quickMarkStyle(ind.growth, "#ef4444")}>✕</button>
           
-          {/* 🟢 FIXED: Added e.stopPropagation() to prevent Pinning from triggering handleClick/Expansion */}
-          <button type="button" onClick={(e) => { e.stopPropagation(); togglePin(e, ind.id); }}
-            style={{ background: "none", border: "none", fontSize: 16, opacity: isPinned ? 1 : 0.2, filter: isPinned ? "none" : "grayscale(1)" }}>📌</button>
+          {/* 📌 Pin Button (Lucide) */}
+          <button 
+            type="button" 
+            onClick={(e) => { e.stopPropagation(); togglePin(e, ind.id); }}
+            style={{ 
+              background: "none", 
+              border: "none", 
+              cursor: "pointer", 
+              color: isPinned ? "#f43f5e" : "#94a3b8", // Rose if pinned, slate if not
+              opacity: isPinned ? 1 : 0.5,
+              transition: "all 0.2s",
+              display: "flex", 
+              alignItems: "center", 
+              padding: 4
+            }}
+            onMouseEnter={(e) => { if(!isPinned) e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { if(!isPinned) e.currentTarget.style.opacity = "0.5"; }}
+            title={isPinned ? "Unpin row" : "Pin row"}
+          >
+            {/* Fills the pin icon and thickens the lines when active */}
+            <Pin size={16} fill={isPinned ? "currentColor" : "none"} strokeWidth={isPinned ? 2 : 1.5} />
+          </button>
 
+          {/* ⬆️ Send to Top Button (Lucide) */}
+          <button 
+            type="button" 
+            onClick={(e) => { e.stopPropagation(); handleSendToTop(ind.id); }}
+            style={{ 
+              background: "none", 
+              border: "none", 
+              cursor: "pointer", 
+              color: "#94a3b8", 
+              opacity: 0.5,
+              transition: "all 0.2s",
+              display: "flex", 
+              alignItems: "center", 
+              padding: 4
+            }}
+            onMouseEnter={(e) => { 
+              e.currentTarget.style.opacity = "1"; 
+              e.currentTarget.style.color = "#3b82f6"; // Blue highlight on hover
+            }} 
+            onMouseLeave={(e) => { 
+              e.currentTarget.style.opacity = "0.5"; 
+              e.currentTarget.style.color = "#94a3b8"; 
+            }}
+            title="Send to Top"
+          >
+            <ArrowUpToLine size={16} strokeWidth={2} />
+          </button>
           <input type="checkbox" checked={!!ind.includeInTrainerSummary} onClick={(e) => e.stopPropagation()} onChange={() => toggleIncludeInTrainerSummary(idx)}
              style={{ marginLeft: 4, accentColor: "var(--accent)" }} />
         </div>
