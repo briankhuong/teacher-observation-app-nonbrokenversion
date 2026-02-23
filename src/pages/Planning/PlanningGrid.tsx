@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePlanningData } from './usePlanningData';
 import { useAuth } from '../../auth/AuthContext';
 import { supabase } from '../../supabaseClient';
@@ -40,6 +40,7 @@ const isSameMonth = (obsDate: string, monthKey: string) => {
 
 const PlanningGrid: React.FC = () => {
   const { user } = useAuth();
+
   const {teachers, groupedData, plans, obsData, months, loading, refresh,schoolMap } = usePlanningData(user?.id || '');
   const [emailDrafts, setEmailDrafts] = useState<EmailBatch[]>([]);
   const [activeTool, setActiveTool] = useState<'LVA' | 'Visit' | 'Eraser' | null>(null);
@@ -73,6 +74,7 @@ const PlanningGrid: React.FC = () => {
     );
   };
 
+  const tableRef = useRef<HTMLTableElement | null>(null);
 // Helper to check if a teacher matches the current email filters
   const matchesEmailFilter = (teacher: any) => {
     if (!isEmailMode) return true; // Show everyone in planning mode
@@ -126,6 +128,52 @@ const PlanningGrid: React.FC = () => {
       setHasInitializedExpand(true);
     }
   }, [loading, groupedData, plans, obsData, hasInitializedExpand]);
+
+useEffect(() => {
+  const table = tableRef.current;
+  if (!table) return;
+
+  let lastColIndex: number | null = null;
+
+  const handleMouseOver = (e: MouseEvent) => {
+    const cell = (e.target as HTMLElement).closest("td") as HTMLTableCellElement | null;
+    if (!cell || !table.contains(cell)) return;
+
+    const colIndex = cell.cellIndex;
+
+    if (colIndex === 0) return; // ignore sticky column
+
+    if (lastColIndex === colIndex) return;
+
+    // Remove old column highlight
+    if (lastColIndex !== null) {
+      table.querySelectorAll(`td:nth-child(${lastColIndex + 1})`)
+        .forEach(td => td.classList.remove("col-hover"));
+    }
+
+    // Add new column highlight
+    table.querySelectorAll(`td:nth-child(${colIndex + 1})`)
+      .forEach(td => td.classList.add("col-hover"));
+
+    lastColIndex = colIndex;
+  };
+
+  const handleLeave = () => {
+    if (lastColIndex !== null) {
+      table.querySelectorAll(`td:nth-child(${lastColIndex + 1})`)
+        .forEach(td => td.classList.remove("col-hover"));
+    }
+    lastColIndex = null;
+  };
+
+  table.addEventListener("mouseover", handleMouseOver);
+  table.addEventListener("mouseleave", handleLeave);
+
+  return () => {
+    table.removeEventListener("mouseover", handleMouseOver);
+    table.removeEventListener("mouseleave", handleLeave);
+  };
+}, []);
 
   const toggleSchool = (schoolName: string) => {
     setExpandedSchools(prev => ({ ...prev, [schoolName]: !prev[schoolName] }));
@@ -567,7 +615,10 @@ return (
 
       {/* 3. GRID AREA */}
       <div className="grid-wrapper" style={{ flex: 1, overflow: 'auto' }}>
-        <table className="planning-table">
+        <table
+            ref={tableRef}
+            className="planning-table"
+            >
           <thead>
             <tr>
               {/* NO EXTRA COLUMN HERE - JUST THE STANDARD HEADERS */}

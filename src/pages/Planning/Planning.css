@@ -417,20 +417,9 @@ border: 0.5px solid #3d4756;
   background-color: rgba(133, 183, 28, 0.15) !important;
 }
 
-/* 2. Highlight the COLUMN */
-.planning-table:has(td:nth-child(2):hover) tbody tr td:nth-child(2):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(3):hover) tbody tr td:nth-child(3):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(4):hover) tbody tr td:nth-child(4):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(5):hover) tbody tr td:nth-child(5):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(6):hover) tbody tr td:nth-child(6):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(7):hover) tbody tr td:nth-child(7):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(8):hover) tbody tr td:nth-child(8):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(9):hover) tbody tr td:nth-child(9):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(10):hover) tbody tr td:nth-child(10):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(11):hover) tbody tr td:nth-child(11):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(12):hover) tbody tr td:nth-child(12):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled),
-.planning-table:has(td:nth-child(13):hover) tbody tr td:nth-child(13):not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled) {
-  background-color: rgba(133, 183, 28, 0.15) !important;
+
+.planning-table td.col-hover {
+  background-color: #e6f0ff;
 }
 
 /* 3. THE FOCUS CELL (SOLID PURPLE #541B86) */
