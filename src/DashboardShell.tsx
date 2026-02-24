@@ -942,60 +942,64 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
     fetchSettings();
   }, [user?.id]); // ✅ FIXED: Changed [user] to [user?.id]
 
-// 🟢 START: Cache Teachers & Schools for Offline Mode 🟢
-  // This runs automatically in the background when the user is online.
-  React.useEffect(() => {
-    // 1. Exit if offline or no user
-    if (!user?.id || !navigator.onLine) return;
+// 🟢 REVISED: Cache Teachers & Schools with Time-Gating
+React.useEffect(() => {
+  if (!user?.id || !navigator.onLine) return;
 
-    const cacheOfflineResources = async () => {
-      try {
-        // 2. Fetch Schools (Strictly Filtered by Trainer ID)
-        // Note: If RLS is enabled on Supabase, this will return [] unless a policy exists!
-        const { data: schools, error: sError } = await supabase
-          .from("schools")
-          .select("id, school_name, campus_name, admin_workbook_url, admin_workbook_view_url, trainer_id")
-          .eq("trainer_id", user.id)
-          .order("school_name");
+  const cacheOfflineResources = async () => {
+    try {
+      const CACHE_INTERVAL = 6 * 60 * 60 * 1000; // 6 Hours
+      const lastCacheTs = await get<number>("last_resource_cache_time") || 0;
+      const timeSinceLastCache = Date.now() - lastCacheTs;
 
-        if (sError) throw sError;
-
-        const safeSchools = schools || [];
-        console.log(`🔥 Fetched ${safeSchools.length} schools from database.`);
-
-        // 3. Save to Offline Cache (Overwrites old data)
-        await set("offline_schools", safeSchools);
-
-        // 4. Fetch Teachers (Only if we have schools)
-        // This prevents leaking teachers (and thus schools) from the Owner
-        if (safeSchools.length > 0) {
-            const mySchoolNames = safeSchools.map(s => s.school_name);
-            
-            const { data: teachers, error: tError } = await supabase
-              .from("teachers")
-              .select("id, grapeseed_id, name, school_name, campus, email, worksheet_url")
-              .in("school_name", mySchoolNames) // 🟢 Only fetch teachers for MY schools
-              .order("name");
-            
-            if (!tError) {
-              await set("offline_teachers", teachers || []); 
-              console.log(`🔥 Fetched ${teachers?.length || 0} teachers.`);
-            }
-        } else {
-            // If I have no schools, I should have no teachers in the cache
-            console.warn("⚠️ No schools found for this user. Offline list may revert to default/owner list.");
-            await set("offline_teachers", []);
-        }
-
-        console.log("✅ Offline resources updated successfully.");
-      } catch (err) {
-        console.warn("⚠️ Failed to cache offline resources:", err);
+      if (timeSinceLastCache < CACHE_INTERVAL) {
+        console.log(`📦 Offline Resources: Fresh (Last update ${Math.round(timeSinceLastCache / 60000)}m ago). Skipping fetch.`);
+        return;
       }
-    };
 
-    cacheOfflineResources();
-  }, [user?.id]); 
-  // 🟢 END BLOCK 🟢
+      console.log("📡 Offline Resources: Stale. Refreshing schools and teachers...");
+
+      // 1. Fetch Schools
+      const { data: schools, error: sError } = await supabase
+        .from("schools")
+        .select("id, school_name, campus_name, admin_workbook_url, admin_workbook_view_url, trainer_id")
+        .eq("trainer_id", user.id)
+        .order("school_name");
+
+      if (sError) throw sError;
+      const safeSchools = schools || [];
+
+      // 2. Save Schools to Offline Cache
+      await set("offline_schools", safeSchools);
+
+      // 3. Fetch Teachers (Only for MY schools)
+      if (safeSchools.length > 0) {
+        const mySchoolNames = safeSchools.map(s => s.school_name);
+        
+        const { data: teachers, error: tError } = await supabase
+          .from("teachers")
+          .select("id, grapeseed_id, name, school_name, campus, email, worksheet_url")
+          .in("school_name", mySchoolNames)
+          .order("name");
+        
+        if (!tError) {
+          await set("offline_teachers", teachers || []); 
+        }
+      } else {
+        await set("offline_teachers", []);
+      }
+
+      // 4. Update the Timestamp
+      await set("last_resource_cache_time", Date.now());
+      console.log("✅ Offline resources updated and time-stamped.");
+
+    } catch (err) {
+      console.warn("⚠️ Failed to cache offline resources:", err);
+    }
+  };
+
+  cacheOfflineResources();
+}, [user?.id]);
 
   
 // NEW: State for tracking Merge process status (Add these two lines)
