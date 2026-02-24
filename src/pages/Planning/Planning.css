@@ -61,7 +61,7 @@
 /* Single consistent border for ALL cells */
 .planning-table th,
 .planning-table td {
-border: 0.5px solid #3d4756;
+border: 0.1px solid #3d4756;
   padding: 0;
   margin: 0;
   box-sizing: border-box;
@@ -69,10 +69,15 @@ border: 0.5px solid #3d4756;
   height: 28px;
 }
 
-.planning-table td.cell-lva,
-.planning-table td.cell-visit {
-  border: 0.5px solid #9c9494;
+/* .planning-table td.cell-lva{
+  border: 0.5px;
+  border-color: #60a5fa;
 }
+
+.planning-table td.cell-visit {
+  border: 0.5px;
+  border-color: #a78bfa;
+} */
 
 .planning-table thead th {
   position: sticky;
