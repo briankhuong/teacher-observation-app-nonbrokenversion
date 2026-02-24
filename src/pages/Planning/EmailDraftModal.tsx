@@ -199,7 +199,22 @@ const updateHeader = (field: 'editableTo' | 'editableCc' | 'editableSubject' | '
     // --- TOKEN REPLACEMENT LOGIC ---
     // Get the date from the picker, or show a fallback if they haven't picked one yet
     const rawDate = isLVA ? activeDraft.meta.deadline : activeDraft.meta.visitDate;
-    const formattedDate = rawDate ? rawDate : '[Select a Date in Edit Tab]';
+
+    // --- DATE FORMATTING LOGIC ---
+  let formattedDate = '[Select a Date in Edit Tab]';
+  
+  if (rawDate) {
+    // We split and create the date this way to avoid timezone "off-by-one" day errors
+    const [year, month, day] = rawDate.split('-').map(Number);
+    const dateObj = new Date(year, month - 1, day);
+    
+    formattedDate = dateObj.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  }
 
     // Swap {{DATE}} with the actual date (wrapped in bold tags for styling)
     let processedText = activeDraft.editableBody || '';
