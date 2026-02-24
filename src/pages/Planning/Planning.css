@@ -417,7 +417,7 @@ border: 0.1px solid #3d4756;
 
 /* 1. Highlight the ROW */
 .planning-table tbody tr:hover td:not(.cell-lva):not(.cell-visit):not(.cell-complete):not(.cell-cancelled) { 
-  background-color: rgba(133, 183, 28, 0.15) !important;
+  background-color: rgba(134, 183, 28, 0.7) !important;
 }
 
 
