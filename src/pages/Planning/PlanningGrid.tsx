@@ -22,6 +22,7 @@ import { groupSelectedToBatches } from './emailUtils';
 import EmailDraftModal from './EmailDraftModal';
 import type { EmailBatch } from './emailUtils';
 import { GrapeSeedLoginModal } from '../../components/GrapeSeedLoginModal';
+import { flattenText } from "../../utils/textUtils";
 
 // At the top of PlanningGrid.tsx
 const isSameMonth = (obsDate: string, monthKey: string) => {
@@ -63,16 +64,18 @@ const PlanningGrid: React.FC = () => {
   // --- NEW SEARCH STATE & HELPER ---
   const [searchQuery, setSearchQuery] = useState('');
 
-  const matchesSearch = (teacher: any, schoolName: string, campusName: string) => {
-    if (!searchQuery.trim()) return true;
-    const query = searchQuery.toLowerCase().trim();
-    return (
-      (teacher.name || '').toLowerCase().includes(query) ||
-      (teacher.email || '').toLowerCase().includes(query) ||
-      schoolName.toLowerCase().includes(query) ||
-      campusName.toLowerCase().includes(query)
-    );
-  };
+// --- UPGRADED SEARCH HELPER ---
+const matchesSearch = React.useCallback((teacher: any, schoolName: string, campusName: string) => {
+  const query = flattenText(searchQuery);
+  if (!query) return true;
+
+  return (
+    flattenText(teacher.name).includes(query) ||
+    flattenText(teacher.email).includes(query) ||
+    flattenText(schoolName).includes(query) ||
+    flattenText(campusName).includes(query)
+  );
+}, [searchQuery]); // Only re-calculates when the query changes
 
   const tableRef = useRef<HTMLTableElement | null>(null);
 // Helper to check if a teacher matches the current email filters
