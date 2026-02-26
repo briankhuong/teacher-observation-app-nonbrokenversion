@@ -1162,8 +1162,7 @@ const handleManualSave = async () => {
       status: observationStatus,
       updatedAt: Date.now(),
       scratchpadText, 
-      adminSummaryVN, 
-      lastSync: lastServerVersionRef.current, 
+      adminSummaryVN,  
     };
 
     persistObservation(payload); 
@@ -1220,8 +1219,7 @@ const handleBackToDashboard = () => {
           status: observationStatus,
           updatedAt: Date.now(),
           scratchpadText,
-          adminSummaryVN,
-          lastSync: lastServerVersionRef.current,
+          adminSummaryVN
         };
     
         persistObservation(payload);
