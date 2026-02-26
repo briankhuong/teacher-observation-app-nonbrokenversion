@@ -1247,7 +1247,6 @@ const handleBackToDashboard = () => {
           updatedAt: Date.now(),
           scratchpadText,
           adminSummaryVN,
-          lastSync: lastServerVersionRef.current,
         };
     
         persistObservation(payload);
@@ -1280,7 +1279,6 @@ const handleToggleLock = () => {
       updatedAt: Date.now(),
       scratchpadText,
       adminSummaryVN,
-      lastSync: lastServerVersionRef.current,
     };
 
     persistObservation(payload);
@@ -1561,22 +1559,22 @@ const handleSavePreview = (targetIndex?: any) => {
         };
     });
 
-    // 2. Commit Data
+// 2. Commit Data
     setIndicators(newIndicators);
     isDirtyRef.current = true;
     
-    const payload: SavedObservationPayload = {
+    // 🟢 FIXED: Removed self-reference and manual lastSync
+    const previewPayload: Omit<SavedObservationPayload, 'lastSync'> = {
       id: observationMeta.id,
-      meta: { teacherName, teacher_id,grapeseed_id, schoolName, campus, unit, lesson, supportType, date },
+      meta: { ...observationMeta, teacher_id: rescuedIds.teacher_id || teacher_id, grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id },
       indicators: newIndicators,
       status: observationStatus,
       updatedAt: Date.now(),
       scratchpadText,
       adminSummaryVN,
-      lastSync: lastServerVersionRef.current,
     };
     
-    persistObservation(payload);
+    persistObservation(previewPayload as SavedObservationPayload);
     
     // 3. Close Modal
     setShowExportPreview(false);
@@ -1774,7 +1772,6 @@ useEffect(() => {
         updatedAt: Date.now(),
         scratchpadText,
         adminSummaryVN: adminSummaryVN,
-        lastSync: lastServerVersionRef.current, 
       };
 
       persistObservation(payload);
