@@ -1747,8 +1747,7 @@ useEffect(() => {
         status: observationStatus,
         updatedAt: Date.now(),
         scratchpadText,
-        adminSummaryVN: adminSummaryVN,
-        lastSync: lastServerVersionRef.current, 
+        adminSummaryVN: adminSummaryVN
       };
 
       persistObservation(payload);

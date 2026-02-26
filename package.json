@@ -35,19 +35,19 @@
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "perfect-freehand": "^1.2.2",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "read-excel-file": "^6.0.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/file-saver": "^2.0.7",
-    "@types/node": "^24.10.1",
-    "@types/react": "^19.2.5",
+    "@types/node": "^24.10.14",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-basic-ssl": "^2.1.0",
-    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-react": "^5.1.4",
     "concurrently": "^9.2.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
@@ -55,7 +55,20 @@
     "globals": "^16.5.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4",
+    "vite": "^7.3.1",
     "vite-plugin-pwa": "^1.2.0"
-  }
+  },
+  "description": "<<<<<<< HEAD\r # React + TypeScript + Vite",
+  "main": "eslint.config.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/briankhuong/teacher-observation-app-nonbrokenversion.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/briankhuong/teacher-observation-app-nonbrokenversion/issues"
+  },
+  "homepage": "https://github.com/briankhuong/teacher-observation-app-nonbrokenversion#readme"
 }

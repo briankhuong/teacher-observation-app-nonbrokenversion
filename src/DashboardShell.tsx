@@ -1365,15 +1365,17 @@ const handleConflictResolved = async (mergedData: any) => {
           const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
           const BUFFER = 2000;
           
-          let syncStatus: 'synced' | 'local-changes' | 'server-newer' = 'synced';
-
-          if (lastSync >= localUpdatedAt) {
-             syncStatus = 'synced'; // Trust local sync receipt over stale server data
-          } else if (localUpdatedAt > dbUpdatedAt + BUFFER) {
-             syncStatus = 'local-changes';
-          } else if (dbUpdatedAt > localUpdatedAt + BUFFER) {
-             syncStatus = 'server-newer';
-          }
+let syncStatus: 'synced' | 'local-changes' | 'server-newer';
+ 
+if (localUpdatedAt > lastSync) {
+  // Local changes always win
+  syncStatus = 'local-changes';
+} else if (dbUpdatedAt > lastSync) {
+  // Server changed AFTER last successful sync
+  syncStatus = 'server-newer';
+} else {
+  syncStatus = 'synced';
+}
 
           // Stats
           const indicatorsArray = Array.isArray(parsed.indicators) ? parsed.indicators : [];
@@ -2559,13 +2561,9 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     // 🟢 NEW: SMART SYNC UI LOGIC
     // -------------------------------------------------------------------------
     // Cast to 'any' to avoid TS errors if you haven't updated the Interface yet
-    const safeObs = obs as any; 
-    const lastSync = safeObs.lastSync || 0;
-    const updatedAt = safeObs.updatedAt || 0;
-
-    // It is synced if we have a record of syncing AND it happened after the last edit
-    const isSynced = lastSync > 0 && lastSync >= updatedAt;
-
+   const isSynced = obs.syncStatus === 'synced';
+const lastSync = obs.lastSync || 0; // keep for tooltip display only
+ 
     let actionButton;
 
     if (isSynced) {
