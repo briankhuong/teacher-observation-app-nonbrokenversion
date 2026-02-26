@@ -1244,7 +1244,12 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         performance_rating: localData.performance_rating || null,
       };
 
-      const { error } = await supabase.from("observations").upsert(payload).select('id');
+// 🟢 Update: Request the server-generated timestamp
+const { data: upsertData, error } = await supabase
+  .from("observations")
+  .upsert(payload)
+  .select('updated_at')
+  .single();
       
       if (error) {
         console.error("Supabase Error Details:", error);
@@ -1265,17 +1270,19 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         if (rpcError) console.error("CRM Broadcast failed:", rpcError);
       }
 
-      // 4. STAMP RECEIPT
-      const now = Date.now();
-      const storageKey = `${STORAGE_PREFIX}${localData.id}`;
-      const finalPayload = {
-        ...localData,
-        // Update local object with the IDs we just ensured existed
-        teacher_id: finalTeacherId, 
-        grapeseed_id: finalGsId,
-        meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
-        lastSync: now 
-      };
+// 4. STAMP RECEIPT (🟢 Use Server Time)
+const serverReceipt = upsertData?.updated_at 
+  ? new Date(upsertData.updated_at).getTime() 
+  : Date.now();
+
+const storageKey = `${STORAGE_PREFIX}${localData.id}`;
+const finalPayload = {
+  ...localData,
+  teacher_id: finalTeacherId, 
+  grapeseed_id: finalGsId,
+  meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
+  lastSync: serverReceipt // 👈 Server Clock
+};
       
       await set(storageKey, finalPayload);
 
@@ -1285,7 +1292,7 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         if (obs.id === id) {
           return { 
             ...obs, 
-            lastSync: now, 
+            lastSync: serverReceipt, 
             syncStatus: 'synced',
             updatedAt: localData.updatedAt,
             performance_rating: localData.performance_rating
@@ -1301,14 +1308,20 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
       alert("Sync failed: " + err.message);
     }
   };
+
+
 const handleConflictResolved = async (mergedData: any) => {
     try {
       console.log("💾 Saving resolved data & Force Pushing...", mergedData);
       
       // 1. Save to Disk
       // 🟢 FIX: Ensure we write to the correct key
-      const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
-      await set(storageKey, mergedData);
+const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
+const resolvedData = {
+  ...mergedData,
+  updatedAt: Date.now() // 👈 Force updatedAt forward so it's > old lastSync
+};
+await set(storageKey, resolvedData);
       
       // 2. Close Modal
       setIsConflictModalOpen(false);
@@ -1316,7 +1329,7 @@ const handleConflictResolved = async (mergedData: any) => {
       // 3. 🟢 FORCE PUSH
       // Pass 'true' as the 3rd argument to skip the conflict check
       // because we JUST resolved the conflict!
-      await handlePush(mergedData.id, mergedData, true);
+await handlePush(resolvedData.id, resolvedData, true);
       
     } catch (err) {
       console.error("❌ Failed to save resolved conflict:", err);

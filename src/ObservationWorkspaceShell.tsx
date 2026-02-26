@@ -994,22 +994,35 @@ useEffect(() => {
       
       setLastServerVersion(new Date(row.updated_at).getTime());
       
-      const dbUpdatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-      const localUpdatedAt = localData?.updatedAt ?? 0;
+// 🟢 FIX: Use the Server's clock as the source of truth
+      const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+      const lastSyncReceipt = localData?.lastSync || 0;
 
-      // Compare Local vs Server Time
-      if (localData && localUpdatedAt > dbUpdatedAt) {
-        console.log("Using newer local data.");
+      // Logic: If the server is newer than our last receipt, something changed elsewhere
+      if (serverTime > lastSyncReceipt) {
+        console.log("📡 Server is newer than our last receipt. Potential conflict.");
+        
+        // Only use server data if local is NOT "dirty" (has no un-pushed edits)
+        const isDirty = localData && (localData.updatedAt > (localData.lastSync || 0));
+        
+        if (!isDirty) {
+          console.log("Auto-pulling server data (Local is not dirty).");
+        } else {
+          console.warn("Conflict detected: Local and Server both have new changes.");
+          // You could trigger a Conflict Modal here if you had one in the workspace
+        }
+      }
+
+      // 🟢 STABILIZER: Always set the "Memory" to the server's time
+      setLastServerVersion(serverTime);
+
+      if (localData && (localData.updatedAt > (localData.lastSync || 0))) {
+        // Use local data if we have uncommitted changes
         setIndicators(localData.indicators);
         setObservationStatus(localData.status ?? "draft");
         setScratchpadText(localData.scratchpadText ?? "");
         setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
-        
-        // Restore the "Memory" of the last sync to prevent conflicts
-        if (localData.lastSync) {
-           setLastServerVersion(localData.lastSync);
-        }
-        return; 
+        return;
       }
 
       // If Server is newer (or no local data), use Server data
@@ -1056,13 +1069,16 @@ const persistObservation = React.useCallback(
       const safePayload: SavedObservationPayload = {
         ...payload,
         teacher_id: safeTeacherId,
-        grapeseed_id: safeGrapeSeedId, // 🟢 Now valid because of the interface update
+        grapeseed_id: safeGrapeSeedId,
         meta: {
           ...payload.meta,
           teacher_id: safeTeacherId, 
           grapeseed_id: safeGrapeSeedId
-        },
-        updatedAt: Date.now()
+        }, 
+        // 🟢 FIX: Ensure updatedAt is ALWAYS fresh local time
+        updatedAt: Date.now(),
+        // 🟢 FIX: Keep the existing receipt; handlePush on the Dashboard will update it
+        lastSync: payload.lastSync || existingOnDisk?.lastSync || 0
       };
 
       await set(storageKey, safePayload);
@@ -1147,9 +1163,15 @@ const handleManualSave = async () => {
       setCanvasDirty(false);
     }
 
-    const payload: SavedObservationPayload = {
+    // 1. 🟢 FETCH EXISTING DATA FIRST
+    // This provides the 'existingOnDisk' reference and the 'lastSync' receipt.
+    const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
+    const existingOnDisk = await get<SavedObservationPayload>(storageKey);
+    const lastSyncReceipt = existingOnDisk?.lastSync || lastServerVersionRef.current || 0;
+
+    // 2. BUILD THE PAYLOAD
+    const newPayload: SavedObservationPayload = {
       id: observationMeta.id,
-      // 🟢 Explicit ID Rescue
       teacher_id: rescuedIds.teacher_id || teacher_id,
       grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
       meta: { 
@@ -1160,13 +1182,17 @@ const handleManualSave = async () => {
       indicators,
       performance_rating: indicators[0]?.performance_rating || null,
       status: observationStatus,
-      updatedAt: Date.now(),
+      // 🟢 MOVE TIME FORWARD: updatedAt (Now) > lastSync (Receipt) 
+      // This is what makes the Sync button turn BLUE.
+      updatedAt: Date.now(), 
       scratchpadText, 
       adminSummaryVN, 
-      lastSync: lastServerVersionRef.current, 
+      // 🟢 KEEP RECEIPT: lastSync stays tied to the server's clock
+      lastSync: lastSyncReceipt
     };
 
-    persistObservation(payload); 
+    // 3. SEND TO PERSIST
+    persistObservation(newPayload); 
 };
 
 const handleAdminReviewSave = async () => {
