@@ -1061,8 +1061,7 @@ const persistObservation = React.useCallback(
           ...payload.meta,
           teacher_id: safeTeacherId, 
           grapeseed_id: safeGrapeSeedId
-        },
-        updatedAt: Date.now()
+        }
       };
 
       await set(storageKey, safePayload);

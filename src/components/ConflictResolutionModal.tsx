@@ -191,11 +191,30 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
     });
   };
 
-  const handleFinalize = () => {
-    const cleanIndicators = resolvedIndicators.filter(i => !i.isMeta).map(({ _localText, _serverText, _serverVersion, _isConflict, _selectedSource, _localGood, _localGrowth, _textMismatch, ...clean }) => clean);
-    onResolve({ ...localData, indicators: cleanIndicators, updatedAt: Date.now(), lastSync: Date.now() });
-  };
+const handleFinalize = () => {
+  const cleanIndicators = resolvedIndicators
+    .filter(i => !i.isMeta)
+    .map(({ 
+      _localText, 
+      _serverText, 
+      _serverVersion, 
+      _isConflict, 
+      _selectedSource, 
+      _localGood, 
+      _localGrowth, 
+      _textMismatch, 
+      ...clean 
+    }) => clean);
 
+  const newVersion = Date.now();
+
+  onResolve({
+    ...localData,
+    indicators: cleanIndicators,
+    updatedAt: newVersion
+    // ❌ REMOVE lastSync from here
+  });
+};
   if (!isOpen || !mounted) return null;
 
   return ReactDOM.createPortal(

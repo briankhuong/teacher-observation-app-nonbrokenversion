@@ -1297,29 +1297,38 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
       alert("Sync failed: " + err.message);
     }
   };
+
+  
 const handleConflictResolved = async (mergedData: any) => {
-    try {
-      console.log("💾 Saving resolved data & Force Pushing...", mergedData);
-      
-      // 1. Save to Disk
-      // 🟢 FIX: Ensure we write to the correct key
-      const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
-      await set(storageKey, mergedData);
-      
-      // 2. Close Modal
-      setIsConflictModalOpen(false);
+  try {
+    console.log("💾 Saving resolved data & Force Pushing...", mergedData);
 
-      // 3. 🟢 FORCE PUSH
-      // Pass 'true' as the 3rd argument to skip the conflict check
-      // because we JUST resolved the conflict!
-      await handlePush(mergedData.id, mergedData, true);
-      
-    } catch (err) {
-      console.error("❌ Failed to save resolved conflict:", err);
-      alert("Error saving your changes. Please try again.");
-    }
-  };
+    const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
 
+    // 1️⃣ Save locally (unsynced resolved version)
+    await set(storageKey, mergedData);
+
+    // 2️⃣ Close modal
+    setIsConflictModalOpen(false);
+
+    // 3️⃣ Force push to server
+    await handlePush(mergedData.id, mergedData, true);
+
+    // 4️⃣ Mark as synced AFTER successful push
+    const syncedPayload = {
+      ...mergedData,
+      lastSync: mergedData.updatedAt
+    };
+
+    await set(storageKey, syncedPayload);
+
+    console.log("✅ Conflict resolved & synced");
+
+  } catch (err) {
+    console.error("❌ Failed to save resolved conflict:", err);
+    alert("Error saving your changes. Please try again.");
+  }
+};
 
 // 🟢 CORE LOGIC: CACHE-FIRST LOADING + GHOST MERGE
   React.useEffect(() => {
@@ -2561,7 +2570,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     // 🟢 NEW: SMART SYNC UI LOGIC
     // -------------------------------------------------------------------------
     // Cast to 'any' to avoid TS errors if you haven't updated the Interface yet
-   const isSynced = obs.syncStatus === 'synced';
+const isSynced = obs.syncStatus === 'synced';
 const lastSync = obs.lastSync || 0; // keep for tooltip display only
  
     let actionButton;
