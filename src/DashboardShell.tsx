@@ -1261,7 +1261,7 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         if (rpcError) console.error("CRM Broadcast failed:", rpcError);
       }
 
-      // 4. STAMP RECEIPT
+// 4. STAMP RECEIPT
       const now = Date.now();
       const storageKey = `${STORAGE_PREFIX}${localData.id}`;
       const finalPayload = {
@@ -1270,7 +1270,8 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         teacher_id: finalTeacherId, 
         grapeseed_id: finalGsId,
         meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
-        lastSync: now 
+        lastSync: now,
+        updatedAt: now // <-- FIX: Pin updatedAt to lastSync to guarantee parity
       };
       
       await set(storageKey, finalPayload);
@@ -1281,9 +1282,9 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         if (obs.id === id) {
           return { 
             ...obs, 
-            lastSync: now, 
+            lastSync: now,
+            updatedAt: now, // <-- FIX: Keep UI state perfectly aligned
             syncStatus: 'synced',
-            updatedAt: localData.updatedAt,
             performance_rating: localData.performance_rating
           };
         }
@@ -1359,23 +1360,25 @@ const handleConflictResolved = async (mergedData: any) => {
             };
           }
 
-          // 🟢 FIX 3 (Edit Zombie): "Trust The Receipt"
+        // 🟢 FIX 3 (Edit Zombie): "Trust The Receipt"
           const localUpdatedAt = parsed.updatedAt || 0;
           const lastSync = parsed.lastSync || 0;
           const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
-          const BUFFER = 2000;
           
-let syncStatus: 'synced' | 'local-changes' | 'server-newer';
- 
-if (localUpdatedAt > lastSync) {
-  // Local changes always win
-  syncStatus = 'local-changes';
-} else if (dbUpdatedAt > lastSync) {
-  // Server changed AFTER last successful sync
-  syncStatus = 'server-newer';
-} else {
-  syncStatus = 'synced';
-}
+          // Increased to 10s to absorb Windows PC system clock drift
+          const BUFFER = 10000; 
+          
+          let syncStatus: 'synced' | 'local-changes' | 'server-newer';
+           
+          if (localUpdatedAt > lastSync) {
+            // Local changes always win
+            syncStatus = 'local-changes';
+          } else if (dbUpdatedAt > (lastSync + BUFFER)) {
+            // Server changed AFTER last successful sync + buffer allowance
+            syncStatus = 'server-newer';
+          } else {
+            syncStatus = 'synced';
+          }
 
           // Stats
           const indicatorsArray = Array.isArray(parsed.indicators) ? parsed.indicators : [];
@@ -1617,11 +1620,18 @@ if (localUpdatedAt > lastSync) {
            lastSync: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
         };
 
-        // Calc Sync Status
+        // Calc Sync Status (Standardized with processAndDisplay)
         const localTime = finalData.updatedAt || 0;
+        const lastSync = finalData.lastSync || 0;
         const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+        const BUFFER = 10000; // 10s buffer for Windows clock drift
+        
         let syncStatus = 'synced';
-        if (localTime > serverTime + 2000) syncStatus = 'local-changes';
+        if (localTime > lastSync) {
+          syncStatus = 'local-changes';
+        } else if (serverTime > (lastSync + BUFFER)) {
+          syncStatus = 'server-newer';
+        }
 
         // Stats Calculation
         const inds = Array.isArray(finalData.indicators) ? finalData.indicators : [];
@@ -1825,7 +1835,12 @@ const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: 
   }
 
   // 5. Prepare the Update (Mark as Dirty)
-  const now = Date.now();
+  // 🟢 FIX: Ensure 'now' is strictly greater than lastSync, even if the Windows PC clock 
+  // is lagging behind the server time pulled during the fallbacks above.
+  const rawNow = Date.now();
+  const safeLastSync = currentData.lastSync || 0;
+  const now = Math.max(rawNow, safeLastSync + 1000); 
+
   const updatedData = {
      ...currentData,
      meta: {
@@ -1869,7 +1884,6 @@ const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: 
   setEditingObservation(null);
   setShowEditModal(false);
 }, [setObservations]);
-// --- Now, continue with the rest of your component's code ---
 
 const grouped = React.useMemo(() => {
     if (groupMode === "none") return null;
