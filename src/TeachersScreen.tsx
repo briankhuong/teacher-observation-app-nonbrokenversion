@@ -12,7 +12,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState, FilterFn } from "@tanstack/react-table";
-import { Search, RefreshCw, Plus, Copy, ExternalLink, Check } from "lucide-react";
+import { Search, RefreshCw, Plus, Copy, ExternalLink, Check, Pencil } from "lucide-react";
 import { flattenText } from "./utils/textUtils";
 
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
@@ -1896,15 +1896,23 @@ const handleSync = async () => {
           </div>
 
       <div className="tm-actions-group">
-            {/* 🟢 NEW: Bulk Edit Toggle Button */}
-            <button
-              type="button"
-              className={`btn ${isBulkEditMode ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}
-              onClick={toggleBulkEdit}
-            >
-              {isBulkEditMode ? "Done Editing" : "✏️ Bulk Edit"}
-            </button>            
+{/* 🟢 NEW: Bulk Edit Toggle Button */}
+            <button
+              type="button"
+              className={`btn ${isBulkEditMode ? 'btn-primary' : 'btn-ghost'}`}
+              style={{ 
+                fontWeight: 600, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px',
+                border: isBulkEditMode ? undefined : '1px solid #475569', 
+                borderRadius: '9999px', 
+                padding: '4px 16px' 
+              }}
+              onClick={toggleBulkEdit}
+            >
+              {isBulkEditMode ? "Done Editing" : <><Pencil size={14} /> Bulk Edit</>}
+            </button>
           <button 
               type="button" 
               className="tm-pure-icon" 
