@@ -874,6 +874,12 @@ export const TeachersScreen: React.FC = () => {
     let thriving = 0;
     let functioning = 0;
     let developing = 0;
+    
+    // 🟢 NEW Counters
+    const modelCounts: Record<string, number> = {};
+    let expBeginner = 0;
+    let expIntermediate = 0;
+    let expVeteran = 0;
 
     // STEP 1: Calculate Base Status & Counts (Global)
     const rowsWithStatus = rows.map((r) => {
@@ -903,6 +909,18 @@ export const TeachersScreen: React.FC = () => {
         if (r.latest_performance === 'Thriving') thriving++;
         if (r.latest_performance === 'Functioning') functioning++;
         if (r.latest_performance === 'Developing') developing++;
+
+        // 🟢 Track Teaching Models
+        if (r.teaching_model) {
+          modelCounts[r.teaching_model] = (modelCounts[r.teaching_model] || 0) + 1;
+        }
+
+        // 🟢 Track Experience
+        if (r.year_count !== null) {
+          if (r.year_count < 1) expBeginner++;
+          else if (r.year_count < 3) expIntermediate++;
+          else expVeteran++;
+        }
       }
 
       return { ...r, _derivedStatus: derivedStatus };
@@ -931,6 +949,11 @@ export const TeachersScreen: React.FC = () => {
     const totalActiveForStats = activeCount + mutualCount;
     const getPct = (val: number) => totalActiveForStats > 0 ? Math.round((val / totalActiveForStats) * 100) : 0;
 
+    // 🟢 Sort models by count descending
+    const sortedModels = Object.entries(modelCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count, pct: getPct(count) }));
+
     return {
       filteredRows: result,
       counts: { 
@@ -945,7 +968,13 @@ export const TeachersScreen: React.FC = () => {
         totalActiveForStats,
         thriving: { count: thriving, pct: getPct(thriving) },
         functioning: { count: functioning, pct: getPct(functioning) },
-        developing: { count: developing, pct: getPct(developing) }
+        developing: { count: developing, pct: getPct(developing) },
+        models: sortedModels,
+        experience: {
+          beginner: { count: expBeginner, pct: getPct(expBeginner) },
+          intermediate: { count: expIntermediate, pct: getPct(expIntermediate) },
+          veteran: { count: expVeteran, pct: getPct(expVeteran) }
+        }
       }
     };
   }, [rows, filterStatus, filterPerformance, filterMonth]);
@@ -1963,20 +1992,43 @@ const handleSync = async () => {
 {/* STATE 2: Data Exists (Show Filters regardless of search results) */}
           {!loading && rows.length > 0 && (
             <>
-              {/* 🟢 NEW: Teacher Stats Dashboard */}
-              <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155', flex: 1 }}>
-                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Unique Headcount</div>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-main)' }}>{stats.uniqueActive}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Across active & mutual rows</div>
+{/* 🟢 NEW: Teacher Stats Dashboard */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Active Headcount</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                    <span style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-main)' }}>{stats.totalActiveForStats}</span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>({stats.uniqueActive} unique)</span>
+                  </div>
                 </div>
                 
-                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155', flex: 2 }}>
-                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Performance Spread (Active Roster)</div>
-                  <div style={{ display: 'flex', gap: '16px' }}>
-                    <div><span style={{ color: '#22c55e', fontWeight: 700 }}>{stats.thriving.count}</span> <span style={{fontSize: '11px'}}>({stats.thriving.pct}%) Thriving</span></div>
-                    <div><span style={{ color: '#3b82f6', fontWeight: 700 }}>{stats.functioning.count}</span> <span style={{fontSize: '11px'}}>({stats.functioning.pct}%) Functioning</span></div>
-                    <div><span style={{ color: '#ef4444', fontWeight: 700 }}>{stats.developing.count}</span> <span style={{fontSize: '11px'}}>({stats.developing.pct}%) Developing</span></div>
+                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Performance</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <div style={{ fontSize: '12px' }}><span style={{ color: '#22c55e', fontWeight: 700, display: 'inline-block', width: '24px' }}>{stats.thriving.count}</span> <span style={{ color: 'var(--text-muted)' }}>({stats.thriving.pct}%) Thriving</span></div>
+                    <div style={{ fontSize: '12px' }}><span style={{ color: '#3b82f6', fontWeight: 700, display: 'inline-block', width: '24px' }}>{stats.functioning.count}</span> <span style={{ color: 'var(--text-muted)' }}>({stats.functioning.pct}%) Functioning</span></div>
+                    <div style={{ fontSize: '12px' }}><span style={{ color: '#ef4444', fontWeight: 700, display: 'inline-block', width: '24px' }}>{stats.developing.count}</span> <span style={{ color: 'var(--text-muted)' }}>({stats.developing.pct}%) Developing</span></div>
+                  </div>
+                </div>
+
+                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Top Models</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '56px', overflowY: 'auto' }}>
+                    {stats.models.length > 0 ? stats.models.slice(0, 3).map(m => (
+                      <div key={m.name} style={{ fontSize: '12px' }}>
+                        <span style={{ fontWeight: 700, color: '#f8fafc', display: 'inline-block', width: '24px' }}>{m.count}</span> 
+                        <span style={{ color: 'var(--text-muted)' }}>({m.pct}%) {m.name}</span>
+                      </div>
+                    )) : <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No models set</div>}
+                  </div>
+                </div>
+
+                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Experience</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <div style={{ fontSize: '12px' }}><span style={{ fontWeight: 700, color: '#f8fafc', display: 'inline-block', width: '24px' }}>{stats.experience.beginner.count}</span> <span style={{ color: 'var(--text-muted)' }}>({stats.experience.beginner.pct}%) &lt; 1 yr</span></div>
+                    <div style={{ fontSize: '12px' }}><span style={{ fontWeight: 700, color: '#f8fafc', display: 'inline-block', width: '24px' }}>{stats.experience.intermediate.count}</span> <span style={{ color: 'var(--text-muted)' }}>({stats.experience.intermediate.pct}%) 1 - 3 yrs</span></div>
+                    <div style={{ fontSize: '12px' }}><span style={{ fontWeight: 700, color: '#f8fafc', display: 'inline-block', width: '24px' }}>{stats.experience.veteran.count}</span> <span style={{ color: 'var(--text-muted)' }}>({stats.experience.veteran.pct}%) 3+ yrs</span></div>
                   </div>
                 </div>
               </div>
