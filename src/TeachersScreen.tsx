@@ -31,8 +31,11 @@ export interface TeacherRow {
   tags: string[] | null; // 🟢 ADDED THIS
   campus: string;
   worksheet_url: string | null;
-  school_id: string | null;  // 🟢 ADD THIS (UUID)
-  campus_id: string | null;  // 🟢 ADD THIS (Text ID)
+  school_id: string | null;
+  campus_id: string | null;
+  teaching_model: string | null;
+  year_count: number | null;
+  needs_review: boolean;
   created_at: string;
   updated_at: string;
   last_visit?: string | null;
@@ -44,8 +47,10 @@ type TeacherFormState = {
   school_name: string;
   campus: string;
   worksheet_url: string;
-  school_id: string | null;  // 🟢 ADD THIS
-  campus_id: string | null;  // 🟢 ADD THIS
+  school_id: string | null;
+  campus_id: string | null;
+  teaching_model: string;
+  year_count: number | string;
 };
 
 const emptyForm: TeacherFormState = {
@@ -56,6 +61,8 @@ const emptyForm: TeacherFormState = {
   worksheet_url: "",
   school_id: null,
   campus_id: null,
+  teaching_model: "",
+  year_count: "",
 };
 
 interface TeacherFormModalProps {
@@ -74,6 +81,7 @@ interface TeacherViewModalProps {
   onCancel: () => void;
   onEdit: (row: TeacherRow) => void;
   onDelete: (row: TeacherRow) => Promise<void>;
+  onAcknowledge: (row: TeacherRow) => Promise<void>;
 }
 
 const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
@@ -82,6 +90,7 @@ const TeacherViewModal: React.FC<TeacherViewModalProps> = ({
   onCancel,
   onEdit,
   onDelete,
+  onAcknowledge,
 }) => {
   const [supportHistory, setSupportHistory] = useState<any[]>([]);
   const [viewingObservation, setViewingObservation] = useState<any | null>(null);
@@ -199,7 +208,7 @@ const handleOpenDeepDive = async (obsId: string) => {
             </div>
           </div>
 
-          {/* --- SECTION 2: BASIC INFO --- */}
+{/* --- SECTION 2: BASIC INFO --- */}
           <div className="detail-row">
             <label>Full Name</label>
             <span style={{ fontWeight: 600 }}>{row.name}</span>
@@ -211,6 +220,12 @@ const handleOpenDeepDive = async (obsId: string) => {
           <div className="detail-row">
             <label>Email</label>
             <span>{row.email || "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>Teaching Profile</label>
+            <span>
+              {row.teaching_model || "No model set"} • {row.year_count !== null ? `${row.year_count} years exp.` : "Exp. unknown"}
+            </span>
           </div>
 
           {/* --- SECTION 3: WORKBOOK LINK --- */}
@@ -342,7 +357,17 @@ const handleOpenDeepDive = async (obsId: string) => {
 
         </div>
 
-        <div className="modal-footer">
+<div className="modal-footer">
+          {row.needs_review && (
+            <button 
+              type="button" 
+              className="btn" 
+              style={{ background: '#eab308', color: '#000', border: 'none', marginRight: 'auto', fontWeight: 600 }}
+              onClick={() => onAcknowledge(row)}
+            >
+              ✨ Acknowledge
+            </button>
+          )}
           <button type="button" className="btn" onClick={onCancel}>Close</button>
           <button type="button" className="btn btn-primary" onClick={() => onEdit(row)}>Edit</button>
           <button type="button" className="btn btn-ghost btn-danger" onClick={() => onDelete(row)}>Delete</button>
@@ -536,7 +561,7 @@ const handleWorkbookLookup = async () => {
             />
           </div>
 
-          <div className="form-row">
+        <div className="form-row">
             <label>Email</label>
             <input
               className="input"
@@ -544,6 +569,37 @@ const handleWorkbookLookup = async () => {
               value={form.email}
               onChange={handleChange("email")}
               placeholder="teacher@example.com"
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Teaching Model</label>
+            <select
+              className="select"
+              value={form.teaching_model}
+              onChange={(e) => setForm(prev => ({ ...prev, teaching_model: e.target.value }))}
+            >
+              <option value="">-- Select Model --</option>
+              <option value="Classic">Classic</option>
+              <option value="Nexus">Nexus</option>
+              <option value="Connect">Connect</option>
+              <option value="LittleSEED">LittleSEED</option>
+              <option value="Classic + Nexus">Classic + Nexus</option>
+              <option value="Classic + Connect">Classic + Connect</option>
+              <option value="Classic + LS">Classic + LS</option>
+            </select>
+          </div>
+
+          <div className="form-row">
+            <label>Years of Experience</label>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.5"
+              value={form.year_count}
+              onChange={(e) => setForm(prev => ({ ...prev, year_count: e.target.value }))}
+              placeholder="e.g. 2.5"
             />
           </div>
 
@@ -755,35 +811,57 @@ export const TeachersScreen: React.FC = () => {
 
   // NEW: View Modal state
   const [viewingRow, setViewingRow] = useState<TeacherRow | null>(null);
-  const [showViewModal, setShowViewModal] = useState(false);
-
+  const [showViewModal, setShowViewModal] = useState(false);  
   const [refreshKey, setRefreshKey] = useState(0);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'mutual' | 'inactive'>('active');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'new' | 'active' | 'mutual' | 'inactive'>('active');
   // 🟢 NEW: Secondary Filters (Performance & Month)
   const [filterPerformance, setFilterPerformance] = useState<string>('all');
   const [filterMonth, setFilterMonth] = useState<string>(''); // Format: "YYYY-MM"
 
-// 🟢 UPDATED: Multi-step Filter Logic
-  const { filteredRows, counts } = useMemo(() => {
+// 🟢 UPDATED: Multi-step Filter & Stats Engine
+  const { filteredRows, counts, stats } = useMemo(() => {
     let activeCount = 0;
     let mutualCount = 0;
     let inactiveCount = 0;
+    let newCount = 0;
+
+    // Stats Counters
+    const uniqueActiveTeacherNames = new Set<string>();
+    let thriving = 0;
+    let functioning = 0;
+    let developing = 0;
 
     // STEP 1: Calculate Base Status & Counts (Global)
     const rowsWithStatus = rows.map((r) => {
       const tags = Array.isArray(r.tags) ? r.tags : [];
       const isInactive = tags.some(t => t.toLowerCase() === "inactive");
       const isMutual = tags.some(t => t !== "No tag" && t.toLowerCase() !== "inactive");
-      const isActive = !isInactive && !isMutual;
+      
+      let derivedStatus = 'active';
+      if (r.needs_review) {
+        newCount++;
+        derivedStatus = 'new';
+      } else if (isInactive) {
+        inactiveCount++;
+        derivedStatus = 'inactive';
+      } else if (isMutual) {
+        mutualCount++;
+        derivedStatus = 'mutual';
+      } else {
+        activeCount++;
+      }
 
-      if (isInactive) inactiveCount++;
-      else if (isMutual) mutualCount++;
-      else activeCount++;
+      // STEP 1B: Aggregate Stats (Only for Active & Mutual teachers)
+      if (!isInactive && !r.needs_review) {
+        // Clean name for unique deduplication
+        uniqueActiveTeacherNames.add(r.name.trim().toLowerCase());
+        
+        if (r.latest_performance === 'Thriving') thriving++;
+        if (r.latest_performance === 'Functioning') functioning++;
+        if (r.latest_performance === 'Developing') developing++;
+      }
 
-      return { 
-        ...r, 
-        _derivedStatus: isInactive ? 'inactive' : isMutual ? 'mutual' : 'active' 
-      };
+      return { ...r, _derivedStatus: derivedStatus };
     });
 
     // STEP 2: Filter by Status Tab
@@ -797,22 +875,33 @@ export const TeachersScreen: React.FC = () => {
     }
 
     // STEP 4: Filter by Month (Last Visit)
-if (filterMonth) {
-  result = result.filter(r => {
-    if (!r.last_visit) return false; 
-    // Ensure both are in the same YYYY-MM format for comparison
-    const visitMonth = r.last_visit.substring(0, 7); 
-    return visitMonth === filterMonth;
-  });
-}
+    if (filterMonth) {
+      result = result.filter(r => {
+        if (!r.last_visit) return false; 
+        const visitMonth = r.last_visit.substring(0, 7); 
+        return visitMonth === filterMonth;
+      });
+    }
+
+    // Calculate percentages based on total Active + Mutual
+    const totalActiveForStats = activeCount + mutualCount;
+    const getPct = (val: number) => totalActiveForStats > 0 ? Math.round((val / totalActiveForStats) * 100) : 0;
 
     return {
       filteredRows: result,
       counts: { 
         all: rows.length, 
+        new: newCount,
         active: activeCount, 
         mutual: mutualCount, 
         inactive: inactiveCount 
+      },
+      stats: {
+        uniqueActive: uniqueActiveTeacherNames.size,
+        totalActiveForStats,
+        thriving: { count: thriving, pct: getPct(thriving) },
+        functioning: { count: functioning, pct: getPct(functioning) },
+        developing: { count: developing, pct: getPct(developing) }
       }
     };
   }, [rows, filterStatus, filterPerformance, filterMonth]);
@@ -833,10 +922,49 @@ if (filterMonth) {
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false); // For column visibility modal
 
-  const [sorting, setSorting] = useState<SortingState>([
+const [sorting, setSorting] = useState<SortingState>([
     { id: "school_campus", desc: false }, // Custom ID for combined column
     { id: "name", desc: false },
   ]);
+
+  // 🟢 MOVED: Acknowledge functions moved UP so columns can use them
+  const handleAcknowledge = async (row: TeacherRow) => {
+    const { error } = await supabase
+      .from("teachers")
+      .update({ needs_review: false })
+      .eq("id", row.id)
+      .eq("trainer_id", user?.id); // Safe fallback to user?.id
+
+    if (error) {
+      alert("Failed to acknowledge teacher.");
+      return;
+    }
+    
+    setRows(prev => prev.map(r => r.id === row.id ? { ...r, needs_review: false } : r));
+    
+    if (viewingRow?.id === row.id) {
+      setViewingRow({ ...row, needs_review: false });
+    }
+  };
+
+  const handleAcknowledgeAll = async () => {
+    const ok = window.confirm(`Are you sure you want to acknowledge all ${counts.new} new teachers? This will clear your inbox.`);
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from("teachers")
+      .update({ needs_review: false })
+      .eq("trainer_id", user?.id) // Safe fallback to user?.id
+      .eq("needs_review", true);
+
+    if (error) {
+      alert("Failed to acknowledge teachers.");
+      return;
+    }
+
+    setRows(prev => prev.map(r => ({ ...r, needs_review: false })));
+    setFilterStatus('active');
+  };
 
   // 🟢 NEW: Background Provisioning Logic
   const runBackgroundProvisioning = async (teacher: TeacherRow, token: string) => {
@@ -1097,12 +1225,24 @@ if (filterMonth) {
         size: 100,
         minSize: 100,
         enableSorting: false,
-        enableResizing: false,
+enableResizing: false,
         cell: (info) => (
           <div
             className="table-actions"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* 🟢 NEW: Quick Inline Acknowledge Button */}
+            {info.row.original.needs_review && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ color: '#eab308', fontSize: '14px', padding: '0 4px', marginRight: '4px' }}
+                onClick={() => handleAcknowledge(info.row.original)}
+                title="Acknowledge Teacher"
+              >
+                ✨
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-ghost"
@@ -1114,9 +1254,9 @@ if (filterMonth) {
         ),
       },
     ],
-    [setShowColumnMenu, provisioningIds]
+    // 🟢 ADDED: handleAcknowledge to the dependency array
+    [setShowColumnMenu, provisioningIds, handleAcknowledge]
   );
-
 const table = useReactTable({
     data: filteredRows,
     columns,
@@ -1173,6 +1313,9 @@ const table = useReactTable({
             id,
             trainer_id,
             grapeseed_id,
+            teaching_model,
+            year_count,
+            needs_review,
             latest_performance,
             teaching_issue,
             name,
@@ -1267,7 +1410,7 @@ const table = useReactTable({
   };
 
   // Re-define openEdit for view modal usage (allows seamless transition)
-  const openEditFromView = (row: TeacherRow) => {
+const openEditFromView = (row: TeacherRow) => {
     setFormMode("edit");
     setEditingRow(row);
     setShowForm(true);
@@ -1275,7 +1418,6 @@ const table = useReactTable({
     setViewingRow(null);
     setShowViewModal(false);
   };
-
 
 
 const handleDelete = async (row: TeacherRow) => {
@@ -1317,6 +1459,9 @@ const submitForm = async (values: TeacherFormState, autoCreateToken?: string) =>
           worksheet_url: values.worksheet_url.trim() || null,
           school_id: values.school_id, 
           campus_id: values.campus_id, 
+          teaching_model: values.teaching_model.trim() || null,
+          year_count: values.year_count ? Number(values.year_count) : null,
+          needs_review: true,
         })
         .select(
           `
@@ -1371,6 +1516,8 @@ const submitForm = async (values: TeacherFormState, autoCreateToken?: string) =>
         school_id: values.school_id, 
         campus_id: values.campus_id, 
         worksheet_url: values.worksheet_url.trim() || null,
+        teaching_model: values.teaching_model.trim() || null,
+        year_count: values.year_count ? Number(values.year_count) : null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", editingRow.id)
@@ -1427,6 +1574,8 @@ const submitForm = async (values: TeacherFormState, autoCreateToken?: string) =>
           worksheet_url: editingRow.worksheet_url ?? "",
           school_id: editingRow.school_id ?? null,
           campus_id: editingRow.campus_id ?? null,
+          teaching_model: editingRow.teaching_model ?? "",
+          year_count: editingRow.year_count ?? "",
         }
       : undefined;
 
@@ -1632,9 +1781,27 @@ const handleSync = async () => {
             </div>
           )}
 
-          {/* STATE 2: Data Exists (Show Filters regardless of search results) */}
+{/* STATE 2: Data Exists (Show Filters regardless of search results) */}
           {!loading && rows.length > 0 && (
             <>
+              {/* 🟢 NEW: Teacher Stats Dashboard */}
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155', flex: 1 }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Unique Headcount</div>
+                  <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-main)' }}>{stats.uniqueActive}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Across active & mutual rows</div>
+                </div>
+                
+                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155', flex: 2 }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Performance Spread (Active Roster)</div>
+                  <div style={{ display: 'flex', gap: '16px' }}>
+                    <div><span style={{ color: '#22c55e', fontWeight: 700 }}>{stats.thriving.count}</span> <span style={{fontSize: '11px'}}>({stats.thriving.pct}%) Thriving</span></div>
+                    <div><span style={{ color: '#3b82f6', fontWeight: 700 }}>{stats.functioning.count}</span> <span style={{fontSize: '11px'}}>({stats.functioning.pct}%) Functioning</span></div>
+                    <div><span style={{ color: '#ef4444', fontWeight: 700 }}>{stats.developing.count}</span> <span style={{fontSize: '11px'}}>({stats.developing.pct}%) Developing</span></div>
+                  </div>
+                </div>
+              </div>
+
               {/* 🟢 FIXED: Filters are now outside the table-row-length check */}
               
               {/* 1. Status Tabs */}
@@ -1644,6 +1811,13 @@ const handleSync = async () => {
                   onClick={() => setFilterStatus('all')}
                 >
                   All Teachers <span className="count-badge">{counts.all}</span>
+                </button>
+                
+                <button 
+                  className={`filter-tab ${filterStatus === 'new' ? 'active-yellow' : ''}`}
+                  onClick={() => setFilterStatus('new')}
+                >
+                  Newly Added Teachers <span className="count-badge" style={{ background: counts.new > 0 ? '#eab308' : '#334155', color: counts.new > 0 ? '#000' : '#fff' }}>{counts.new}</span>
                 </button>
                 
                 <button 
@@ -1708,7 +1882,21 @@ const handleSync = async () => {
                   Clear Filters ×
                 </button>
                 )}
-              </div>
+</div>
+
+              {/* 🟢 NEW: Bulk Acknowledge Button (Only shows when in New Inbox) */}
+              {filterStatus === 'new' && counts.new > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+                  <button 
+                    type="button" 
+                    className="btn" 
+                    style={{ background: '#eab308', color: '#000', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
+                    onClick={handleAcknowledgeAll}
+                  >
+                    ✨ Acknowledge All ({counts.new})
+                  </button>
+                </div>
+              )}
 
               {/* 3. Column Visibility Menu (Positioned Absolute) */}
               <div
@@ -1867,12 +2055,13 @@ const handleSync = async () => {
         onSubmit={submitForm}
       />
       
-      <TeacherViewModal
+    <TeacherViewModal
         open={showViewModal}
         row={viewingRow}
         onCancel={() => setShowViewModal(false)}
         onEdit={openEditFromView}
         onDelete={handleDelete}
+        onAcknowledge={handleAcknowledge}
       />
 
       {/* 🟢 NEW: Spinner Style */}
