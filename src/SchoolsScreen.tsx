@@ -46,8 +46,9 @@ export interface SchoolRow {
   notes: string | null;
   admin_workbook_url: string | null;
   has_empty_class: boolean; // 🟢 NEW FIELD
-  official_code: string | null; // 🟢 Added
-  campus_id: string | null;     // 🟢 Added
+  official_code: string | null; 
+  campus_id: string | null;     
+  caring: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -59,14 +60,15 @@ type SchoolFormState = {
   admin_email: string;
   admin_phone: string;
   am_name: string;
-  official_code: string; // 🟢 Added
-  campus_id: string;     // 🟢 Added
+  official_code: string; 
+  campus_id: string;     
   am_email: string;
   address: string;
   district: string;
   city: string;
   notes: string;
   admin_workbook_url: string;
+  caring: boolean;
 };
 
 const emptyForm: SchoolFormState = {
@@ -79,11 +81,12 @@ const emptyForm: SchoolFormState = {
   am_email: "",
   address: "",
   district: "",
-  official_code: "", // 🟢 Added
-  campus_id: "",     // 🟢 Added
+  official_code: "", 
+  campus_id: "",     
   city: "",
   notes: "",
   admin_workbook_url: "",
+  caring: false,
 };
 
 interface SchoolFormModalProps {
@@ -123,7 +126,14 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           </button>
         </div>
 
-        <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
+    <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
+          <div className="detail-row" style={{ background: row.caring ? 'rgba(34, 197, 94, 0.1)' : 'transparent', padding: '8px', borderRadius: '6px' }}>
+            <label>Caring School Status</label>
+            <span style={{ fontWeight: 600, color: row.caring ? '#22c55e' : 'var(--text)' }}>
+              {row.caring ? "✅ Caring School" : "—"}
+            </span>
+          </div>
+
           <div className="detail-row">
             <label>School Name</label>
             <span>{row.school_name}</span>
@@ -521,6 +531,22 @@ return (
               value={form.city}
               onChange={handleChange("city")}
             />
+          </div>
+
+      <div className="form-row">
+            <label>Caring Status</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                id="chk-caring"
+                checked={form.caring}
+                onChange={(e) => setForm(prev => ({ ...prev, caring: e.target.checked }))}
+                style={{ width: 'auto', margin: 0 }}
+              />
+              <label htmlFor="chk-caring" style={{ margin: 0, cursor: 'pointer', fontWeight: 600 }}>
+                Mark as Caring
+              </label>
+            </div>
           </div>
 
           <div className="form-row">
@@ -958,6 +984,7 @@ const table = useReactTable({
             campus_name,
             official_code, 
             campus_id,
+            caring,
             admin_name,
             admin_email,
             admin_phone,
@@ -1071,6 +1098,7 @@ const table = useReactTable({
           district: values.district.trim() || null,
           city: values.city.trim() || null,
           notes: values.notes.trim() || null,
+          caring: values.caring,
           admin_workbook_url: values.admin_workbook_url.trim() || null,
         })
         .select()
@@ -1113,6 +1141,7 @@ const table = useReactTable({
         city: values.city.trim() || null,
         notes: values.notes.trim() || null,
         admin_workbook_url: values.admin_workbook_url.trim() || null,
+        caring: values.caring,
         updated_at: new Date().toISOString(),
       })
       .eq("id", editingRow.id)
@@ -1157,6 +1186,7 @@ const table = useReactTable({
           city: editingRow.city ?? "",
           notes: editingRow.notes ?? "",
           admin_workbook_url: editingRow.admin_workbook_url ?? "",
+          caring: editingRow.caring ?? false,
         }
       : undefined;
 
