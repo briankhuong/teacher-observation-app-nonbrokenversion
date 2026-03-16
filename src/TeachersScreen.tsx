@@ -794,6 +794,50 @@ const fuzzyVietnameseFilter: FilterFn<TeacherRow> = (row, columnId, value) => {
   return targetValue.includes(searchTerm);
 };
 
+// 🟢 NEW: Helper component for inline number editing to prevent DB spam
+const InlineNumberInput = ({ 
+  initialValue, 
+  onSave 
+}: { 
+  initialValue: number | null, 
+  onSave: (val: number | null) => void 
+}) => {
+  const [value, setValue] = useState(initialValue === null ? "" : initialValue.toString());
+
+  // Sync state if initialValue changes externally
+  useEffect(() => {
+    setValue(initialValue === null ? "" : initialValue.toString());
+  }, [initialValue]);
+
+  const handleBlur = () => {
+    const num = value === "" ? null : Number(value);
+    if (num !== initialValue) onSave(num);
+  };
+
+  // 🟢 FIX: Added <HTMLInputElement> so TS knows .blur() exists
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      min="0"
+      step="0.5"
+      className="input"
+      style={{ padding: '2px 6px', fontSize: '12px', width: '70px', height: '28px' }}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+      onClick={(e) => e.stopPropagation()} // Prevent row click
+      placeholder="Yrs"
+    />
+  );
+};
+
 export const TeachersScreen: React.FC = () => {
   const { user } = useAuth();
 
@@ -920,14 +964,61 @@ export const TeachersScreen: React.FC = () => {
       worksheet_url: false,
     };
   });
-  const [showColumnMenu, setShowColumnMenu] = useState(false); // For column visibility modal
+const [showColumnMenu, setShowColumnMenu] = useState(false); // For column visibility modal
 
 const [sorting, setSorting] = useState<SortingState>([
-    { id: "school_campus", desc: false }, // Custom ID for combined column
-    { id: "name", desc: false },
-  ]);
+    { id: "school_campus", desc: false }, // Custom ID for combined column
+    { id: "name", desc: false },
+  ]);
 
-  // 🟢 MOVED: Acknowledge functions moved UP so columns can use them
+  // 🟢 NEW: Bulk Edit State
+  const [isBulkEditMode, setIsBulkEditMode] = useState(false);
+
+  // 🟢 NEW: Optimistic Auto-Save Handler
+  const handleInlineUpdate = async (id: string, field: keyof TeacherRow, value: any) => {
+    // 1. Optimistic UI update (Instant feedback)
+    setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+
+    // 2. Background DB sync
+    const { error } = await supabase
+      .from("teachers")
+      .update({ [field]: value, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("trainer_id", user?.id);
+
+    if (error) {
+      console.error(`Failed to update ${field}:`, error);
+      alert(`Could not save ${field}. Please refresh and try again.`);
+    }
+  };
+
+  // 🟢 NEW: Toggle Bulk Edit and adjust columns automatically
+  const toggleBulkEdit = () => {
+    setIsBulkEditMode(prev => {
+      const nextMode = !prev;
+      if (nextMode) {
+        setColumnVisibility({
+          email: true,
+          teaching_issue: false,
+          recent_support: false,
+          worksheet_url: false,
+          actions: false,
+          teaching_model: true,
+          year_count: true,
+        });
+      } else {
+        setColumnVisibility({
+          email: false,
+          worksheet_url: false,
+          teaching_model: false,
+          year_count: false,
+        });
+      }
+      return nextMode;
+    });
+  };
+
+  // 🟢 MOVED: Acknowledge functions moved UP so columns can use them
   const handleAcknowledge = async (row: TeacherRow) => {
     const { error } = await supabase
       .from("teachers")
@@ -1086,35 +1177,103 @@ const [sorting, setSorting] = useState<SortingState>([
         size: 300,
       },
 
-      // 🟢 ADD: Latest Performance Column
-      {
-        accessorKey: "latest_performance",
-        header: "Performance",
-        cell: (info) => {
-          const val = info.getValue() as string;
-          if (!val) return <span className="entity-cell-sub">—</span>;
-          
-          // Logic to color-code based on your 3-tier system
-          const color = val === 'Thriving' ? '#22c55e' : val === 'Functioning' ? '#3b82f6' : '#ef4444';
-          
-          return (
-            <span style={{ 
-              padding: '2px 8px', 
-              borderRadius: '12px', 
-              fontSize: '11px', 
-              fontWeight: 700, 
-              border: `1px solid ${color}`, 
-              color: color,
-              background: `${color}10` // 10% opacity
-            }}>
-              {val}
-            </span>
-          );
-        },
-        id: "latest_performance",
-        minSize: 100,
-        size: 120,
-      },
+// 🟢 NEW: Editable Teaching Model Column
+      {
+        accessorKey: "teaching_model",
+        header: "Teaching Model",
+        cell: (info) => {
+          if (!isBulkEditMode) return <span className="entity-cell-sub">{info.getValue() as string || "—"}</span>;
+          
+          return (
+            <select
+              className="select"
+              style={{ padding: '2px 6px', fontSize: '11px', width: '130px', height: '28px' }}
+              value={(info.getValue() as string) || ""}
+              onChange={(e) => handleInlineUpdate(info.row.original.id, "teaching_model", e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <option value="">-- Select --</option>
+              <option value="Classic">Classic</option>
+              <option value="Nexus">Nexus</option>
+              <option value="Connect">Connect</option>
+              <option value="LittleSEED">LittleSEED</option>
+              <option value="Classic + Nexus">Classic + Nexus</option>
+              <option value="Classic + Connect">Classic + Connect</option>
+              <option value="Classic + LS">Classic + LS</option>
+            </select>
+          );
+        },
+        id: "teaching_model",
+        minSize: 140,
+        size: 150,
+      },
+
+      // 🟢 NEW: Editable Experience Column
+      {
+        accessorKey: "year_count",
+        header: "Exp (Yrs)",
+        cell: (info) => {
+          if (!isBulkEditMode) return <span className="entity-cell-sub">{info.getValue() !== null ? info.getValue() as number : "—"}</span>;
+          
+          return (
+            <InlineNumberInput 
+              initialValue={info.getValue() as number | null} 
+              onSave={(val) => handleInlineUpdate(info.row.original.id, "year_count", val)} 
+            />
+          );
+        },
+        id: "year_count",
+        minSize: 80,
+        size: 90,
+      },
+
+      // 🟢 UPDATED: Latest Performance Column (Now Editable)
+      {
+        accessorKey: "latest_performance",
+        header: "Performance",
+        cell: (info) => {
+          const val = info.getValue() as string;
+          
+          // Bulk Edit Mode: Render a Dropdown
+          if (isBulkEditMode) {
+            return (
+              <select
+                className="select"
+                style={{ padding: '2px 6px', fontSize: '11px', width: '110px', height: '28px' }}
+                value={val || ""}
+                onChange={(e) => handleInlineUpdate(info.row.original.id, "latest_performance", e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <option value="">-- Set Rating --</option>
+                <option value="Thriving">Thriving</option>
+                <option value="Functioning">Functioning</option>
+                <option value="Developing">Developing</option>
+              </select>
+            );
+          }
+
+          // Normal Mode: Render the Badge
+          if (!val) return <span className="entity-cell-sub">—</span>;
+          const color = val === 'Thriving' ? '#22c55e' : val === 'Functioning' ? '#3b82f6' : '#ef4444';
+          
+          return (
+            <span style={{ 
+              padding: '2px 8px', 
+              borderRadius: '12px', 
+              fontSize: '11px', 
+              fontWeight: 700, 
+              border: `1px solid ${color}`, 
+              color: color,
+              background: `${color}10` // 10% opacity
+            }}>
+              {val}
+            </span>
+          );
+        },
+        id: "latest_performance",
+        minSize: 110,
+        size: 130,
+      },
 
       // 🟢 ADD: Focus Area Chips Column (Quick Look)
       {
@@ -1254,9 +1413,10 @@ enableResizing: false,
         ),
       },
     ],
-    // 🟢 ADDED: handleAcknowledge to the dependency array
-    [setShowColumnMenu, provisioningIds, handleAcknowledge]
-  );
+// 🟢 ADDED: handleAcknowledge to the dependency array
+    [setShowColumnMenu, provisioningIds, handleAcknowledge, isBulkEditMode]
+  );
+
 const table = useReactTable({
     data: filteredRows,
     columns,
@@ -1735,17 +1895,28 @@ const handleSync = async () => {
             />
           </div>
 
-          <div className="tm-actions-group">
-            <button 
-              type="button" 
-              className="tm-pure-icon" 
-              onClick={handleSync}
-              title="Sync with GrapeSEED"
-            >
-              <RefreshCw size={18} strokeWidth={2} />
-            </button>
+      <div className="tm-actions-group">
+            {/* 🟢 NEW: Bulk Edit Toggle Button */}
+            <button
+              type="button"
+              className={`btn ${isBulkEditMode ? 'btn-primary' : 'btn-ghost'}`}
+              style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}
+              onClick={toggleBulkEdit}
+            >
+              {isBulkEditMode ? "Done Editing" : "✏️ Bulk Edit"}
+            </button>            
+          <button 
+              type="button" 
+              className="tm-pure-icon" 
+              onClick={handleSync}
+              title="Sync with GrapeSEED"
+            >
+              <RefreshCw size={18} strokeWidth={2} />
+            </button>
 
-            <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
+
+
+            <ImportTeachersBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
 
             <button
               type="button"
