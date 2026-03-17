@@ -57,10 +57,14 @@ export function buildTeacherPreCallHtml({
         <p style="margin: 0; font-size: 14px;"><strong>Review Notes:</strong> You can see the latest observation notes in your workbook here: <a href="${teacherWorkbookUrl}" style="color: #2563eb;">Open Workbook</a></p>
       </div>` : ""}
 
-      <p>During our call, we will celebrate your progress and discuss a few next steps to keep your class engaging and effective.</p>
+      <p>During our call, we will celebrate your progress and discuss a few next steps to keep your class engaging and effective. In the mean time, <strong><u>please read the comments in the workbook above and answer all the questions to prepare for your call</u></strong>. For the answers, you can just type them under the questions.</p>
+
+      <p>Note that after you select a time slot in the booking page above, there'll be an automatic email sent to you to confirm the schedule with <strong><u>a Zoom link</u></strong> that you can use to enter our call.</p>
+
+      <p>Thank you in advance for your time and look forward to hearing from you soon!</p>
 
       <p style="margin-bottom: 0;">Best regards,<br><strong>${trainerName}</strong><br><span style="color: #6b7280; font-size: 13px;">GrapeSEED Trainer</span></p>
-    </div>
+      </div>
 
     <div style="${footer}">
       GrapeSEED Vietnam Training Team
