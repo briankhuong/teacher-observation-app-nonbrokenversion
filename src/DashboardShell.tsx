@@ -949,6 +949,13 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
     if (!user?.id || !navigator.onLine) return;
 
     const cacheOfflineResources = async () => {
+      // 🟢 OPTIMIZATION: Check if we already have data to prevent iPad lag on reload
+      const existingSchools = await get("offline_schools");
+      if (existingSchools && existingSchools.length > 0) {
+        console.log("📱 Cache exists. Skipping background sync to save resources.");
+        return; 
+      }
+
       try {
         // 2. Fetch Schools (Strictly Filtered by Trainer ID)
         // Note: If RLS is enabled on Supabase, this will return [] unless a policy exists!
