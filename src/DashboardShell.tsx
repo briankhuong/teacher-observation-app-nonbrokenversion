@@ -2182,22 +2182,80 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     });
   };
 
-  const handlePostCallEmail = async (obs: DashboardObservationRow) => {
+const handlePostCallEmail = async (obs: DashboardObservationRow) => {
+    // Optional: If you have a loading state for the modal, turn it on here!
+    
     const teacherEmail = await fetchTeacherEmail(obs.teacherName, obs.schoolName);
     
+    let visitationId = null;
+    const gsToken = localStorage.getItem('grapeseed_token');
+
+    // 🟢 SILENT MATCH PROTOCOL
+    if (gsToken) {
+      try {
+        // 1. Fetch exact IDs for this school & campus directly from DB
+        const { data: schoolData } = await supabase
+          .from('schools')
+          .select('official_code, campus_id')
+          .eq('school_name', obs.schoolName)
+          .eq('campus_name', obs.campus || '') // Fallback for null campuses
+          .maybeSingle();
+
+        if (schoolData?.official_code) {
+// 2. Extract YYYY-MM using the creation date of the observation
+          // 🟢 FIXED: Using 'createdAt' (common in Supabase) or falling back to 'today'
+          const dateObj = new Date((obs as any).createdAt || (obs as any).created_at || new Date());
+          const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+          
+          // 3. Determine Type
+          // 🟢 FIXED: Using 'supportType' as per your error message
+          const apiType = obs.supportType === 'LVA' ? 'LVA' : 'Visit';
+
+          // 4. Hit the API!
+          const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+          const matchResponse = await fetch(`${API_BASE_URL}/api/match-visitation`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              schoolCode: schoolData.official_code,
+              monthKey: monthKey,
+              type: apiType,
+              userToken: gsToken,
+              campusId: schoolData.campus_id
+            })
+          });
+
+          if (matchResponse.ok) {
+            const matchData = await matchResponse.json();
+            if (matchData.match?.linkId) {
+              visitationId = matchData.match.linkId;
+              console.log("🎯 Silent Match Success: Attached Portal Link!");
+            }
+          } else if (matchResponse.status === 401) {
+            console.warn("⚠️ GrapeSEED Token Expired. Link omitted from email.");
+            // NOTE: You could trigger your setShowLoginModal(true) here if you want to block the email until they log in!
+          }
+        }
+      } catch (err) {
+        console.error("Failed to silently fetch visitation ID:", err);
+      }
+    }
+
+    // 🟢 BUILD HTML WITH THE NEW ID
     const html = buildTeacherPostCallHtml({
       teacherName: obs.teacherName,
       schoolName: obs.schoolName,
       campus: obs.campus,
-      trainerName: trainerName, // 🟢 UPDATED: Uses real name
+      trainerName: trainerName, 
       teacherWorkbookUrl: obs.teacherWorkbookUrl,
+      visitationId: visitationId // <--- 🔥 INJECTED HERE!
     });
 
     setEmailModalState({
       isOpen: true,
       mode: "simple",
-      emailType: "post", // <--- 1. Set Type
-      obsId: obs.id, // <--- ✅ PASS THE ID HERE
+      emailType: "post", 
+      obsId: obs.id, 
       to: teacherEmail ? [teacherEmail] : [],
       cc: [],
       subject: `GrapeSEED Support Summary: ${obs.teacherName}`,

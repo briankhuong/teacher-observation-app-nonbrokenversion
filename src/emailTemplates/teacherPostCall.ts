@@ -28,9 +28,10 @@ export function buildTeacherPostCallHtml({
   const secondaryLink = "color: #059669; font-weight: 600; text-decoration: none;";
   const footer = "background-color: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #6b7280;";
 
-  // Construct the Portal Link if ID is present
+// Construct the Portal Link if ID is present
+  // 🟢 ADDED: /teacher suffix to target the correct portal view
   const portalUrl = visitationId 
-    ? `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/visitation/${visitationId}`
+    ? `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/visitation/${visitationId}/teacher`
     : null;
 
   return `
