@@ -38,7 +38,11 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
   const [unit, setUnit] = useState('');
   const [lesson, setLesson] = useState('');
   const [supportType, setSupportType] = useState<DashboardObservationRow['supportType']>('Visit');
-  const [date, setDate] = useState(''); // ISO date string YYYY-MM-DD
+const [date, setDate] = useState(''); // ISO date string YYYY-MM-DD
+  const [worksheetUrl, setWorksheetUrl] = useState('');
+
+  const [lookupStatus, setLookupStatus] = useState<"idle" | "searching" | "no_match" | "found">("idle");
+  const [lookupResults, setLookupResults] = useState<{ school_name: string; campus: string; worksheet_url: string }[]>([]);
 
   const [schools, setSchools] = useState<SchoolRow[]>([]);
   const [schoolsLoading, setSchoolsLoading] = useState(true);
@@ -51,10 +55,40 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
       setCampus(observation.campus || '');
       setUnit(observation.unit || '');
       setLesson(observation.lesson || '');
-      setSupportType(observation.supportType || 'Visit');
+setSupportType(observation.supportType || 'Visit');
       setDate(observation.isoDate || '');
+      setWorksheetUrl(observation.meta?.teacherWorkbookUrl || '');
     }
   }, [isOpen, observation]);
+
+  const handleWorkbookLookup = async () => {
+    if (!teacherName.trim()) return;
+
+    setLookupStatus("searching");
+    setLookupResults([]);
+
+    const { data, error } = await supabase
+      .from("teachers")
+      .select("school_name, campus, worksheet_url")
+      .eq("trainer_id", user?.id)
+      .ilike("name", `%${teacherName.trim()}%`) // Search by name instead of email
+      .not("worksheet_url", "is", null);
+
+    if (error) {
+      console.error("Lookup failed", error);
+      setLookupStatus("idle");
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      setLookupStatus("no_match");
+    } else {
+      // De-duplicate results by URL
+      const uniqueResults = data.filter((v, i, a) => a.findIndex(t => t.worksheet_url === v.worksheet_url) === i);
+      setLookupResults(uniqueResults);
+      setLookupStatus("found");
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -114,7 +148,7 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (observation) {
+if (observation) {
       onSave(observation.id, {
         teacherName,
         schoolName,
@@ -123,6 +157,7 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
         lesson,
         supportType,
         date,
+        teacherWorkbookUrl: worksheetUrl, // Pass the new URL up to the save function
       });
       onClose();
     }
@@ -140,10 +175,69 @@ export const EditObservationModal: React.FC<EditObservationModalProps> = ({
           </div>
         </div>
         <form onSubmit={handleSubmit} className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
-          <div className="form-row">
+<div className="form-row">
             <label>Teacher Name:</label>
             <input type="text" value={teacherName} onChange={(e) => setTeacherName(e.target.value)} className="input" required />
           </div>
+
+          <div className="form-row">
+            <label>Worksheet link:</label>
+            <div style={{ position: 'relative' }}>
+              <div className="input-group" style={{ display: 'flex' }}>
+                <input
+                  className="input"
+                  type="url"
+                  value={worksheetUrl}
+                  onChange={(e) => setWorksheetUrl(e.target.value)}
+                  placeholder="Search by teacher name..."
+                  style={{ flexGrow: 1 }}
+                />
+                <button
+                  type="button"
+                  className="btn-append"
+                  title="Search for existing workbook by teacher name"
+                  disabled={!teacherName.trim() || lookupStatus === "searching"}
+                  onClick={handleWorkbookLookup}
+                  style={{ padding: '0 12px', background: '#334155', color: 'white', border: '1px solid #475569', borderLeft: 'none', borderRadius: '0 6px 6px 0', cursor: 'pointer' }}
+                >
+                  {lookupStatus === "searching" ? "..." : "🔍"}
+                </button>
+              </div>
+
+              {lookupStatus === "no_match" && (
+                <div style={{ fontSize: '12px', color: '#fca5a5', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                  <span>No workbook found for this teacher.</span>
+                  <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setLookupStatus("idle")}>×</span>
+                </div>
+              )}
+
+              {lookupStatus === "found" && (
+                <div className="lookup-picker" style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', marginTop: '4px', padding: '8px', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', padding: '0 4px' }}>
+                    <strong style={{ fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>Matches Found</strong>
+                    <span style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => setLookupStatus("idle")}>×</span>
+                  </div>
+                  {lookupResults.map((res, i) => (
+                    <div 
+                      key={i} 
+                      className="lookup-item"
+                      style={{ padding: '6px', cursor: 'pointer', borderBottom: i < lookupResults.length - 1 ? '1px solid #334155' : 'none' }}
+                      onClick={() => {
+                        setWorksheetUrl(res.worksheet_url);
+                        setLookupStatus("idle");
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#334155'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: '13px', color: '#f8fafc' }}>{res.school_name}</div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>{res.campus}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="form-row">
             <label>School Name:</label>
             <select

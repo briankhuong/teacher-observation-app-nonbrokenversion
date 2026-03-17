@@ -8,7 +8,7 @@ import { SchoolsScreen } from "./SchoolsScreen";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
 import { TrainerSettingsModal } from "./components/TrainerSettingsModal";
-// src/App.tsx
+import { getGraphAccessToken } from "./msal/getGraphToken";
 import { get, set, keys, clear } from 'idb-keyval';
 import { INITIAL_INDICATORS } from "./constants"; // 🟢 NEW (Correct)
 // ... existing imports
@@ -327,7 +327,9 @@ const NewObservationForm: React.FC<NewObservationFormProps> = ({
   const [supportType, setSupportType] = useState<SupportType>("Visit");
   const [date, setDate] = useState<string>(todayISO);
 
-  const [worksheetUrl, setWorksheetUrl] = useState("");
+const [worksheetUrl, setWorksheetUrl] = useState("");
+  const [autoCreate, setAutoCreate] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [autoCreatedTeacherMsg, setAutoCreatedTeacherMsg] = useState<string | null>(null);
 
   // --- Search State ---
@@ -530,6 +532,8 @@ const handleSubmit = async (e: React.FormEvent) => {
       return;
     }
 
+    setIsSubmitting(true);
+
     const currentUser = user as any;
     const newObsId = crypto.randomUUID(); 
 
@@ -596,9 +600,10 @@ const handleSubmit = async (e: React.FormEvent) => {
              worksheet_url: data.worksheet_url ?? null,
              grapeseed_id: null,
           };
-          setTeachers((prev) => [...prev, newTeacherObj]);
+        setTeachers((prev) => [...prev, newTeacherObj]);
         } catch (err) {
           alert("Unexpected error creating teacher online.");
+          setIsSubmitting(false);
           return;
         }
       } else {
@@ -623,8 +628,35 @@ const handleSubmit = async (e: React.FormEvent) => {
     }
     // ---------------------------------------------------------
 
-    // 🟢 CRITICAL FIX: Add teacher_id to meta so it survives the State Handover
+// 🟢 CRITICAL FIX: Add teacher_id to meta so it survives the State Handover
 const selectedTeacherObj = teachers.find(t => t.id === finalTeacherId);
+let finalWorksheetUrl = worksheetUrl;
+
+// 🟢 AUTO-CREATE WORKBOOK LOGIC
+if (autoCreate && navigator.onLine) {
+    try {
+        const token = await getGraphAccessToken();
+        const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+        
+        const resp = await fetch(`${MERGE_SERVER_BASE}/api/provision-teacher`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ teacherName, schoolName, trainerId: currentUser.id, teacherId: finalTeacherId })
+        });
+        
+        const result = await resp.json();
+        if (!result.ok) throw new Error(result.error || "Provisioning failed");
+        
+        finalWorksheetUrl = result.workbookUrl;
+        
+        // Update teacher record in DB with the newly generated URL
+        await supabase.from("teachers").update({ worksheet_url: finalWorksheetUrl }).eq("id", finalTeacherId);
+    } catch (err: any) {
+        console.error("Auto-create failed", err);
+        alert(`⚠️ Could not auto-create workbook: ${err.message}\nObservation will be saved without it.`);
+    }
+}
+
 const meta: NewObservationMeta = { 
         teacherName, 
         schoolName, 
@@ -642,7 +674,7 @@ if (!navigator.onLine) {
             id: newObsId,
             teacher_id: finalTeacherId, 
             // 🟢 Pass the updated meta here
-            meta: { ...meta, teacherWorkbookUrl: worksheetUrl || null }, 
+            meta: { ...meta, teacherWorkbookUrl: finalWorksheetUrl || null }, 
             indicators: INITIAL_INDICATORS, 
             status: "draft",
             updatedAt: Date.now(),
@@ -660,7 +692,7 @@ if (!navigator.onLine) {
         return;
     }
 
-    // ONLINE SAVE LOGIC
+// ONLINE SAVE LOGIC
     const { data: obs, error: obsError } = await supabase
       .from("observations")
       .insert({
@@ -668,7 +700,7 @@ if (!navigator.onLine) {
         trainer_id: currentUser.id,
         teacher_id: finalTeacherId,
         status: "draft",
-        meta, // Meta now includes teacher_id
+        meta: { ...meta, teacherWorkbookUrl: finalWorksheetUrl || null }, // Include workbook URL in JSON
         indicators: [],
         teacher_name: meta.teacherName,
         school_name: meta.schoolName,
@@ -681,12 +713,14 @@ if (!navigator.onLine) {
       .select("id")
       .single();
 
-    if (obsError) {
+if (obsError) {
       alert(`Could not save observation: ${obsError.message}`);
+      setIsSubmitting(false);
       return;
     }
 
-    onCreate({ observationId: obs.id, ...meta });
+    // Force TypeScript to accept the teacherWorkbookUrl injection
+    onCreate({ observationId: obs.id, ...meta, teacherWorkbookUrl: finalWorksheetUrl || null } as any);
   };
 
   // --- STYLES FOR DARK THEME ---
@@ -782,16 +816,31 @@ if (!navigator.onLine) {
             </div>
           </div>
 
-          <div className="form-row" style={{ marginBottom: '16px' }}>
-            <label style={darkLabelStyle}>Worksheet link (optional)</label>
-            <input
-              className="input"
-              type="url"
-              value={worksheetUrl}
-              onChange={(e) => setWorksheetUrl(e.target.value)}
-              placeholder="Paste Excel / OneDrive link..."
-              style={darkInputStyle}
-            />
+<div className="form-row" style={{ marginBottom: '16px' }}>
+            <label style={darkLabelStyle}>Worksheet link</label>
+            <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
+              <input 
+                type="checkbox" 
+                id="chk-auto" 
+                checked={autoCreate} 
+                onChange={(e) => setAutoCreate(e.target.checked)} 
+                style={{width:'auto', margin:0}} 
+              />
+              <label htmlFor="chk-auto" style={{margin:0, fontWeight:600, color:'#63b3ed', cursor:'pointer'}}>
+                ✨ Auto-create Excel Workbook?
+              </label>
+            </div>
+            
+            {!autoCreate && (
+              <input
+                className="input"
+                type="url"
+                value={worksheetUrl}
+                onChange={(e) => setWorksheetUrl(e.target.value)}
+                placeholder="Paste Excel / OneDrive link..."
+                style={darkInputStyle}
+              />
+            )}
           </div>
 
           <div className="form-row" style={{ marginBottom: '16px' }}>
@@ -861,8 +910,8 @@ if (!navigator.onLine) {
           <button type="button" className="btn" onClick={onCancel} style={{ background: '#4a5568', color: 'white', border: 'none' }}>
             Cancel
           </button>
-          <button type="submit" form="create-obs-form" className="btn btn-primary" style={{ background: '#3182ce', color: 'white', border: 'none' }}>
-            Create & open
+<button type="submit" form="create-obs-form" className="btn btn-primary" disabled={isSubmitting} style={{ background: '#3182ce', color: 'white', border: 'none', opacity: isSubmitting ? 0.7 : 1 }}>
+            {isSubmitting ? "Creating..." : "Create & open"}
           </button>
         </div>
 
