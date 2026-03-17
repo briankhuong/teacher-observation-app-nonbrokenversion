@@ -342,7 +342,7 @@ const handleDraftEmails = async () => {
         try {
           const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
-          const response = await fetch(`${API_BASE_URL}/api/match-visitation`, {
+const response = await fetch(`${API_BASE_URL}/api/match-visitation`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -350,7 +350,8 @@ const handleDraftEmails = async () => {
               monthKey: emailFilters.month, 
               type: draft.type, 
               coachId: user?.id,
-              userToken: gsToken // ✅ PASSED SECURELY TO BACKEND
+              userToken: gsToken, // ✅ PASSED SECURELY TO BACKEND
+              campusId: draft.campusId // 🟢 ADDED: Send the campus ID to the backend!
             }),
             signal: controller.signal 
           });

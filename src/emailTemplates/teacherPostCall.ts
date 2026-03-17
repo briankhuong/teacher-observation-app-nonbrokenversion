@@ -5,6 +5,7 @@ export interface TeacherPostCallTemplateParams {
   trainerName: string;
   teacherWorkbookUrl?: string | null;
   surveyUrl?: string | null;
+  visitationId?: string | null; // 🟢 ADDED: To generate the Portal Link
 }
 
 export function buildTeacherPostCallHtml({
@@ -14,15 +15,23 @@ export function buildTeacherPostCallHtml({
   trainerName,
   teacherWorkbookUrl,
   surveyUrl,
+  visitationId,
 }: TeacherPostCallTemplateParams): string {
   
+  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
   const headerText = schoolName ? `${schoolName} ${campus ? `• ${campus}` : ""}` : "GrapeSEED Support";
   
-  const container = "max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', Helvetica, Arial, sans-serif;";
-  const header = "background-color: #065f46; padding: 20px; text-align: center;"; // Green-ish for "Done"
-  const body = "padding: 30px 25px; color: #374151; line-height: 1.6;";
+  const container = "max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; border: 1px solid #e5e7eb;";
+  const header = "background-color: #065f46; padding: 20px; text-align: center;"; 
+  const body = "padding: 30px 25px; color: #374151; line-height: 1.6; font-size: 15px;";
   const button = "display: inline-block; background-color: #059669; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;";
+  const secondaryLink = "color: #059669; font-weight: 600; text-decoration: none;";
   const footer = "background-color: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #6b7280;";
+
+  // Construct the Portal Link if ID is present
+  const portalUrl = visitationId 
+    ? `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/visitation/${visitationId}`
+    : null;
 
   return `
 <!DOCTYPE html>
@@ -40,19 +49,27 @@ export function buildTeacherPostCallHtml({
       
       <p>Thank you for your time today! It was a pleasure to discuss your class and work together on strategies for your students.</p>
 
-      ${teacherWorkbookUrl ? `
+      ${portalUrl ? `
       <div style="text-align: center; margin: 25px 0;">
-        <p style="margin-bottom: 10px; font-size: 14px; color: #6b7280;">Access your updated action plan:</p>
-        <a href="${teacherWorkbookUrl}" style="${button}">📂 Open Teacher Workbook</a>
+        <p style="margin-bottom: 10px; font-size: 14px; color: #6b7280;">View feedback on the GrapeSEED Portal:</p>
+        <a href="${portalUrl}" style="${button}">📂 Open GrapeSEED Portal</a>
+      </div>` : ""}
+
+      ${teacherWorkbookUrl ? `
+      <div style="text-align: center; margin: 20px 0;">
+        ${!portalUrl ? `<p style="margin-bottom: 10px; font-size: 14px; color: #6b7280;">Access your updated action plan:</p>` : ""}
+        <a href="${teacherWorkbookUrl}" style="${portalUrl ? secondaryLink : button}">
+          ${portalUrl ? "View Teacher Workbook &rarr;" : "📂 Open Teacher Workbook"}
+        </a>
       </div>` : ""}
 
       ${surveyUrl ? `
       <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 25px 0;" />
       <p style="font-size: 14px;"><strong>We value your feedback.</strong> When you have a moment, please let us know how we did:</p>
-      <p><a href="${surveyUrl}" style="color: #059669; font-weight: 600;">Take Short Survey &rarr;</a></p>
+      <p><a href="${surveyUrl}" style="${secondaryLink}">Take Short Survey &rarr;</a></p>
       ` : ""}
 
-      <p style="margin-bottom: 0;">Best regards,<br><strong>${trainerName}</strong></p>
+      <p style="margin-bottom: 0; margin-top: 25px;">Best regards,<br><strong>${trainerName}</strong></p>
     </div>
 
     <div style="${footer}">

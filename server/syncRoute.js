@@ -966,7 +966,8 @@ router.post("/api/login-grapeseed", async (req, res) => {
 /* DEBUG: IDENTITY VERIFICATION                       */
 /* -------------------------------------------------- */
 router.post("/api/match-visitation", async (req, res) => {
-  const { schoolCode, monthKey, type, userToken } = req.body; 
+  // 🟢 1. ADD campusId to the requested body
+  const { schoolCode, monthKey, type, userToken, campusId } = req.body; 
   const [year, month] = monthKey.split('-');
   const targetType = type === 'Visit' ? 0 : 1;
 
@@ -997,7 +998,8 @@ router.post("/api/match-visitation", async (req, res) => {
     channels.forEach(c => console.log(` - ${(c.visitation || c).schoolName}`));
     console.log(`-------------------------------------------\n`);
 
-    const match = channels.find(item => {
+// 1. Filter out all tasks that do not match the School, Type, and Month
+    const potentialMatches = channels.filter(item => {
       const v = item.visitation || item;
       const isSchoolMatch = String(v.schoolId || "").toLowerCase() === schoolCode.toLowerCase();
       const isTypeMatch = Number(v.type) === targetType;
@@ -1005,9 +1007,36 @@ router.post("/api/match-visitation", async (req, res) => {
       return isSchoolMatch && isTypeMatch && isMonthMatch && !v.isCancelled;
     });
 
+    let match = null;
+
+    if (potentialMatches.length > 0) {
+      // 🟢 2. CAMPUS MATCH LOGIC: Prioritize Exact Matches
+      
+      // PRIORITY A: Try to find an EXACT campus ID match first
+      if (campusId) {
+        match = potentialMatches.find(item => {
+          const v = item.visitation || item;
+          return v.campusId && String(v.campusId).toLowerCase() === String(campusId).toLowerCase();
+        });
+      }
+
+      // PRIORITY B: If no exact match (or none requested), look for a "General" task (campusId is null)
+      if (!match) {
+        match = potentialMatches.find(item => {
+          const v = item.visitation || item;
+          return !v.campusId; 
+        });
+      }
+
+      // PRIORITY C: Absolute fallback (grab the first one available)
+      if (!match) {
+        match = potentialMatches[0];
+      }
+    }
+
     if (match) {
       const v = match.visitation || match;
-      console.log(`🎯 MATCH FOUND: ${v.id}`);
+      console.log(`🎯 MATCH FOUND: ${v.id} (Campus: ${v.campusId || 'NULL'})`);
       return res.json({ match: { id: v.id, linkId: v.id } });
     }
 

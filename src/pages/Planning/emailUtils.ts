@@ -3,7 +3,8 @@
 export interface EmailBatch {
   id: string;
   schoolName: string;
-  officialCode?: string;     // <--- ADD THIS
+  officialCode?: string; 
+  campusId?: string;    // <--- ADD THIS
   visitationLink?: string;   // <--- ADD THIS
   type: 'LVA' | 'Visit';
   adminEmail: string;
@@ -63,6 +64,7 @@ export const groupSelectedToBatches = (
         id: batchKey,
         schoolName: teacher.school_name,
         officialCode: schoolData.official_code,
+        campusId: schoolData.campus_id,
         type: type,
         adminEmail: schoolData.admin_email || '',
         amEmail: schoolData.am_email || '',

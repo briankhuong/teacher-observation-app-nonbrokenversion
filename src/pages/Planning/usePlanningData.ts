@@ -35,10 +35,11 @@ const loadAllData = async () => {
     setLoading(true);
     
     // 1. Fetch Schools (Now fetching ID)
+// 1. Fetch Schools (Now fetching ID)
 const { data: schoolData, error: schoolError } = await supabase
       .from('schools')
-      // CHANGE THIS LINE BELOW: Add 'official_code'
-      .select('id, name:school_name, admin_email, am_email, official_code'); 
+      // 🟢 Added campus_id here!
+      .select('id, name:school_name, campus_id, admin_email, am_email, official_code');
 
     if (schoolError) console.error('Error fetching schools:', schoolError);
     
