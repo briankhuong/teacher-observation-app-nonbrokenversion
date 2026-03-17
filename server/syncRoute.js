@@ -584,7 +584,7 @@ router.post("/api/pulse-audit", async (req, res) => {
                   campus_name: schoolRow.campus_name,
                   official_code: code, 
                   campus_id: schoolRow.campus_id,
-                  teacherUrl: `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${code}/teachers`
+                  teacherUrl: `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${code}/campuses/${schoolRow.campus_id}`
                 });
               }
             });
