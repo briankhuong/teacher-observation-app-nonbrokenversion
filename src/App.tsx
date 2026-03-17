@@ -542,10 +542,10 @@ const handleSubmit = async (e: React.FormEvent) => {
     // ---------------------------------------------------------
     let finalTeacherId = selectedTeacherId;
 
-    // LEVEL 2: Memory Fallback 
+// LEVEL 2: Memory Fallback 
     if (!finalTeacherId) {
       const foundInState = teachers.find(
-        (t) => t.name === teacherName.trim() && t.school_name === schoolName
+        (t) => t.name.trim() === teacherName.trim() && t.school_name.trim() === schoolName.trim()
       );
       if (foundInState) {
         console.log("🌊 Level 2: Found teacher in State Array");

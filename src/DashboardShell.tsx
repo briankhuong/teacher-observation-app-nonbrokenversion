@@ -1098,12 +1098,13 @@ async function getMergedDashboardData(userId: string) {
     subject: "",
   });
   // Fetch helpers for email
-  const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
+const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
+    // .trim() removes spaces from start/end; .ilike makes it case-insensitive
     const { data } = await supabase
       .from("teachers")
       .select("email")
-      .eq("name", teacherName)
-      .eq("school_name", schoolName)
+      .ilike("name", teacherName.trim())
+      .ilike("school_name", schoolName.trim())
       .limit(1);
     return data?.[0]?.email || "";
   };
