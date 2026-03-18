@@ -998,7 +998,7 @@ router.post("/api/match-visitation", async (req, res) => {
     channels.forEach(c => console.log(` - ${(c.visitation || c).schoolName}`));
     console.log(`-------------------------------------------\n`);
 
-// 1. Filter out all tasks that do not match the School, Type, and Month
+// 1. Get all potential matches for the School, Month, and Type
     const potentialMatches = channels.filter(item => {
       const v = item.visitation || item;
       const isSchoolMatch = String(v.schoolId || "").toLowerCase() === schoolCode.toLowerCase();
@@ -1010,28 +1010,30 @@ router.post("/api/match-visitation", async (req, res) => {
     let match = null;
 
     if (potentialMatches.length > 0) {
-      // 🟢 2. CAMPUS MATCH LOGIC: Prioritize Exact Matches
-      
-      // PRIORITY A: Try to find an EXACT campus ID match first
-      if (campusId) {
+      // 🟢 2. TYPE-AWARE CAMPUS MATCHING
+      if (type === 'Visit') {
+        // For Onsite Visits, prioritize the specific campus ID
         match = potentialMatches.find(item => {
           const v = item.visitation || item;
           return v.campusId && String(v.campusId).toLowerCase() === String(campusId).toLowerCase();
         });
+        
+        // If visit is not found for campus, fallback to a general visit (null campus)
+        if (!match) {
+          match = potentialMatches.find(item => !(item.visitation || item).campusId);
+        }
+      } else {
+        // For LVA, prioritize the 'null' campus task (Standard GrapeSEED behavior)
+        match = potentialMatches.find(item => !(item.visitation || item).campusId);
+        
+        // If no null campus LVA found, fallback to any available LVA for this school
+        if (!match) {
+          match = potentialMatches[0];
+        }
       }
-
-      // PRIORITY B: If no exact match (or none requested), look for a "General" task (campusId is null)
-      if (!match) {
-        match = potentialMatches.find(item => {
-          const v = item.visitation || item;
-          return !v.campusId; 
-        });
-      }
-
-      // PRIORITY C: Absolute fallback (grab the first one available)
-      if (!match) {
-        match = potentialMatches[0];
-      }
+      
+      // Final absolute fallback: if still no match, take the first from the filtered list
+      if (!match) match = potentialMatches[0];
     }
 
     if (match) {
