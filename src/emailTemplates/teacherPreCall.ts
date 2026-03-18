@@ -59,7 +59,7 @@ export function buildTeacherPreCallHtml({
 
       <p>During our call, we will celebrate your progress and discuss a few next steps to keep your class engaging and effective. In the mean time, <strong><u>please read the comments in the workbook above and answer all the questions to prepare for your call</u></strong>. For the answers, you can just type them under the questions.</p>
 
-      <p>Note that after you select a time slot in the booking page above, there'll be an automatic email sent to you to confirm the schedule with <strong><u>a Zoom link</u></strong> that you can use to enter our call.</p>
+      <p>Note that after you select a time slot in the booking page above, there'll be an automatic email sent to you to confirm the schedule with <strong><u>a link</u></strong> that you can use to enter our call.</p>
 
       <p>Thank you in advance for your time and look forward to hearing from you soon!</p>
 
