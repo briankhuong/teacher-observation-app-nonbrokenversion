@@ -491,6 +491,7 @@ const trainerName =
     (user?.email ? user.email.split('@')[0] : "GrapeSEED Trainer");
 const { teacherName, schoolName, campus, unit, lesson, supportType, date, teacher_id, grapeseed_id} = observationMeta;
 const [showBatchModal, setShowBatchModal] = useState(false);
+const [showBackupModal, setShowBackupModal] = useState(false);
 const [batchCandidates, setBatchCandidates] = useState<{id: string, number: string, title: string, text: string}[]>([]);
 const [isAiPolishing, setIsAiPolishing] = useState(false);
 const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
@@ -1257,10 +1258,10 @@ const handleAdminReviewSave = async () => {
 };
 
 const handleBackToDashboard = () => {
+    // First, save any unsaved changes (same as before)
     if (isDirtyRef.current || canvasDirty) {
         const payload: SavedObservationPayload = {
           id: observationMeta.id,
-          // 🟢 Explicit ID Rescue
           teacher_id: rescuedIds.teacher_id || teacher_id,
           grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
           meta: { 
@@ -1278,7 +1279,8 @@ const handleBackToDashboard = () => {
     
         persistObservation(payload);
     }
-    onBack();
+    // Then open the backup prompt
+    setShowBackupModal(true);
 };
 
 const handleToggleLock = () => { 
@@ -3993,6 +3995,86 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               </div>
             </div>
       )}
+            {/* Backup prompt modal */}
+      {showBackupModal && (
+        <div className="scratchpad-backdrop">
+          <div className="scratchpad-modal" style={{ maxWidth: 500 }}>
+            <div className="scratchpad-header">
+              <div>
+                <div className="scratchpad-title">Backup this observation?</div>
+                <div className="scratchpad-sub">
+                  You can download a JSON backup of this observation before leaving.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: 16 }}>
+              <p style={{ fontSize: 13, marginBottom: 12, color: "var(--text-muted)" }}>
+                This backup contains all your notes, ratings, and handwriting for:
+              </p>
+              
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: 200, overflowY: "auto", padding: "4px 0" }}>
+                {indicators.map(ind => (
+                  <div key={ind.id} style={{ 
+                    background: "#1e293b", 
+                    padding: "4px 8px", 
+                    borderRadius: 4, 
+                    fontSize: 12,
+                    border: "1px solid #334155"
+                  }}>
+                    <strong>{ind.number}</strong> – {ind.title}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ 
+              padding: 16, 
+              borderTop: "1px solid rgba(51,65,85,0.5)", 
+              display: "flex", 
+              justifyContent: "flex-end", 
+              gap: 8 
+            }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowBackupModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setShowBackupModal(false);
+                  onBack(); // Go back without download
+                }}
+              >
+                Just Go Back
+              </button>
+              <button
+                type="button"
+                className="btn"
+                style={{
+                  background: "var(--accent)",
+                  color: "white",
+                  border: "none"
+                }}
+                onClick={() => {
+                  // First download the backup
+                  handleExportObservation();
+                  // Then go back
+                  setShowBackupModal(false);
+                  onBack();
+                }}
+              >
+                Download Backup & Go Back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
