@@ -33,7 +33,7 @@ import type {
   Stroke, 
   IndicatorState 
 } from "./constants";
-import { Pin, ArrowUpToLine } from 'lucide-react';
+import { Pin, ArrowUpToLine, Download } from 'lucide-react';
 
 // Add to imports
 import { stitchHandwritingBatches } from "./utils/imageStitcher";
@@ -1193,6 +1193,35 @@ const handleManualSave = async () => {
     persistObservation(newPayload); 
 };
 
+const handleExportObservation = () => {
+  // Create a JSON export of the current observation
+  const payload: SavedObservationPayload = {
+    id: observationMeta.id,
+    teacher_id: rescuedIds.teacher_id || teacher_id,
+    grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
+    meta: { 
+      ...observationMeta,
+      teacher_id: rescuedIds.teacher_id || teacher_id,
+      grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id 
+    },
+    indicators,
+    performance_rating: indicators[0]?.performance_rating || null,
+    status: observationStatus,
+    updatedAt: Date.now(),
+    scratchpadText,
+    adminSummaryVN,
+  };
+  
+  const dataStr = JSON.stringify(payload, null, 2);
+  const blob = new Blob([dataStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `observation-${observationMeta.id}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 const handleAdminReviewSave = async () => {
     if (!adminPreview) return;
     const translatedSummary = adminPreview.trainerSummary;
@@ -2312,6 +2341,15 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
         <div className="workspace-btn-group">
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <div style={{ display: "flex", gap: 6 }}>
+                            {/* 🆕 Export JSON button */}
+              <button
+                className="btn"
+                type="button"
+                onClick={handleExportObservation}
+                style={{ background: "transparent", border: "1px solid var(--accent)", color: "var(--accent)", display: "flex", alignItems: "center", gap: 4 }}
+              >
+                <Download size={16} /> Export JSON
+              </button>
               <button
                 className="btn"
                 type="button"
@@ -2335,6 +2373,8 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
               >
                 {isAiPolishing ? "✨ Polishing..." : "✨ Polish All"}
               </button>
+
+
                 {!isDesktopMode && (
                   <button
                     className="btn"

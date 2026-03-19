@@ -1,5 +1,5 @@
 // src/DashboardShell.tsx
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
 // import { ObservationCard } from "./components/ObservationCard"; // Unused in this file, commenting out
@@ -22,7 +22,7 @@ import { get, set, keys, del } from 'idb-keyval';
 import { SyncStatusBadge } from './components/SyncStatusBadge';
 import { ConflictResolutionModal } from "./components/ConflictResolutionModal";
 import { loadObservationFromDb, saveObservationToDb } from "./db/observations";
-import { Bell, Activity, RefreshCw } from "lucide-react";
+import { Bell, Activity, RefreshCw, Upload } from "lucide-react";
 import { isGrapeSeedTokenValid } from './utils/authHelpers';
 import { GrapeSeedLoginModal } from './components/GrapeSeedLoginModal';
 
@@ -576,6 +576,8 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 // 🟢 NEW: State for the Sync Action Dashboard
 // --- DashboardShell.tsx (Approx Line 420) ---
 const [isActionDashboardOpen, setIsActionDashboardOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 const [isPulseLoading, setIsPulseLoading] = useState(false); // 🆕 Track background loading
 const [lastPulseTime, setLastPulseTime] = useState<number | null>(null); // 🆕 Session gate
 const [syncPulseResults, setSyncPulseResults] = useState<{
@@ -922,6 +924,44 @@ const handleCheckPulseSilent = useCallback(async () => {
   }
 }, [user?.id, isPulseLoading]);
 // The Auto-Trigger
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const importedData = JSON.parse(text);
+
+      // Handle both single observation and array
+      const observationsToImport = Array.isArray(importedData) ? importedData : [importedData];
+
+      for (const obs of observationsToImport) {
+        if (!obs.id) continue;
+
+        // Check if already exists (optional prompt)
+        const existing = await get(`${STORAGE_PREFIX}${obs.id}`);
+        if (existing) {
+          if (!confirm(`Observation ${obs.id} already exists. Overwrite?`)) continue;
+        }
+
+        // Save to IndexedDB
+        await set(`${STORAGE_PREFIX}${obs.id}`, obs);
+      }
+
+      alert(`Imported ${observationsToImport.length} observation(s). Refreshing...`);
+      window.location.reload(); // simple refresh to show new data
+    } catch (err) {
+      console.error('Import error', err);
+      alert('Invalid backup file. Please select a valid JSON export.');
+    } finally {
+      setImporting(false);
+      // Reset file input
+      e.target.value = '';
+    }
+  };
+
 React.useEffect(() => {
   handleCheckPulseSilent();
 }, [handleCheckPulseSilent]);
@@ -3107,6 +3147,27 @@ const lastSync = obs.lastSync || 0; // keep for tooltip display only
                 AM Summary…
               </button>
             </div>
+            {/* 🆕 Import button */}
+            <div className="toolbar-group">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+                title="Import observations from backup"
+                style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                <Upload size={16} /> Import
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileImport}
+                accept=".json"
+                style={{ display: 'none' }}
+              />
+            </div>
+
             {/* --- Bell Icon with Red Dot next to Online Badge --- */}
                 {/* 🔔 LUCIDE NOTIFICATION BELL */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginLeft: '8px' }}>
