@@ -497,7 +497,17 @@ const [isAiPolishing, setIsAiPolishing] = useState(false);
 const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
 
 const [isCanvasVisible, setIsCanvasVisible] = useState(true); 
-const [isDesktopMode, setIsDesktopMode] = useState(false);
+// 🖥️ Device detection: true for screens >= 768px (desktop), false for smaller (tablet/phone)
+const [isDesktopMode, setIsDesktopMode] = useState(() => window.innerWidth >= 768);
+
+// Optional: listen to window resize to switch mode dynamically
+useEffect(() => {
+  const handleResize = () => {
+    setIsDesktopMode(window.innerWidth >= 768);
+  };
+  window.addEventListener('resize', handleResize);
+  return () => window.removeEventListener('resize', handleResize);
+}, []);
 const [textAreaHeight, setTextAreaHeight] = useState(getPersistedTextareaHeight);
 const [isTextareaResizing, setIsTextareaResizing] = useState(false);
 const textareaRef = useRef<HTMLTextAreaElement>(null);
