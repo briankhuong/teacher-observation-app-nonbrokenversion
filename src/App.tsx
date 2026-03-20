@@ -84,9 +84,10 @@ const handleLogout = async () => {
 
   const [showNewObservationForm, setShowNewObservationForm] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [screen, setScreen] = useState<Screen>("dashboard");
-  const [selectedObservation, setSelectedObservation] =
+const [screen, setScreen] = useState<Screen>("dashboard");
+const [selectedObservation, setSelectedObservation] =
     useState<SelectedObservationMeta | null>(null);
+const [highlightObservationId, setHighlightObservationId] = useState<string | null>(null);
 
 
 // 1. AUTH & NETWORK LISTENERS
@@ -135,7 +136,19 @@ const handleLogout = async () => {
 
 
 
-  const goToDashboard = () => setScreen("dashboard");
+const goToDashboard = () => setScreen("dashboard");
+
+const handleBackFromWorkspace = () => {
+  if (selectedObservation) {
+    setHighlightObservationId(selectedObservation.id);
+  }
+  goToDashboard();
+};
+
+const handleHighlightComplete = () => {
+  setHighlightObservationId(null);
+};
+
   const goToTeachers = () => setScreen("teachers");
   const goToSchools = () => setScreen("schools");
   const goToPlanning = () => setScreen("planning"); // 🟢 New navigation helper
@@ -242,19 +255,23 @@ const handleLogout = async () => {
       </header>
 
       <main className="app-shell">
-        {screen === "dashboard" && (
-          <DashboardShell onOpenObservation={openObservation} />
-        )}
+{screen === "dashboard" && (
+  <DashboardShell 
+    onOpenObservation={openObservation} 
+    highlightObservationId={highlightObservationId}
+    onHighlightComplete={handleHighlightComplete}
+  />
+)}
 
-        {screen === "workspace" && selectedObservation && (
-          <ObservationWorkspaceShell
-            observationMeta={selectedObservation}
-            onBack={goToDashboard}
-            isOnline={isOnline} // 🟢 Pass the state down as a prop
-            isSyncing={isSyncing}       // 🟢 PASS DOWN
-            setIsSyncing={setIsSyncing} // 🟢 PASS DOWN
-          />
-        )}
+{screen === "workspace" && selectedObservation && (
+  <ObservationWorkspaceShell
+    observationMeta={selectedObservation}
+    onBack={handleBackFromWorkspace}
+    isOnline={isOnline}
+    isSyncing={isSyncing}
+    setIsSyncing={setIsSyncing}
+  />
+)}
 
         {screen === "teachers" && <TeachersScreen />}
 

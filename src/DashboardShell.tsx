@@ -1,5 +1,5 @@
 // src/DashboardShell.tsx
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { supabase } from "./supabaseClient";
 // import { ObservationCard } from "./components/ObservationCard"; // Unused in this file, commenting out
@@ -101,6 +101,8 @@ interface DashboardProps {
     supportType: "Training" | "LVA" | "Visit";
     date: string;
   }) => void;
+  highlightObservationId?: string | null;
+  onHighlightComplete?: () => void;
 }
 
 /* ------------------------------
@@ -555,6 +557,8 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
 --------------------------------- */
 export const DashboardShell: React.FC<DashboardProps> = ({
   onOpenObservation,
+  highlightObservationId,
+  onHighlightComplete,
 }) => {
   const { user } = useAuth();
   const trainerName = 
@@ -611,6 +615,8 @@ const [syncPulseResults, setSyncPulseResults] = useState<{
     disconnectedCampuses: []
   };
 });
+
+const lastHighlightedRef = useRef<string | null>(null);
 
 const [pendingObservation, setPendingObservation] = useState<DashboardObservationRow | null>(null);
 const [showLoginModal, setShowLoginModal] = useState(false);
@@ -1160,7 +1166,7 @@ const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
     return data?.[0]?.email || "";
   };
 
-  const fetchSchoolEmails = async (schoolName: string, campus: string) => {
+const fetchSchoolEmails = async (schoolName: string, campus: string) => {
     const { data } = await supabase
       .from("schools")
       .select("admin_email, am_email")
@@ -1172,8 +1178,6 @@ const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
     amEmail: data?.[0]?.am_email || "" 
   };
   };
-
-
 
 const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
     try {
@@ -1645,7 +1649,7 @@ const handleConflictResolved = async (mergedData: any) => {
   }, [user?.id]);
 
   // 🟢 HELPER: Process & Merge Logic (Extracting this makes the useEffect cleaner)
-  async function processRows(dbRows: any[], pendingDeletes: string[]) {
+async function processRows(dbRows: any[], pendingDeletes: string[]) {
     const processedIds = new Set<string>();
     const rows: DashboardObservationRow[] = [];
 
@@ -2123,6 +2127,7 @@ const grouped = React.useMemo(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryMonth, summaryAmKey, observations]);
 
+  
   // Build email body from current table state
   const emailBody = React.useMemo(() => {
     if (!summaryMonth || !summaryAmKey || summaryRows.length === 0) {
@@ -2730,22 +2735,27 @@ const lastSync = obs.lastSync || 0; // keep for tooltip display only
         </button>
       );
     }
+
+
+  
     // -------------------------------------------------------------------------
 
+
     return (
-      <div
-        key={obs.id}
-        role="button"
-        tabIndex={0}
-        className="obs-row"
-        onClick={handleOpenWorkspace}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            handleOpenWorkspace();
-          }
-        }}
-      >
+<div
+  key={obs.id}
+  id={`obs-row-${obs.id}`}
+  role="button"
+  tabIndex={0}
+  className="obs-row"
+  onClick={handleOpenWorkspace}
+  onKeyDown={(e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleOpenWorkspace();
+    }
+  }}
+>
         <div
           className={`obs-status-strip ${
             obs.statusColor === "good"
@@ -3080,6 +3090,41 @@ const lastSync = obs.lastSync || 0; // keep for tooltip display only
       </div>
     );
   };
+
+// Auto‑scroll to highlighted observation when coming back from workspace
+useEffect(() => {
+  if (!highlightObservationId || !onHighlightComplete) return;
+  if (lastHighlightedRef.current === highlightObservationId) return;
+
+  const targetObs = observations.find(o => o.id === highlightObservationId);
+  if (!targetObs) return;
+
+  // If group mode is 'month', expand the group containing this observation
+  if (groupMode === 'month') {
+    const monthKey = monthKeyFromTs(targetObs.rawDate);
+    if (monthKey) {
+      setExpandedGroups(prev => ({
+        ...prev,
+        [monthKey]: true,
+      }));
+    }
+  }
+
+  // Allow time for the DOM to update after group expansion
+  setTimeout(() => {
+    const element = document.getElementById(`obs-row-${highlightObservationId}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Temporary highlight (remove after 2 seconds)
+      element.classList.add('obs-row-highlight');
+      setTimeout(() => {
+        element.classList.remove('obs-row-highlight');
+      }, 2000);
+    }
+    lastHighlightedRef.current = highlightObservationId;
+    onHighlightComplete();
+  }, 100);
+}, [highlightObservationId, observations, groupMode, onHighlightComplete]);
 
   return (
     <>
