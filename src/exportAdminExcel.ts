@@ -191,13 +191,14 @@ export async function exportAdminExcel(model: AdminExportModel) {
   if (lastRow >= 6) {
     ws.mergeCells(`E6:E${lastRow}`);
     const mergedNotes = ws.getCell("E6");
+    // Force Excel to treat as plain text (preserves leading hyphens and spaces)
+    mergedNotes.value = "'" + (model.trainerSummary || "");
     mergedNotes.alignment = {
       vertical: "top",
       horizontal: "left",
       wrapText: true,
     };
   }
-
   // -------------------------------------
   // CATEGORY COLOR MERGE (COLUMN A)
   // -------------------------------------

@@ -391,6 +391,9 @@ const [activeRowId, setActiveRowId] = useState<string | null>(indicators[0]?.id 
 // Tracks which rows are "Locked" (Pinned state)
 const [pinnedRowIds, setPinnedRowIds] = useState<Set<string>>(new Set());
 
+const [adminPerformanceRating, setAdminPerformanceRating] = useState("");
+const [selectedAdminIndicators, setSelectedAdminIndicators] = useState<string[]>([]);
+
 // 🟢 FIXED: Unified Accordion Logic for BOTH PC and iPad modes
 const handleRowToggle = (id: string) => {
   setOpenRowIds(prev => {
@@ -2895,7 +2898,63 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                       </button>
                     </div>
                   </div>
+                  {/* Inside the admin preview panel, after the header div and before the flex container with the two textareas */}
+                  <div className="admin-preview-toolbar" style={{
+                    display: "flex",
+                    gap: "16px",
+                    alignItems: "center",
+                    padding: "8px 16px",
+                    borderBottom: "1px solid #334155",
+                    marginBottom: "16px",
+                    flexWrap: "wrap",
+                    minHeight: "60px",        // ensures the bar is always visible
+                    overflow: "visible",      // prevents hidden overflow
+                    position: "relative",     // ensures proper stacking
+                    zIndex: 5                 // keeps it above background elements
+                  }}>
+                  {/* Extract button */}
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => console.log("Extract clicked – later use")}
+                    style={{ background: "#3b82f6", color: "white", border: "none" }}
+                  >
+                    Extract
+                  </button>
 
+                  {/* Performance dropdown */}
+                  <select
+                    value={adminPerformanceRating}
+                    onChange={(e) => setAdminPerformanceRating(e.target.value)}
+                    style={{ padding: "6px 12px", borderRadius: "6px", background: "#0f172a", color: "white", border: "1px solid #475569" }}
+                  >
+                    <option value="">Chọn đánh giá</option>
+                    <option value="rất hiệu quả">Rất hiệu quả</option>
+                    <option value="hiệu quả">Hiệu quả</option>
+                    <option value="khá hiệu quả">Khá hiệu quả</option>
+                    <option value="ở mức trung bình">Ở mức trung bình</option>
+                    <option value="ở mức dưới trung bình">Ở mức dưới trung bình</option>
+                  </select>
+
+                  {/* Multi-select dropdown for indicators */}
+                  <select
+                    multiple
+                    size={4}
+                    value={selectedAdminIndicators}
+                    onChange={(e) => {
+                      const values = Array.from(e.target.selectedOptions, opt => opt.value);
+                      setSelectedAdminIndicators(values);
+                      console.log("Selected indicators:", values);
+                    }}
+                    style={{ minWidth: "200px", background: "#0f172a", color: "white", border: "1px solid #475569", borderRadius: "6px" }}
+                  >
+                    {indicators.map(ind => (
+                      <option key={ind.id} value={ind.number}>
+                        {ind.number} – {ind.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>      
                   {/* 🟢 NEW: Side-by-side flex container */}
                   <div style={{ display: "flex", gap: "16px", marginBottom: 16 }}>
                     

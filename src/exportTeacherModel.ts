@@ -417,22 +417,28 @@ export function buildTeacherExportModel(
 // Proposed update for the parser section in src/exportTeacherModel.ts
 
 lines.forEach(line => {
-  const gaRegex = /^\(\s*GA\s*\)/i; 
-  
-  // 1. Check for explicit (GA) marker
+  const gaRegex = /^\(\s*GA\s*\)/i;
+  const hyphenRegex = /^[\s]*[-•]/;
+
+  // 1. (GA) marker → GROWTH
   if (gaRegex.test(line)) {
     const cleanText = line
-        .replace(gaRegex, "") 
-        .replace(/^[\s\-\•]+/, "") 
+        .replace(gaRegex, "")
+        .replace(/^[\s\-\•]+/, "")
         .trim();
     if (cleanText) growthSet.add(cleanText);
-  } 
-  // 2. NEW RULE: If no marker, check if ONLY 'Growth' checkbox is active
+  }
+  // 2. Hyphen/bullet at start → STRENGTH (even if Growth is checked)
+  else if (hyphenRegex.test(line)) {
+    const cleanText = line.replace(/^[\s\-\•]+/, "").trim();
+    if (cleanText) strengthSet.add(cleanText);
+  }
+  // 3. Only Growth checkbox active (Good is false) → GROWTH
   else if (!good && growth) {
     const cleanText = line.replace(/^[\s\-\•]+/, "").trim();
     if (cleanText) growthSet.add(cleanText);
   }
-  // 3. Fallback to Strength (Good cell)
+  // 4. Fallback → STRENGTH
   else {
     const cleanText = line.replace(/^[\s\-\•]+/, "").trim();
     if (cleanText) strengthSet.add(cleanText);

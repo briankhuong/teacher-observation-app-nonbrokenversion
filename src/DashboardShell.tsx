@@ -2477,10 +2477,10 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       const adminModel = buildAdminExportModel(exportMeta, exportIndicators, trainerName);
 
       // 👇👇 CRITICAL UPDATE: Clean the text before adding to model 👇👇
-      if (obs.admin_summary_vn) {
-        // Remove (GA) and Hyphens so Admin sheet looks clean
-        adminModel.trainerSummary = cleanTextForAdmin(obs.admin_summary_vn);
-      }
+    if (obs.admin_summary_vn) {
+      // Keep original formatting (preserve hyphens, spaces, line breaks)
+      adminModel.trainerSummary = obs.admin_summary_vn;
+    }
       
       const sheetName = buildAdminSheetName(obs);
 

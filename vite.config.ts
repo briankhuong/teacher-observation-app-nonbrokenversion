@@ -26,6 +26,8 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
+        // Increase the maximum file size to cache (default is 2 MiB)
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MiB
       },
 
       manifest: {
