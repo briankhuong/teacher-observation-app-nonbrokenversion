@@ -1753,6 +1753,51 @@ const handleAdminPreview = async () => {
     setIsCanvasVisible(false);
   };
 
+const handleExtractBrackets = () => {
+  if (!adminPreview) {
+    alert("Admin preview must be open to extract.");
+    return;
+  }
+
+  const extractedLines: string[] = [];
+
+  // Loop through indicators marked for Admin report
+  indicators.forEach(ind => {
+    if (!ind.includeInTrainerSummary) return;
+
+    const lines = ind.commentText?.split(/\r?\n/) || [];
+    for (const line of lines) {
+      // Check if line starts with (GA) (ignoring leading spaces)
+      if (/^\s*\(\s*GA\s*\)/i.test(line)) {
+        // Extract text inside square brackets (non-greedy)
+        const bracketMatches = line.match(/\[(.*?)\]/g);
+        if (bracketMatches) {
+          bracketMatches.forEach(match => {
+            // Remove the brackets, keep the inner text
+            const inner = match.slice(1, -1).trim();
+            if (inner) extractedLines.push(inner);
+          });
+        }
+      }
+    }
+  });
+
+  if (extractedLines.length === 0) {
+    alert("No (GA) lines with bracket content found in Admin‑marked indicators.");
+    return;
+  }
+
+  // Format: each line starts with "- " and there is an empty line between points
+  const formatted = extractedLines
+    .map(text => `- ${text}`)
+    .join("\n\n");
+
+  // Update the adminPreview state (which controls the textarea)
+  setAdminPreview(prev => prev ? { ...prev, trainerSummary: formatted } : prev);
+  // Also update the persisted summary state
+  setAdminSummaryVN(formatted);
+};
+
 const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
 const handleGenerateAiSummary = async () => {
@@ -2916,7 +2961,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   <button
                     type="button"
                     className="btn"
-                    onClick={() => console.log("Extract clicked – later use")}
+                    onClick={handleExtractBrackets}
                     style={{ background: "#3b82f6", color: "white", border: "none" }}
                   >
                     Extract
