@@ -25,6 +25,7 @@ import { loadObservationFromDb, saveObservationToDb } from "./db/observations";
 import { Bell, Activity, RefreshCw, Upload } from "lucide-react";
 import { isGrapeSeedTokenValid } from './utils/authHelpers';
 import { GrapeSeedLoginModal } from './components/GrapeSeedLoginModal';
+import type { TeacherEntry } from "./emailTemplates/adminUpdateBulk";
 
 // ✅ CORRECT (Matches your screenshots & Vercel settings)
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
@@ -1080,6 +1081,14 @@ const [conflictServerData, setConflictServerData] = React.useState<any>(null);
 
   // AM summary UI state
   const [showAmSummary, setShowAmSummary] = useState(false);
+// Bulk admin modal state
+  const [showBulkAdminModal, setShowBulkAdminModal] = useState(false);
+  const [bulkSchool, setBulkSchool] = useState<string>("");
+  const [bulkMonth, setBulkMonth] = useState<string>("");
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkMerging, setBulkMerging] = useState(false);
+  const [bulkMergeProgress, setBulkMergeProgress] = useState<{ current: number; total: number; currentTeacher?: string }>({ current: 0, total: 0 });
+
   const [summaryMonth, setSummaryMonth] = useState<string>("");
   const [summaryAmKey, setSummaryAmKey] = useState<string>("");
   const [summaryRows, setSummaryRows] = useState<AmSummaryRow[]>([]);
@@ -1979,6 +1988,25 @@ const grouped = React.useMemo(() => {
       return m2 - m1;
     });
   }, [observations]);
+const availableSchools = React.useMemo(() => {
+  return [...new Set(observations.map(o => o.schoolName).filter(Boolean))];
+}, [observations]);
+
+const availableMonthsForBulk = React.useMemo(() => {
+  return [...new Set(
+    observations
+      .map(o => monthKeyFromTs(o.rawDate))
+      .filter((m): m is string => m !== null)
+  )];
+}, [observations]);
+
+const filteredObservationsForBulk = React.useMemo(() => {
+  if (!bulkSchool || !bulkMonth) return [];
+  return observations.filter(o => 
+    o.schoolName === bulkSchool && 
+    monthKeyFromTs(o.rawDate) === bulkMonth
+  );
+}, [observations, bulkSchool, bulkMonth]);
 
   // All AMs that appear in *any* observation (we filter by month later)
   const allAms = React.useMemo(() => {
@@ -2381,6 +2409,102 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
     });
   };
 
+// Bulk merge admin workbooks (sequential)
+const handleBulkAdminMerge = async () => {
+  if (bulkSelectedIds.size === 0) {
+    alert("Please select at least one teacher.");
+    return;
+  }
+  setBulkMerging(true);
+  let successCount = 0;
+  let failCount = 0;
+  const selectedObs = observations.filter(o => bulkSelectedIds.has(o.id));
+  try {
+    for (let i = 0; i < selectedObs.length; i++) {
+      const obs = selectedObs[i];
+      setBulkMergeProgress({
+        current: i + 1,
+        total: selectedObs.length,
+        currentTeacher: obs.teacherName,
+      });
+      try {
+        await handleMergeAdminWorkbook(obs);
+        successCount++;
+      } catch (err) {
+        console.error(`Merge failed for ${obs.teacherName}:`, err);
+        failCount++;
+      }
+    }
+  } finally {
+    setBulkMerging(false);
+    setBulkMergeProgress({ current: 0, total: 0 });
+  }
+  alert(`Merge complete: ${successCount} succeeded, ${failCount} failed.`);
+  setShowBulkAdminModal(false);
+};
+
+// Bulk admin update email
+const handleBulkAdminEmail = async () => {
+  if (bulkSelectedIds.size === 0) {
+    alert("Please select at least one teacher.");
+    return;
+  }
+  const selectedObs = observations.filter(o => bulkSelectedIds.has(o.id));
+  // Collect unique admin emails (per campus) and unique AM emails
+  const adminEmailSet = new Set<string>();
+  const amEmailSet = new Set<string>();
+  const teachersForTable: TeacherEntry[] = [];
+
+  for (const obs of selectedObs) {
+    const { adminEmail, amEmail } = await fetchSchoolEmails(obs.schoolName, obs.campus);
+    if (adminEmail) adminEmailSet.add(adminEmail);
+    if (amEmail) amEmailSet.add(amEmail);
+    teachersForTable.push({
+      campus: obs.campus,
+      teacherName: obs.teacherName,
+      unit: obs.unit,
+      lesson: obs.lesson,
+      dateStr: obs.isoDate ? obs.isoDate.slice(5) : "", // "MM-DD"
+    });
+  }
+
+  const toEmails = Array.from(adminEmailSet);
+  const ccEmails = Array.from(amEmailSet);
+  if (toEmails.length === 0 && ccEmails.length === 0) {
+    alert("No admin or AM email addresses found for the selected teachers.");
+    return;
+  }
+
+  // Use the first selected observation's admin workbook URL (same for all if same school)
+  const firstObs = selectedObs[0];
+  const adminWorkbookUrl = firstObs.adminWorkbookUrl;
+  const viewOnlyUrl = firstObs.adminViewOnlyUrl;
+
+  const monthLabel = bulkMonth.replace(".", "/"); // e.g. "12.2025" -> "12/2025"
+
+  const html = buildAdminUpdateBulkHtml({
+    adminName: "School Admin", // generic, but we'll address to first admin? Or just generic
+    schoolName: bulkSchool,
+    reportMonth: monthLabel,
+    trainerName: trainerName,
+    adminWorkbookUrl: adminWorkbookUrl,
+    viewOnlyUrl: viewOnlyUrl,
+    teachers: teachersForTable,
+  });
+
+  setEmailModalState({
+    isOpen: true,
+    mode: "simple",
+    emailType: "admin",
+    obsId: undefined,
+    obsIds: selectedObs.map(o => o.id),
+    to: toEmails,
+    cc: ccEmails,
+    subject: `GrapeSEED Support Update: ${bulkSchool} (${monthLabel})`,
+    bodyHtml: html,
+  });
+  setShowBulkAdminModal(false);
+};
 
 const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     setMergingTeacherId(obs.id);
@@ -3192,6 +3316,29 @@ useEffect(() => {
                 AM Summary…
               </button>
             </div>
+            <div className="toolbar-group">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                const schools = [...new Set(observations.map(o => o.schoolName).filter(Boolean))];
+                const months = [...new Set(
+                  observations
+                    .map(o => monthKeyFromTs(o.rawDate))
+                    .filter((m): m is string => m !== null)
+                )];
+                setBulkSchool(schools[0] || "");
+                setBulkMonth(months[0] || "");
+                setBulkSelectedIds(new Set());
+                setShowBulkAdminModal(true);
+              }}
+              disabled={observations.length === 0}
+            >
+              Bulk Admin…
+            </button>
+          </div>     
+
+
             {/* 🆕 Import button */}
             <div className="toolbar-group">
               <button
@@ -3743,7 +3890,7 @@ useEffect(() => {
           </div>
         </div>
       )}
-      {/* 👇 THIS IS THE MISSING PIECE 👇 */}
+
       <EmailComposeModal 
         isOpen={emailModalState.isOpen}
         onClose={() => setEmailModalState(prev => ({ ...prev, isOpen: false }))}
@@ -3756,8 +3903,6 @@ useEffect(() => {
         sandwichData={emailModalState.sandwichData}
       />
 
-
-      {/* ---------- EDIT OBSERVATION MODAL ---------- */}
       <EditObservationModal
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
@@ -3773,12 +3918,135 @@ useEffect(() => {
          localData={conflictLocalData}
          serverData={conflictServerData}
       />
-<ActionDashboardModal
+
+     {/* Bulk Admin Modal */}
+{showBulkAdminModal && (
+  <div className="modal-backdrop" onClick={() => setShowBulkAdminModal(false)} style={{ zIndex: 1100 }}>
+    <div className="modal-panel" style={{ width: "700px", maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-header">
+        <div className="modal-title">Bulk Admin Actions</div>
+        <button type="button" className="btn" onClick={() => setShowBulkAdminModal(false)}>×</button>
+      </div>
+      <div className="modal-body" style={{ overflowY: "auto" }}>
+        <div style={{ display: "flex", gap: "16px", marginBottom: "20px" }}>
+          <div className="toolbar-group" style={{ flex: 1 }}>
+            <span>School</span>
+            <select
+              className="select"
+              value={bulkSchool}
+              onChange={(e) => {
+                setBulkSchool(e.target.value);
+                setBulkSelectedIds(new Set());
+              }}
+            >
+              <option value="">Select school</option>
+              {availableSchools.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="toolbar-group" style={{ flex: 1 }}>
+            <span>Month</span>
+            <select
+              className="select"
+              value={bulkMonth}
+              onChange={(e) => {
+                setBulkMonth(e.target.value);
+                setBulkSelectedIds(new Set());
+              }}
+              disabled={!bulkSchool}
+            >
+              <option value="">Select month</option>
+              {availableMonthsForBulk.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {bulkSchool && bulkMonth && (
+          <>
+            <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  type="checkbox"
+                  checked={filteredObservationsForBulk.length > 0 && bulkSelectedIds.size === filteredObservationsForBulk.length}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setBulkSelectedIds(new Set(filteredObservationsForBulk.map(o => o.id)));
+                    } else {
+                      setBulkSelectedIds(new Set());
+                    }
+                  }}
+                />
+                Select all ({filteredObservationsForBulk.length})
+              </label>
+              <span style={{ fontSize: "12px", color: "#666" }}>{bulkSelectedIds.size} selected</span>
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: "6px", maxHeight: "400px", overflowY: "auto" }}>
+              {filteredObservationsForBulk.map(obs => (
+                <label key={obs.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px", borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={bulkSelectedIds.has(obs.id)}
+                    onChange={(e) => {
+                      const newSet = new Set(bulkSelectedIds);
+                      if (e.target.checked) newSet.add(obs.id);
+                      else newSet.delete(obs.id);
+                      setBulkSelectedIds(newSet);
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{obs.teacherName}</div>
+                    <div style={{ fontSize: "12px", color: "#6b7280" }}>{obs.campus} • Unit {obs.unit} – Lesson {obs.lesson} • {obs.isoDate ? new Date(obs.isoDate).toLocaleDateString() : obs.dateLabel}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+
+        {bulkMerging && (
+          <div style={{ marginTop: "16px", padding: "12px", background: "#f3f4f6", borderRadius: "6px" }}>
+            <div>Merging: {bulkMergeProgress.current} of {bulkMergeProgress.total}</div>
+            <div style={{ fontSize: "12px", color: "#4b5563" }}>Current: {bulkMergeProgress.currentTeacher}</div>
+            <progress key={bulkMergeProgress.current} value={bulkMergeProgress.current} max={bulkMergeProgress.total} style={{ width: "100%", marginTop: "8px" }} />
+          </div>
+        )}
+      </div>
+      <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setShowBulkAdminModal(false)}
+          disabled={bulkMerging}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={handleBulkAdminMerge}
+          disabled={bulkSelectedIds.size === 0 || bulkMerging}
+          style={{ background: "#4f46e5", color: "white" }}
+        >
+          {bulkMerging ? "Merging..." : "Merge Admin Workbooks"}
+        </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={handleBulkAdminEmail}
+          disabled={bulkSelectedIds.size === 0 || bulkMerging}
+          style={{ background: "#10b981", color: "white" }}
+        >
+          Send Admin Update Email
+        </button>
+      </div>
+    </div>
+  </div>
+)} 
+    <ActionDashboardModal
           isOpen={isActionDashboardOpen}
           onClose={() => setIsActionDashboardOpen(false)}
           results={syncPulseResults} // 👈 Passes the state we populated in Step 1
           onResolve={handleResolveConflict}
-        />
+    />
 
         {/* 🟢 GRAPESEED LOGIN GATE (Auto-Resumes Email) */}
         <GrapeSeedLoginModal
