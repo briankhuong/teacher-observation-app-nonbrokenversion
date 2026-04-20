@@ -53,14 +53,14 @@ export function buildTeacherPostCallHtml({
       ${portalUrl ? `
       <div style="text-align: center; margin: 25px 0;">
         <p style="margin-bottom: 10px; font-size: 14px; color: #6b7280;">View feedback on the GrapeSEED Portal:</p>
-        <a href="${portalUrl}" style="${button}">📂 Open GrapeSEED Portal</a>
+        <a href="${portalUrl}" style="${button}">📂 Go to the Survey</a>
       </div>` : ""}
 
       ${teacherWorkbookUrl ? `
       <div style="text-align: center; margin: 20px 0;">
         ${!portalUrl ? `<p style="margin-bottom: 10px; font-size: 14px; color: #6b7280;">Access your updated action plan:</p>` : ""}
         <a href="${teacherWorkbookUrl}" style="${portalUrl ? secondaryLink : button}">
-          ${portalUrl ? "View Teacher Workbook &rarr;" : "📂 Open Teacher Workbook"}
+          ${portalUrl ? "View Teacher Workbook &rarr;" : "📂 Open the Feedback file"}
         </a>
       </div>` : ""}
 
