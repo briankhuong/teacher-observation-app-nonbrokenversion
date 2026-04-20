@@ -2570,20 +2570,59 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
   };
 
   // ✅ CLIENT-SIDE MERGE ADMIN HANDLER (With Translation Fix)
-  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
     setMergingAdminId(obs.id);
     setActionModal(null);
 
-    // 🔴 REPLACED: const full = loadFullObservation(obs.id);
-    // 🟢 FIXED: Fetch asynchronously from IndexedDB
-    const full = await get(`${STORAGE_PREFIX}${obs.id}`);
+    // 1. Try to get from IndexedDB first
+    let full = await get(`${STORAGE_PREFIX}${obs.id}`);
 
-    if (!full) { alert("Missing local data (Check IndexedDB)"); setMergingAdminId(null); return; }
+    // 2. If missing, try to fetch from Supabase (online only)
+    if (!full) {
+        if (!navigator.onLine) {
+            alert(`Cannot merge admin workbook for ${obs.teacherName}: observation data not available offline. Please go online or open the observation first.`);
+            setMergingAdminId(null);
+            return;
+        }
+        
+        console.log(`📡 Fetching full observation ${obs.id} from server...`);
+        try {
+            const { data, error } = await supabase
+                .from("observations")
+                .select("*")
+                .eq("id", obs.id)
+                .single();
+            
+            if (error || !data) throw new Error("Observation not found on server");
+            
+            // Build a full local object from server data
+            full = {
+                id: data.id,
+                meta: data.meta || {},
+                indicators: data.indicators || [],
+                status: data.status || "draft",
+                updatedAt: new Date(data.updated_at).getTime(),
+                lastSync: new Date(data.updated_at).getTime(),
+                adminSummaryVN: data.admin_summary_vn,
+                performance_rating: data.performance_rating,
+            };
+            
+            // Save to IndexedDB for future use
+            await set(`${STORAGE_PREFIX}${obs.id}`, full);
+            console.log(`✅ Saved observation ${obs.id} to IndexedDB`);
+        } catch (err) {
+            console.error("Failed to fetch observation from server:", err);
+            alert(`Could not load observation data for ${obs.teacherName}. Please open the observation once to sync it locally, then try again.`);
+            setMergingAdminId(null);
+            return;
+        }
+    }
 
+    // 3. Continue with the existing merge logic (the rest of the function stays the same)
     const adminWorkbookUrl = obs.adminWorkbookUrl;
     if (!adminWorkbookUrl) { alert("Admin workbook URL not found."); setMergingAdminId(null); return; }
 
-    // Resolve School ID logic... (keep existing)
+    // Resolve School ID logic...
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
     if (!schoolId) {
        try {
@@ -2595,20 +2634,16 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     try {
       const graphToken = await getGraphAccessToken();
 
-      // Prepare Data
       const exportMeta = toMetaForExport(full, obs);
       const exportIndicators = toIndicatorsForExport(full);
       const adminModel = buildAdminExportModel(exportMeta, exportIndicators, trainerName);
 
-      // 👇👇 CRITICAL UPDATE: Clean the text before adding to model 👇👇
-    if (obs.admin_summary_vn) {
-      // Keep original formatting (preserve hyphens, spaces, line breaks)
-      adminModel.trainerSummary = obs.admin_summary_vn;
-    }
+      if (obs.admin_summary_vn) {
+        adminModel.trainerSummary = obs.admin_summary_vn;
+      }
       
       const sheetName = buildAdminSheetName(obs);
 
-      // Run Merge
       const result = await clientMergeAdminSheet({
         token: graphToken,
         workbookUrl: adminWorkbookUrl,
@@ -2616,7 +2651,6 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
         model: adminModel
       });
 
-      // Update Database
       const mergedAt = new Date().toISOString();
       const newViewUrl = obs.adminViewOnlyUrl || result.viewUrl; 
 
@@ -2629,7 +2663,6 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
 
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
 
-      // Update UI
       setObservations((prev) =>
         prev.map((o) => 
           o.id === obs.id 
@@ -2654,7 +2687,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     } finally {
       setMergingAdminId(null);
     }
-  };
+};
 
 
 // ✅ DELETE HANDLER (Offline Robust + Queue)
