@@ -570,8 +570,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 
   const [observations, setObservations] =
     useState<DashboardObservationRow[]>([]);
-  const [groupMode, setGroupMode] = useState<GroupMode>("month");
-  const [sortMode, setSortMode] = useState<SortMode>("newest");
   const [searchText, setSearchText] = useState("");
   const [recentMergePanel, setRecentMergePanel] =
    useState<RecentMergePanel>(null);
@@ -1775,59 +1773,37 @@ async function processRows(dbRows: any[], pendingDeletes: string[]) {
       FILTER + SORT + GROUP
   --------------------------------- */
 const filteredAndSorted = React.useMemo(() => {
-    // 1. Internal Helper (or import this from a utils file)
     const flattenText = (text: string | null | undefined): string => {
       if (!text) return "";
       return text
         .toLowerCase()
-        .normalize("NFD")               // Decomposes accents
-        .replace(/[\u0300-\u036f]/g, "") // Strips accent marks
-        .replace(/đ/g, "d")             // Handles the unique 'đ'
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
         .trim();
     };
 
     let list = [...observations];
 
-    // 2. Enhanced Search Logic
+    // Search logic
     const q = searchText.trim().toLowerCase();
     if (q) {
       const flattenedQuery = flattenText(q);
-      const searchWords = flattenedQuery.split(/\s+/); // Tokenize search into words
-
+      const searchWords = flattenedQuery.split(/\s+/);
       list = list.filter((o) => {
-        // Flatten the target fields for comparison
         const targetName = flattenText(o.teacherName);
         const targetSchool = flattenText(o.schoolName);
         const targetCampus = flattenText(o.campus);
-
-        // Combine fields to allow cross-field searching
         const combinedTarget = `${targetName} ${targetSchool} ${targetCampus}`;
-
-        // Ensure EVERY word in the search exists somewhere in the combined target
         return searchWords.every(word => combinedTarget.includes(word));
       });
     }
 
-    // 3. Sorting (Remains unchanged to preserve visual data)
-    list.sort((a, b) => {
-      if (sortMode === "newest") {
-        return (b.rawDate ?? 0) - (a.rawDate ?? 0);
-      }
-      if (sortMode === "oldest") {
-        return (a.rawDate ?? 0) - (b.rawDate ?? 0);
-      }
-      if (sortMode === "teacher-az") {
-        return a.teacherName.localeCompare(b.teacherName);
-      }
-      if (sortMode === "teacher-za") {
-        return b.teacherName.localeCompare(a.teacherName);
-      }
-      return 0;
-    });
+    // Always sort by newest (rawDate descending)
+    list.sort((a, b) => (b.rawDate ?? 0) - (a.rawDate ?? 0));
 
     return list;
-  }, [observations, searchText, sortMode]);
-
+  }, [observations, searchText]);
   // Assuming 'observations' and 'setObservations' are managed via useState in DashboardShell
 // const [observations, setObservations] = useState<DashboardObservationRow[]>([]);
 
@@ -1951,24 +1927,12 @@ const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: 
 }, [setObservations]);
 
 const grouped = React.useMemo(() => {
-    if (groupMode === "none") return null;
-
-    if (groupMode === "month") {
-      return groupBy(filteredAndSorted, (o) => {
-        const mk = monthKeyFromTs(o.rawDate);
-        return mk ?? "Unknown date";
-      });
-    }
-    if (groupMode === "school") {
-      return groupBy(filteredAndSorted, (o) => o.schoolName);
-    }
-    if (groupMode === "campus") {
-      return groupBy(filteredAndSorted, (o) => o.campus);
-    }
-
-    return null;
-  }, [filteredAndSorted, groupMode]);
-
+  // Always group by month
+  return groupBy(filteredAndSorted, (o) => {
+    const mk = monthKeyFromTs(o.rawDate);
+    return mk ?? "Unknown date";
+  });
+}, [filteredAndSorted]);
   /* ------------------------------
       AM SUMMARY HELPERS
   --------------------------------- */
@@ -3256,15 +3220,13 @@ useEffect(() => {
   const targetObs = observations.find(o => o.id === highlightObservationId);
   if (!targetObs) return;
 
-  // If group mode is 'month', expand the group containing this observation
-  if (groupMode === 'month') {
-    const monthKey = monthKeyFromTs(targetObs.rawDate);
-    if (monthKey) {
-      setExpandedGroups(prev => ({
-        ...prev,
-        [monthKey]: true,
-      }));
-    }
+  // Always expand the group containing this observation (grouping is always by month)
+  const monthKey = monthKeyFromTs(targetObs.rawDate);
+  if (monthKey) {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [monthKey]: true,
+    }));
   }
 
   // Allow time for the DOM to update after group expansion
@@ -3281,8 +3243,7 @@ useEffect(() => {
     lastHighlightedRef.current = highlightObservationId;
     onHighlightComplete();
   }, 100);
-}, [highlightObservationId, observations, groupMode, onHighlightComplete]);
-
+}, [highlightObservationId, observations, onHighlightComplete]);
   return (
     <>
       <div className="card">
@@ -3304,35 +3265,6 @@ useEffect(() => {
                 placeholder="Teacher, school, campus…"
               />
             </div>
-
-            <div className="toolbar-group">
-              <span>Group by</span>
-              <select
-                className="select"
-                value={groupMode}
-                onChange={(e) => setGroupMode(e.target.value as GroupMode)}
-              >
-                <option value="none">None</option>
-                <option value="month">Month</option>
-                <option value="school">School</option>
-                <option value="campus">Campus</option>
-              </select>
-            </div>
-
-            <div className="toolbar-group">
-              <span>Sort</span>
-              <select
-                className="select"
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-              >
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-                <option value="teacher-az">Teacher A–Z</option>
-                <option value="teacher-za">Teacher Z–A</option>
-              </select>
-            </div>
-
             <div className="toolbar-group">
               <button
                 type="button"
@@ -3453,10 +3385,7 @@ useEffect(() => {
           ) : (
               <>
                 {/* Existing Group Logic */}
-                {groupMode === "none" || !grouped
-                  ? filteredAndSorted.map((obs) => renderRow(obs))
-                  : grouped.map(renderGroup)
-                }
+                {grouped.map(renderGroup)}
                 
                 {/* Existing Empty State Logic */}
                 {!loading && observations.length === 0 && (
