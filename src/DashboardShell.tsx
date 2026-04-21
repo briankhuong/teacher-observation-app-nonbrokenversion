@@ -1324,29 +1324,33 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         if (rpcError) console.error("CRM Broadcast failed:", rpcError);
       }
 
-// 4. STAMP RECEIPT
-      const now = Date.now();
-      const storageKey = `${STORAGE_PREFIX}${localData.id}`;
-      const finalPayload = {
-        ...localData,
-        // Update local object with the IDs we just ensured existed
-        teacher_id: finalTeacherId, 
-        grapeseed_id: finalGsId,
-        meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
-        lastSync: now,
-        updatedAt: now // <-- FIX: Pin updatedAt to lastSync to guarantee parity
-      };
-      
-      await set(storageKey, finalPayload);
+// 4. FETCH THE SERVER’S UPDATED_AT (source of truth)
+const { data: updatedRow, error: fetchError } = await supabase
+  .from("observations")
+  .select("updated_at")
+  .eq("id", localData.id)
+  .single();
 
-      // 5. UPDATE UI INSTANTLY
-      // @ts-ignore
+const serverUpdatedAt = fetchError ? Date.now() : new Date(updatedRow.updated_at).getTime();
+
+// 5. STAMP RECEIPT USING SERVER TIME
+const storageKey = `${STORAGE_PREFIX}${localData.id}`;
+const finalPayload = {
+  ...localData,
+  teacher_id: finalTeacherId,
+  grapeseed_id: finalGsId,
+  meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
+  lastSync: serverUpdatedAt,
+  updatedAt: serverUpdatedAt   // both equal, no drift
+};
+await set(storageKey, finalPayload);
+
       setObservations(prev => prev.map(obs => {
         if (obs.id === id) {
           return { 
             ...obs, 
-            lastSync: now,
-            updatedAt: now, // <-- FIX: Keep UI state perfectly aligned
+            lastSync: serverUpdatedAt,
+            updatedAt: serverUpdatedAt,
             syncStatus: 'synced',
             performance_rating: localData.performance_rating
           };
@@ -1361,6 +1365,8 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
       alert("Sync failed: " + err.message);
     }
   };
+
+
 const handleConflictResolved = async (mergedData: any) => {
     try {
       console.log("💾 Saving resolved data & Force Pushing...", mergedData);
