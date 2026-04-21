@@ -46,11 +46,9 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
       setActiveTab("edit");
 
       if (mode === "simple") {
-        setTimeout(() => {
-          if (simpleEditorRef.current) {
-            simpleEditorRef.current.innerHTML = initialBodyHtml || "";
-          }
-        }, 0);
+        if (simpleEditorRef.current) {
+          simpleEditorRef.current.innerHTML = initialBodyHtml || "";
+        }
       } else if (mode === "sandwich" && sandwichData) {
         setIntro(sandwichData.intro);
         setOutro(sandwichData.outro);
