@@ -1325,6 +1325,7 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
       }
 
 // 4. FETCH THE SERVER’S UPDATED_AT (source of truth)
+// 4. FETCH THE SERVER’S UPDATED_AT (source of truth)
 const { data: updatedRow, error: fetchError } = await supabase
   .from("observations")
   .select("updated_at")
@@ -1345,20 +1346,10 @@ const finalPayload = {
 };
 await set(storageKey, finalPayload);
 
-      setObservations(prev => prev.map(obs => {
-        if (obs.id === id) {
-          return { 
-            ...obs, 
-            lastSync: serverUpdatedAt,
-            updatedAt: serverUpdatedAt,
-            syncStatus: 'synced',
-            performance_rating: localData.performance_rating
-          };
-        }
-        return obs;
-      }));
+// 6. Refresh the whole dashboard to ensure UI matches the fresh IndexedDB data
+await refreshDashboard();
 
-      console.log("✅ Sync Complete!");
+console.log("✅ Sync Complete and dashboard refreshed!");
 
     } catch (err: any) {
       console.error("Sync failed:", err);
@@ -1775,6 +1766,28 @@ async function processRows(dbRows: any[], pendingDeletes: string[]) {
     // Enrich with School Data
     return await enrichObservationsWithDefaults(rows);
   }
+  // 🟢 NEW: Refresh the dashboard data from the latest IndexedDB and Supabase
+  const refreshDashboard = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const pendingDeletes = (await get<string[]>("pending_deletes")) || [];
+      const { data, error } = await supabase
+        .from("observations")
+        .select("id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn")
+        .eq("trainer_id", user.id)
+        .order("observation_date", { ascending: false })
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        await set("dashboard_backup_list", data);
+        const rows = await processRows(data, pendingDeletes);
+        setObservations(rows);
+      }
+    } catch (err) {
+      console.warn("Dashboard refresh failed", err);
+    }
+  }, [user?.id]);
+
   /* ------------------------------
       FILTER + SORT + GROUP
   --------------------------------- */
