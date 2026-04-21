@@ -85,7 +85,7 @@ export function buildAdminUpdateBulkHtml({
       <div style="text-align: center; margin: 25px 0;">
         <a href="${urlToUse}" style="${button}">📂 Mở File Nhận Xét</a>
       </div>` : ""}
-
+        
       <p style="margin-bottom: 0;">Trân trọng,<br><strong>${trainerName}</strong><br><span style="color: #6b7280; font-size: 13px;">GrapeSEED Trainer</span></p>
     </div>
 
