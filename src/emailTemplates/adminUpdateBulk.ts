@@ -61,7 +61,7 @@ export function buildAdminUpdateBulkHtml({
     <div style="${body}">
       <p style="margin-top: 0;">Kính gửi anh/chị <strong>${adminName}</strong>,</p>
       
-      <p>Cảm ơn anh/chị đã tạo điều kiện em hoàn thành đợt hỗ trợ vừa qua. Dưới đây là danh sách giáo viên em đã hỗ trợ<strong>${reportMonth}</strong>:</p>
+      <p>Cảm ơn anh/chị đã tạo điều kiện em hoàn thành đợt hỗ trợ vừa qua. Dưới đây là danh sách giáo viên em đã hỗ trợ trong tháng <strong>${reportMonth}</strong>:</p>
 
       <div style="border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; margin: 20px 0;">
         <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
@@ -79,13 +79,13 @@ export function buildAdminUpdateBulkHtml({
         </table>
       </div>
 
-      <p>Anh/chị có thể xem chi tiết các ghi chú và đề xuất trong Admin Workbook (đã cập nhật):</p>
+      <p>Anh/chị có thể xem chi tiết các ghi chú và đề xuất trong File tổng hợp Nhận xét bên dưới:</p>
 
       ${urlToUse ? `
       <div style="text-align: center; margin: 25px 0;">
-        <a href="${urlToUse}" style="${button}">📂 Mở File Tổng Hợp (Admin Workbook)</a>
+        <a href="${urlToUse}" style="${button}">📂 Mở File Nhận Xét</a>
       </div>` : ""}
-
+        
       <p style="margin-bottom: 0;">Trân trọng,<br><strong>${trainerName}</strong><br><span style="color: #6b7280; font-size: 13px;">GrapeSEED Trainer</span></p>
     </div>
 

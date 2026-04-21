@@ -54,7 +54,7 @@ export function buildTeacherPreCallHtml({
 
       ${teacherWorkbookUrl ? `
       <div style="background: #eff6ff; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #2563eb;">
-        <p style="margin: 0; font-size: 14px;"><strong>Review Notes:</strong> You can see the latest feedback for your class in your file here: <a href="${teacherWorkbookUrl}" style="color: #2563eb;">Open the Feedback file</a></p>
+        <p style="margin: 0; font-size: 14px;"><strong>Review Notes:</strong> You can see the latest observation notes in your workbook here: <a href="${teacherWorkbookUrl}" style="color: #2563eb;">Open Feedback file</a></p>
       </div>` : ""}
 
       <p>During our call, we will celebrate your progress and discuss a few next steps to keep your class engaging and effective. In the mean time, <strong><u>please read the comments in the workbook above and answer all the questions to prepare for your call</u></strong>. For the answers, you can just type them under the questions.</p>
