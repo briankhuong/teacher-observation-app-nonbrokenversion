@@ -107,20 +107,43 @@ const [highlightObservationId, setHighlightObservationId] = useState<string | nu
 
     // --- 🟢 NEW: Warm-up Logic (Fixes OCR Cold Start) ---
 // --- 🟢 NEW: Warm-up Logic (Fixes OCR Cold Start) ---
-    const warmUpServices = async () => {
-      try {
-        const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
-        if (MERGE_SERVER_BASE) {
-          // 🟢 UPDATED: Pointing to the Gemini route
-          // Using "HEAD" is a lightweight way to wake the server without sending data
-          fetch(`${MERGE_SERVER_BASE}/api/ocr-gemini`, { method: "HEAD" }).catch(() => {});
-          console.log("🚀 Gemini OCR Server warm-up signaled...");
-        }
-      } catch (e) {
-        // Silently fail, it's just a background optimization
+const warmUpServices = async () => {
+  try {
+    const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
+    if (!MERGE_SERVER_BASE) return;
+
+    // 1. Wake up Gemini OCR (existing)
+    fetch(`${MERGE_SERVER_BASE}/api/ocr-gemini`, { method: "HEAD" }).catch(() => {});
+
+    // 2. Wake up Groq polish endpoint with a dummy request
+    fetch(`${MERGE_SERVER_BASE}/api/polish-text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "ping" })
+    }).catch(() => {});
+
+    // 3. Refresh GrapeSEED token (store fresh token for later use)
+    const tokenResp = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (tokenResp.ok) {
+      const { access_token } = await tokenResp.json();
+      if (access_token) {
+        localStorage.setItem("grapeseed_token", access_token);
+        console.log("✅ GrapeSEED token refreshed");
       }
-    };
-    warmUpServices();
+    } else {
+      console.warn("⚠️ Could not refresh GrapeSEED token");
+    }
+
+    console.log("🚀 AI services and GrapeSEED token warm‑up complete");
+  } catch (e) {
+    // Silently fail – this is just a background optimisation
+    console.warn("Warm‑up failed (non‑critical)", e);
+  }
+};
+warmUpServices();
 
     // --- Network Logic (Fixes the "sticky" badge) ---
     const handleStatusChange = () => setIsOnline(navigator.onLine);
