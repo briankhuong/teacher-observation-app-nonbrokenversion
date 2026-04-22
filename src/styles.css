@@ -328,18 +328,13 @@ body {
   margin: 0;
 }
 
+
+
 .obs-list {
   display: flex;
   flex-direction: column;
-
-  /* single shared width */
   width: 100%;
-  max-width: 580px;
-  margin: 0 auto;
-
-  /* let children stretch to same width */
   align-items: stretch;
-
   padding-top: 8px;
 }
 

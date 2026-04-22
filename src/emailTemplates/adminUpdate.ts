@@ -59,7 +59,7 @@ export function buildAdminUpdateHtml({
 
       ${urlToUse ? `
       <div style="text-align: center; margin: 30px 0;">
-        <a href="${urlToUse}" style="${button}">📂 Mở File Tổng Hợp (Admin Workbook)</a>
+        <a href="${urlToUse}" style="${button}">📂 Mở File Nhận Xét</a>
         <p style="margin-top: 10px; font-size: 12px; color: #9ca3af;">(Link này bao gồm các ghi chú chi tiết từ buổi hỗ trợ)</p>
       </div>` : ""}
 
