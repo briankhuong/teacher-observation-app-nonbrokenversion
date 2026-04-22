@@ -382,7 +382,104 @@ function editDistance(s1, s2) {
   }
   return costs[s2.length];
 }
+// -------------------------------------------------- */
+// NEW: Helper to get coachId from user token
+// -------------------------------------------------- */
+async function getCoachIdFromToken(userToken) {
+  // 1. Try direct profile endpoint
+  try {
+    const response = await fetch('https://services.grapeseed.com/account/v1/users/me', {
+      headers: getHeaders(userToken)
+    });
+    if (response.ok) {
+      const profile = await response.json();
+      if (profile.id) return profile.id;
+    }
+  } catch (err) {
+    console.warn("Failed to fetch /users/me:", err.message);
+  }
 
+  // 2. Fallback: fetch active channels and extract coachId from first visitation
+  try {
+    const channelsResp = await fetch('https://services.grapeseed.com/admin/v1/visitations/channels', {
+      headers: getHeaders(userToken)
+    });
+    if (channelsResp.ok) {
+      const channels = await channelsResp.json();
+      const first = Array.isArray(channels) ? channels[0] : null;
+      if (first) {
+        const v = first.visitation || first;
+        // coachId can be in various fields
+        if (v.coachId) return v.coachId;
+        if (v.coach_id) return v.coach_id;
+        if (v.createBy) return v.createBy; // often matches coachId
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch channels for coachId fallback:", err.message);
+  }
+
+  return null;
+}
+
+// -------------------------------------------------- */
+// NEW: Search completed supports (stage = 6)
+// -------------------------------------------------- */
+async function searchCompletedSupports(coachId, schoolCode, monthKey, type, campusId) {
+  const [year, month] = monthKey.split('-');
+  const targetType = type === 'Visit' ? 0 : 1;
+  const url = `https://services.grapeseed.com/admin/v1/visitations/coaches/${coachId}/coachrelated?stage=6`;
+  
+  try {
+    const masterToken = await getMasterToken();
+    console.log(`🔍 Searching completed supports: ${url}`);
+    const response = await fetch(url, { headers: getHeaders(masterToken) });
+    if (!response.ok) {
+      console.error(`Failed to fetch completed supports: ${response.status}`);
+      return null;
+    }
+    const data = await response.json();
+    const items = data.visitations || [];   // ✅ FIX: use visitations array
+    console.log(`📋 Found ${items.length} completed supports.`);
+
+    for (const item of items) {
+      const v = item.visitationResponseModel;
+      if (!v) continue;
+      const isSchoolMatch = String(v.schoolId || "").toLowerCase() === schoolCode.toLowerCase();
+      const isTypeMatch = Number(v.type) === targetType;
+      const isMonthMatch = v.startDate && v.startDate.includes(`${year}-${month}`);
+      if (!isSchoolMatch || !isTypeMatch || !isMonthMatch) continue;
+      
+      console.log(`✅ Match candidate: ${v.id} (school match: ${isSchoolMatch}, type: ${isTypeMatch}, month: ${isMonthMatch})`);
+      
+      if (type === 'Visit') {
+        if (v.campusId && String(v.campusId).toLowerCase() === String(campusId).toLowerCase()) {
+          return v;
+        }
+        if (!v.campusId) return v;
+      } else {
+        if (!v.campusId) return v;
+      }
+    }
+    // Fallback: return first matching school/type/month regardless of campus
+    for (const item of items) {
+      const v = item.visitationResponseModel;
+      if (!v) continue;
+      const isSchoolMatch = String(v.schoolId || "").toLowerCase() === schoolCode.toLowerCase();
+      const isTypeMatch = Number(v.type) === targetType;
+      const isMonthMatch = v.startDate && v.startDate.includes(`${year}-${month}`);
+      if (isSchoolMatch && isTypeMatch && isMonthMatch) {
+        console.log(`✅ Fallback match: ${v.id}`);
+        return v;
+      }
+    }
+    console.log("❌ No completed support matches.");
+    return null;
+  } catch (err) {
+    console.error("Error searching completed supports:", err);
+    return null;
+  }
+}
 /* -------------------------------------------------- */
 /* UPDATED: CAMPUS SEARCH PROXY                       */
 /* -------------------------------------------------- */
@@ -962,11 +1059,12 @@ router.post("/api/login-grapeseed", async (req, res) => {
     }
 });
 
+
+
 /* -------------------------------------------------- */
-/* DEBUG: IDENTITY VERIFICATION                       */
+/* DEBUG: IDENTITY VERIFICATION (UPDATED)             */
 /* -------------------------------------------------- */
 router.post("/api/match-visitation", async (req, res) => {
-  // 🟢 1. ADD campusId to the requested body
   const { schoolCode, monthKey, type, userToken, campusId } = req.body; 
   const [year, month] = monthKey.split('-');
   const targetType = type === 'Visit' ? 0 : 1;
@@ -976,7 +1074,7 @@ router.post("/api/match-visitation", async (req, res) => {
   }
 
   try {
-    console.log(`📡 Fetching dashboard using trainer's token...`);
+    console.log(`📡 Fetching active channels using trainer's token...`);
     
     const response = await fetch('https://services.grapeseed.com/admin/v1/visitations/channels', {
       headers: getHeaders(userToken) 
@@ -985,20 +1083,13 @@ router.post("/api/match-visitation", async (req, res) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`❌ GrapeSEED API Rejected Token: ${response.status} - ${errorText}`);
-      // Return 401 so the frontend knows to pop the login modal again if needed
       return res.status(401).json({ error: "GrapeSEED API Error", details: errorText });
     }
 
     const data = await response.json();
     const channels = Array.isArray(data) ? data : [];
 
-    // 🚨 THE TRUTH TELLER: Print exactly what schools the server sees
-    console.log(`\n🕵️ IDENTITY CHECK: Who am I logged in as?`);
-    console.log(`Found ${channels.length} items. Schools visible:`);
-    channels.forEach(c => console.log(` - ${(c.visitation || c).schoolName}`));
-    console.log(`-------------------------------------------\n`);
-
-// 1. Get all potential matches for the School, Month, and Type
+    // 1. Try to find an active match (stage < 6)
     const potentialMatches = channels.filter(item => {
       const v = item.visitation || item;
       const isSchoolMatch = String(v.schoolId || "").toLowerCase() === schoolCode.toLowerCase();
@@ -1010,30 +1101,34 @@ router.post("/api/match-visitation", async (req, res) => {
     let match = null;
 
     if (potentialMatches.length > 0) {
-      // 🟢 2. TYPE-AWARE CAMPUS MATCHING
       if (type === 'Visit') {
-        // For Onsite Visits, prioritize the specific campus ID
         match = potentialMatches.find(item => {
           const v = item.visitation || item;
           return v.campusId && String(v.campusId).toLowerCase() === String(campusId).toLowerCase();
         });
-        
-        // If visit is not found for campus, fallback to a general visit (null campus)
-        if (!match) {
-          match = potentialMatches.find(item => !(item.visitation || item).campusId);
+        if (!match) match = potentialMatches.find(item => !(item.visitation || item).campusId);
+      } else {
+        match = potentialMatches.find(item => !(item.visitation || item).campusId);
+        if (!match) match = potentialMatches[0];
+      }
+      if (!match) match = potentialMatches[0];
+    }
+
+    // 2. If no active match, search completed supports (stage = 6)
+    if (!match) {
+      console.log(`⚠️ No active match found for ${schoolCode}. Searching completed supports...`);
+      const coachId = await getCoachIdFromToken(userToken);
+      if (coachId) {
+        const completed = await searchCompletedSupports(coachId, schoolCode, monthKey, type, campusId);
+        if (completed) {
+          console.log(`🎯 Found completed support: ${completed.id} (stage 6)`);
+          match = { visitation: completed }; // wrap to match expected structure
+        } else {
+          console.warn(`⚠️ No completed support found either.`);
         }
       } else {
-        // For LVA, prioritize the 'null' campus task (Standard GrapeSEED behavior)
-        match = potentialMatches.find(item => !(item.visitation || item).campusId);
-        
-        // If no null campus LVA found, fallback to any available LVA for this school
-        if (!match) {
-          match = potentialMatches[0];
-        }
+        console.warn(`⚠️ Could not retrieve coachId.`);
       }
-      
-      // Final absolute fallback: if still no match, take the first from the filtered list
-      if (!match) match = potentialMatches[0];
     }
 
     if (match) {
