@@ -242,40 +242,53 @@ function monthKeyFromTs(ts: number | null): string | null {
 
 async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
   let nextMeta: any = {};
+  let fullLocalData: any = null;
 
-  // 1. Try to read from LocalStorage first
-  const key = `${STORAGE_PREFIX}${obsId}`;
-  const rawLocal = localStorage.getItem(key);
+  // 1. Try to read from IndexedDB first (primary storage)
+  const idbKey = `${STORAGE_PREFIX}${obsId}`;
+  fullLocalData = await get(idbKey);
 
-  if (rawLocal) {
-    // Case A: We have local data. Update it.
-    const parsed = JSON.parse(rawLocal);
-    parsed.meta = { ...(parsed.meta || {}), ...patch };
-    nextMeta = parsed.meta;
-    localStorage.setItem(key, JSON.stringify(parsed));
+  if (fullLocalData) {
+    // Update the meta in the local copy
+    fullLocalData.meta = { ...(fullLocalData.meta || {}), ...patch };
+    nextMeta = fullLocalData.meta;
   } else {
-    // Case B: No local data? Fetch from DB so we don't crash.
-    // This prevents the "disappearing badge" bug on fresh loads.
-    const { data, error } = await supabase
-      .from("observations")
-      .select("id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn")
-      .eq("id", obsId)
-      .single();
-
-    if (!error && data) {
-      nextMeta = { ...(data.meta || {}), ...patch };
-      // We don't necessarily need to write to localStorage here if the user hasn't opened it,
-      // but we MUST have the 'nextMeta' to save to the DB below.
+    // Fallback to localStorage for migration
+    const key = `${STORAGE_PREFIX}${obsId}`;
+    const rawLocal = localStorage.getItem(key);
+    
+    if (rawLocal) {
+      const parsed = JSON.parse(rawLocal);
+      parsed.meta = { ...(parsed.meta || {}), ...patch };
+      nextMeta = parsed.meta;
+      fullLocalData = parsed;
+      localStorage.setItem(key, JSON.stringify(parsed));
     } else {
-      console.error("[persistMerged] Could not find obs to update:", obsId);
-      return {}; // Fail safe
+      // No local data, fetch from DB
+      const { data, error } = await supabase
+        .from("observations")
+        .select("id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn")
+        .eq("id", obsId)
+        .single();
+
+      if (!error && data) {
+        nextMeta = { ...(data.meta || {}), ...patch };
+        fullLocalData = {
+          id: data.id,
+          meta: nextMeta,
+          indicators: data.indicators || [],
+          status: data.status || "draft",
+          updatedAt: new Date(data.updated_at).getTime(),
+          lastSync: new Date(data.updated_at).getTime(),
+        };
+      } else {
+        console.error("[persistMerged] Could not find obs to update:", obsId);
+        return {};
+      }
     }
   }
 
-  // 2. Save to Supabase (The Source of Truth)
-  // We use a simplified update here to ensure the patch sticks.
-  // Note: We need to merge the new patch with the EXISTING DB meta to be safe,
-  // but since 'nextMeta' above is built from (Local OR DB) + Patch, we are good.
+  // 2. Save to Supabase
   try {
     const { error } = await supabase
       .from("observations")
@@ -287,6 +300,23 @@ async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
   } catch (e) {
     console.error("[persistMerged] Supabase update failed", e);
     alert("Warning: Could not save status to database. Check internet connection.");
+    return nextMeta;
+  }
+
+  // 3. Fetch the server's updated_at to sync timestamps
+  const { data: updatedRow, error: fetchError } = await supabase
+    .from("observations")
+    .select("updated_at")
+    .eq("id", obsId)
+    .single();
+
+  const serverUpdatedAt = fetchError ? Date.now() : new Date(updatedRow.updated_at).getTime();
+
+  // 4. Update local IndexedDB with the correct timestamps
+  if (fullLocalData) {
+    fullLocalData.lastSync = serverUpdatedAt;
+    fullLocalData.updatedAt = serverUpdatedAt;
+    await set(idbKey, fullLocalData);
   }
 
   return nextMeta;
@@ -2779,6 +2809,7 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
         persistMergedLinkToObservationMeta(id, { [metaKey]: timestamp })
       )
     );
+     await refreshDashboard();
   };
 
 
