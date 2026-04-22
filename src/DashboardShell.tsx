@@ -2441,7 +2441,7 @@ const handleBulkAdminMerge = async () => {
         currentTeacher: obs.teacherName,
       });
       try {
-        await handleMergeAdminWorkbook(obs);
+        await handleMergeAdminWorkbook(obs, true);
         successCount++;
       } catch (err) {
         console.error(`Merge failed for ${obs.teacherName}:`, err);
@@ -2583,7 +2583,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
   };
 
   // ✅ CLIENT-SIDE MERGE ADMIN HANDLER (With Translation Fix)
-const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
+const handleMergeAdminWorkbook = async (obs: DashboardObservationRow, silent: boolean = false) => {
     setMergingAdminId(obs.id);
     setActionModal(null);
 
@@ -2692,7 +2692,9 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow) => {
         mergedAt,
       });
 
-      alert("Admin merge succeeded!");
+if (!silent) {
+  alert("Admin merge succeeded!");
+}
 
     } catch (err: any) {
       console.error("Client admin merge error:", err);
