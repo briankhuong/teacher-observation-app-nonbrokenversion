@@ -11,7 +11,7 @@ interface EmailComposeModalProps {
   mode: EmailMode;
   
   initialTo: string[];
-  initialCc?: string[]; // <--- NEW PROP
+  initialCc?: string[];
   initialSubject: string;
   initialBodyHtml?: string;
   sandwichData?: { intro: string; tableHtml: string; outro: string };
@@ -23,17 +23,20 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
   onSuccess,
   mode,
   initialTo,
-  initialCc = [], // Default to empty
+  initialCc = [],
   initialSubject,
   initialBodyHtml,
   sandwichData
 }) => {
   const [toInput, setToInput] = useState("");
-  const [ccInput, setCcInput] = useState(""); // <--- NEW STATE
+  const [ccInput, setCcInput] = useState("");
   const [subject, setSubject] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
-
+  
+  // 🟢 CRITICAL FIX: Store email body in state, not just DOM
+  const [simpleBodyHtml, setSimpleBodyHtml] = useState("");
+  
   const simpleEditorRef = useRef<HTMLDivElement>(null);
   const [intro, setIntro] = useState("");
   const [outro, setOutro] = useState("");
@@ -41,13 +44,18 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setToInput(initialTo.join(", "));
-      setCcInput(initialCc.join(", ")); // <--- Initialize CC
+      setCcInput(initialCc.join(", "));
       setSubject(initialSubject);
       setActiveTab("edit");
 
       if (mode === "simple") {
+        // Store the initial HTML in state
+        const html = initialBodyHtml || "";
+        setSimpleBodyHtml(html);
+        
+        // Also set the DOM element if it exists
         if (simpleEditorRef.current) {
-          simpleEditorRef.current.innerHTML = initialBodyHtml || "";
+          simpleEditorRef.current.innerHTML = html;
         }
       } else if (mode === "sandwich" && sandwichData) {
         setIntro(sandwichData.intro);
@@ -56,11 +64,19 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
     }
   }, [isOpen, initialTo, initialCc, initialSubject, initialBodyHtml, mode, sandwichData]);
 
+  // 🟢 Sync DOM when simpleBodyHtml changes (e.g., user edits)
+  useEffect(() => {
+    if (mode === "simple" && simpleEditorRef.current && simpleEditorRef.current.innerHTML !== simpleBodyHtml) {
+      simpleEditorRef.current.innerHTML = simpleBodyHtml;
+    }
+  }, [simpleBodyHtml, mode]);
+
   if (!isOpen) return null;
 
   const getFinalHtml = () => {
     if (mode === "simple") {
-      return simpleEditorRef.current?.innerHTML || "";
+      // Return the state value, not DOM value
+      return simpleBodyHtml || "";
     } else {
       const formatText = (text: string) => 
         text.split('\n').map(line => `<p style="margin:0 0 8px 0;">${line}</p>`).join("");
@@ -77,7 +93,7 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
 
   const handleSend = async () => {
     const recipients = toInput.split(",").map((s) => s.trim()).filter(Boolean);
-    const ccRecipients = ccInput.split(",").map((s) => s.trim()).filter(Boolean); // <--- Parse CC
+    const ccRecipients = ccInput.split(",").map((s) => s.trim()).filter(Boolean);
 
     if (recipients.length === 0) {
       alert("Please enter at least one email address in the 'To' field.");
@@ -86,7 +102,6 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
 
     setIsSending(true);
     try {
-      // ✅ Pass CC to the updated API function
       await sendGraphEmail(recipients, ccRecipients, subject, getFinalHtml());
       alert("✅ Email sent successfully!");
       if (onSuccess) onSuccess();
@@ -96,6 +111,13 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
       alert(`❌ Failed to send: ${error.message}`);
     } finally {
       setIsSending(false);
+    }
+  };
+
+  // Handle user edits in the contentEditable div
+  const handleSimpleEdit = () => {
+    if (simpleEditorRef.current) {
+      setSimpleBodyHtml(simpleEditorRef.current.innerHTML);
     }
   };
 
@@ -129,7 +151,7 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
             />
           </div>
 
-          {/* ✅ CC Row (NEW) */}
+          {/* CC Row */}
           <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", alignItems: "center" }}>
             <label style={{ fontSize: 13, fontWeight: 500, color: "#6b7280" }}>Cc:</label>
             <input 
@@ -153,7 +175,7 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
           </div>
         </div>
 
-        {/* ... (Rest of component remains the same: MAIN CONTENT AREA, TABS, PREVIEW, FOOTER) ... */}
+        {/* MAIN CONTENT AREA */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", overflow: "hidden" }}>
            <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", padding: "0 24px" }}>
              <button onClick={() => setActiveTab("edit")} style={{ padding: "12px 0", marginRight: 20, background: "none", border: "none", borderBottom: activeTab === "edit" ? "2px solid #2563eb" : "2px solid transparent", color: activeTab === "edit" ? "#2563eb" : "#6b7280", fontWeight: 500, cursor: "pointer" }}>Write</button>
@@ -167,7 +189,13 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
              ) : (
                <>
                  {mode === "simple" ? (
-                    <div ref={simpleEditorRef} contentEditable style={{ outline: "none", minHeight: "300px", fontSize: 14, lineHeight: 1.6 }} />
+                    <div 
+                      ref={simpleEditorRef}
+                      contentEditable
+                      onInput={handleSimpleEdit}
+                      style={{ outline: "none", minHeight: "300px", fontSize: 14, lineHeight: 1.6 }}
+                      dangerouslySetInnerHTML={{ __html: simpleBodyHtml }}
+                    />
                  ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                       <div>
@@ -188,6 +216,8 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
              )}
            </div>
         </div>
+        
+        {/* FOOTER */}
         <div style={{ padding: "16px 24px", background: "#f9fafb", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: 12 }}>
           <button className="btn" onClick={onClose} disabled={isSending} style={{ background: "#fff", border: "1px solid #d1d5db" }}>Cancel</button>
           <button className="btn btn-primary" onClick={handleSend} disabled={isSending} style={{ backgroundColor: "#2563eb", color: "white", padding: "8px 20px", display: "flex", alignItems: "center", gap: 8, opacity: isSending ? 0.7 : 1 }}>
