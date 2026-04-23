@@ -439,9 +439,11 @@ async function searchCompletedSupports(coachId, schoolCode, monthKey, type, camp
       return null;
     }
     const data = await response.json();
-    const items = data.visitations || [];   // ✅ FIX: use visitations array
+    const items = data.visitations || [];
     console.log(`📋 Found ${items.length} completed supports.`);
 
+    // First pass: exact month match (respecting campus logic)
+    let exactMatch = null;
     for (const item of items) {
       const v = item.visitationResponseModel;
       if (!v) continue;
@@ -450,29 +452,53 @@ async function searchCompletedSupports(coachId, schoolCode, monthKey, type, camp
       const isMonthMatch = v.startDate && v.startDate.includes(`${year}-${month}`);
       if (!isSchoolMatch || !isTypeMatch || !isMonthMatch) continue;
       
-      console.log(`✅ Match candidate: ${v.id} (school match: ${isSchoolMatch}, type: ${isTypeMatch}, month: ${isMonthMatch})`);
-      
+      console.log(`✅ Exact match candidate: ${v.id} (startDate: ${v.startDate})`);
       if (type === 'Visit') {
         if (v.campusId && String(v.campusId).toLowerCase() === String(campusId).toLowerCase()) {
-          return v;
+          exactMatch = v;
+          break;
         }
-        if (!v.campusId) return v;
+        if (!v.campusId) exactMatch = v;
       } else {
-        if (!v.campusId) return v;
+        if (!v.campusId) exactMatch = v;
       }
+      if (exactMatch) break;
     }
-    // Fallback: return first matching school/type/month regardless of campus
+    if (exactMatch) return exactMatch;
+
+    // Second pass: no month restriction – find most recent for school, type, and (for Visit) campus
+    console.log(`⚠️ No exact month match. Looking for most recent completed support for school ${schoolCode}, type ${type}${type === 'Visit' ? `, campus ${campusId}` : ''}...`);
+    let bestMatch = null;
+    let bestDate = null;
     for (const item of items) {
       const v = item.visitationResponseModel;
       if (!v) continue;
       const isSchoolMatch = String(v.schoolId || "").toLowerCase() === schoolCode.toLowerCase();
       const isTypeMatch = Number(v.type) === targetType;
-      const isMonthMatch = v.startDate && v.startDate.includes(`${year}-${month}`);
-      if (isSchoolMatch && isTypeMatch && isMonthMatch) {
-        console.log(`✅ Fallback match: ${v.id}`);
-        return v;
+      if (!isSchoolMatch || !isTypeMatch) continue;
+      
+      // For Visit, require campus match (if campusId provided)
+      if (type === 'Visit' && campusId) {
+        // If the support has a campusId, it must match. If it has null campus, it's a general school visit – we can accept it as fallback? 
+        // But to be safe, require exact campus match if observation has a campusId.
+        if (v.campusId && String(v.campusId).toLowerCase() !== String(campusId).toLowerCase()) {
+          continue;
+        }
+        // If support has null campus, it might be acceptable as a fallback? But to avoid wrong campus, better to require match if observation has campusId.
+        // We'll only skip if support has a campusId that doesn't match.
+      }
+      
+      const d = new Date(v.startDate);
+      if (!bestDate || d > bestDate) {
+        bestDate = d;
+        bestMatch = v;
       }
     }
+    if (bestMatch) {
+      console.log(`✅ Fallback match: ${bestMatch.id} (startDate: ${bestMatch.startDate})`);
+      return bestMatch;
+    }
+
     console.log("❌ No completed support matches.");
     return null;
   } catch (err) {
