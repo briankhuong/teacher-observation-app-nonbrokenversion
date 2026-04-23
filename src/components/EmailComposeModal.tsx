@@ -37,15 +37,20 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
   // 🟢 CRITICAL FIX: Store email body in state, not just DOM
   const [simpleBodyHtml, setSimpleBodyHtml] = useState("");
   
-  const simpleEditorRef = useRef<HTMLDivElement>(null);
+const simpleEditorRef = useRef<HTMLDivElement>(null);
   const [intro, setIntro] = useState("");
   const [outro, setOutro] = useState("");
 
+  // 🟢 FIX: Convert reference types to primitives to prevent dependency loops
+  const toJoined = initialTo ? initialTo.join(", ") : "";
+  const ccJoined = initialCc ? initialCc.join(", ") : "";
+  const sandwichDataString = sandwichData ? JSON.stringify(sandwichData) : "";
+
   useEffect(() => {
     if (isOpen) {
-      setToInput(initialTo.join(", "));
-      setCcInput(initialCc.join(", "));
-      setSubject(initialSubject);
+      setToInput(toJoined);
+      setCcInput(ccJoined);
+      setSubject(initialSubject || "");
       setActiveTab("edit");
 
       if (mode === "simple") {
@@ -57,12 +62,15 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
         if (simpleEditorRef.current) {
           simpleEditorRef.current.innerHTML = html;
         }
-      } else if (mode === "sandwich" && sandwichData) {
-        setIntro(sandwichData.intro);
-        setOutro(sandwichData.outro);
+      } else if (mode === "sandwich" && sandwichDataString) {
+        // Parse the stringified version so ESLint doesn't demand the raw object
+        const parsedSandwich = JSON.parse(sandwichDataString);
+        setIntro(parsedSandwich.intro || "");
+        setOutro(parsedSandwich.outro || "");
       }
     }
-  }, [isOpen, initialTo, initialCc, initialSubject, initialBodyHtml, mode, sandwichData]);
+  // 🟢 FIX: Use primitive string dependencies instead of raw arrays/objects
+  }, [isOpen, toJoined, ccJoined, initialSubject, initialBodyHtml, mode, sandwichDataString]);
 
   // 🟢 Sync DOM when simpleBodyHtml changes (e.g., user edits)
   useEffect(() => {
@@ -73,10 +81,11 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
 
   if (!isOpen) return null;
 
-  const getFinalHtml = () => {
+const getFinalHtml = () => {
     if (mode === "simple") {
-      // Return the state value, not DOM value
-      return simpleBodyHtml || "";
+      // 🟢 FIX: Read directly from the synchronous DOM ref to prevent the onBlur/onClick race condition.
+      // Fallback to simpleBodyHtml state just in case the ref is unexpectedly null.
+      return simpleEditorRef.current?.innerHTML || simpleBodyHtml || "";
     } else {
       const formatText = (text: string) => 
         text.split('\n').map(line => `<p style="margin:0 0 8px 0;">${line}</p>`).join("");
@@ -179,7 +188,11 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
         <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", overflow: "hidden" }}>
            <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", padding: "0 24px" }}>
              <button onClick={() => setActiveTab("edit")} style={{ padding: "12px 0", marginRight: 20, background: "none", border: "none", borderBottom: activeTab === "edit" ? "2px solid #2563eb" : "2px solid transparent", color: activeTab === "edit" ? "#2563eb" : "#6b7280", fontWeight: 500, cursor: "pointer" }}>Write</button>
-             <button onClick={() => setActiveTab("preview")} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: activeTab === "preview" ? "2px solid #2563eb" : "2px solid transparent", color: activeTab === "preview" ? "#2563eb" : "#6b7280", fontWeight: 500, cursor: "pointer" }}>Preview</button>
+             <button onClick={() => {
+               // 🟢 FIX: Explicitly capture DOM text to state before switching to the preview tab
+               handleSimpleEdit(); 
+               setActiveTab("preview");
+             }} style={{ padding: "12px 0", background: "none", border: "none", borderBottom: activeTab === "preview" ? "2px solid #2563eb" : "2px solid transparent", color: activeTab === "preview" ? "#2563eb" : "#6b7280", fontWeight: 500, cursor: "pointer" }}>Preview</button>
            </div>
            <div style={{ flex: 1, overflowY: "auto", padding: "24px", background: activeTab === "preview" ? "#f3f4f6" : "#fff" }}>
              {activeTab === "preview" ? (
@@ -192,7 +205,7 @@ export const EmailComposeModal: React.FC<EmailComposeModalProps> = ({
                     <div 
                       ref={simpleEditorRef}
                       contentEditable
-                      onInput={handleSimpleEdit}
+                      onBlur={handleSimpleEdit} // 🟢 FIX: Only sync to React state when focus is completely lost
                       style={{ outline: "none", minHeight: "300px", fontSize: 14, lineHeight: 1.6 }}
                       dangerouslySetInnerHTML={{ __html: simpleBodyHtml }}
                     />
