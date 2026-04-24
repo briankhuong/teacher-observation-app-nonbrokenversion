@@ -122,24 +122,11 @@ const warmUpServices = async () => {
       body: JSON.stringify({ text: "ping" })
     }).catch(() => {});
 
-    // 3. Refresh GrapeSEED token (store fresh token for later use)
-    const tokenResp = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    if (tokenResp.ok) {
-      const { access_token } = await tokenResp.json();
-      if (access_token) {
-        localStorage.setItem("grapeseed_token", access_token);
-        console.log("✅ GrapeSEED token refreshed");
-      }
-    } else {
-      console.warn("⚠️ Could not refresh GrapeSEED token");
-    }
+    // 3. ❌ REMOVE the GrapeSEED token refresh – it uses master account
+    // The user must obtain their own token via the GrapeSEED login modal.
 
-    console.log("🚀 AI services and GrapeSEED token warm‑up complete");
+    console.log("🚀 AI services warm‑up complete (no token refresh)");
   } catch (e) {
-    // Silently fail – this is just a background optimisation
     console.warn("Warm‑up failed (non‑critical)", e);
   }
 };

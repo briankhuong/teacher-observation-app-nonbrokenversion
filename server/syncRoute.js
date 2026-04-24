@@ -425,15 +425,16 @@ async function getCoachIdFromToken(userToken) {
 // -------------------------------------------------- */
 // NEW: Search completed supports (stage = 6)
 // -------------------------------------------------- */
-async function searchCompletedSupports(coachId, schoolCode, monthKey, type, campusId) {
+async function searchCompletedSupports(coachId, schoolCode, monthKey, type, campusId, userToken) {
   const [year, month] = monthKey.split('-');
   const targetType = type === 'Visit' ? 0 : 1;
   const url = `https://services.grapeseed.com/admin/v1/visitations/coaches/${coachId}/coachrelated?stage=6`;
   
   try {
-    const masterToken = await getMasterToken();
-    console.log(`🔍 Searching completed supports: ${url}`);
-    const response = await fetch(url, { headers: getHeaders(masterToken) });
+    // 🔥 FIX: Use userToken instead of master token
+    console.log(`🔍 Searching completed supports with user token: ${url}`);
+    const response = await fetch(url, { headers: getHeaders(userToken) });
+    // ... rest of the function unchanged (except the log message)
     if (!response.ok) {
       console.error(`Failed to fetch completed supports: ${response.status}`);
       return null;
@@ -1145,7 +1146,7 @@ router.post("/api/match-visitation", async (req, res) => {
       console.log(`⚠️ No active match found for ${schoolCode}. Searching completed supports...`);
       const coachId = await getCoachIdFromToken(userToken);
       if (coachId) {
-        const completed = await searchCompletedSupports(coachId, schoolCode, monthKey, type, campusId);
+        const completed = await searchCompletedSupports(coachId, schoolCode, monthKey, type, campusId, userToken);
         if (completed) {
           console.log(`🎯 Found completed support: ${completed.id} (stage 6)`);
           match = { visitation: completed }; // wrap to match expected structure
