@@ -3136,3 +3136,12 @@ display: -webkit-box;
   background: linear-gradient(90deg, rgba(84, 27, 134, 0.15) 0%, rgba(138, 75, 201, 0.08) 100%) !important;
   border-left: 3px solid #541B86 !important;
 }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

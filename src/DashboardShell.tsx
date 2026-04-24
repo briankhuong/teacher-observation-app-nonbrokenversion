@@ -1090,6 +1090,7 @@ const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
 const [showPerformanceModal, setShowPerformanceModal] = useState(false);
 const [pendingSyncObs, setPendingSyncObs] = useState<DashboardObservationRow | null>(null);
 const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
+const [syncingObservationId, setSyncingObservationId] = useState<string | null>(null);
 
 const [isConflictModalOpen, setIsConflictModalOpen] = React.useState(false);
 const [conflictLocalData, setConflictLocalData] = React.useState<any>(null);
@@ -1222,6 +1223,7 @@ const fetchSchoolEmails = async (schoolName: string, campus: string) => {
 const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
     try {
       console.log(`☁️ Attempting Smart Sync for: ${id} (Force: ${force})`);
+            setSyncingObservationId(id);
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -1396,6 +1398,8 @@ console.log("✅ Sync Complete and dashboard refreshed!");
     } catch (err: any) {
       console.error("Sync failed:", err);
       alert("Sync failed: " + err.message);
+    } finally {
+      setSyncingObservationId(null);
     }
   };
 
@@ -2870,15 +2874,34 @@ if (!silent) {
       !!teacherWorkbookUrl || !!adminViewOnlyUrl || !!adminWorkbookUrl;
 
     // -------------------------------------------------------------------------
-    // 🟢 NEW: SMART SYNC UI LOGIC
+    // 🟢 NEW: SMART SYNC UI LOGIC (with loading state)
     // -------------------------------------------------------------------------
-    // Cast to 'any' to avoid TS errors if you haven't updated the Interface yet
-   const isSynced = obs.syncStatus === 'synced';
-const lastSync = obs.lastSync || 0; // keep for tooltip display only
+    const isSynced = obs.syncStatus === 'synced';
+    const lastSync = obs.lastSync || 0; // keep for tooltip display only
  
     let actionButton;
 
-    if (isSynced) {
+    if (syncingObservationId === obs.id) {
+      // 🟢 SYNCING STATE (Spinner)
+      actionButton = (
+        <div 
+          style={{
+            display: "flex", alignItems: "center", gap: "6px",
+            fontSize: "11px", fontWeight: "bold", 
+            color: "#4f46e5",
+            background: "rgba(79, 70, 229, 0.1)", 
+            border: "1px solid rgba(79, 70, 229, 0.3)",
+            padding: "2px 8px", borderRadius: "4px"
+          }}
+        >
+          <svg className="animate-spin" style={{ width: "12px", height: "12px" }} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+            <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          <span>Syncing...</span>
+        </div>
+      );
+    } else if (isSynced) {
       // ✅ CASE A: Synced (Green Badge)
       actionButton = (
         <div 
@@ -2887,7 +2910,7 @@ const lastSync = obs.lastSync || 0; // keep for tooltip display only
           style={{
             display: "flex", alignItems: "center", gap: "4px",
             fontSize: "11px", fontWeight: "bold", 
-            color: "#10b981", // Emerald-500
+            color: "#10b981",
             background: "rgba(16, 185, 129, 0.1)", 
             border: "1px solid rgba(16, 185, 129, 0.3)",
             padding: "2px 8px", borderRadius: "4px", cursor: "default"
@@ -2898,19 +2921,18 @@ const lastSync = obs.lastSync || 0; // keep for tooltip display only
       );
     } else {
       // ☁️ CASE B: Not Synced (Blue Button)
-      // Handles BOTH "Push" (Local changes) and "Sync/Pull" (Server changes)
       actionButton = (
         <button
           onClick={(e) => {
             e.stopPropagation();
-            handlePush(obs.id); // <--- This now triggers the Conflict Check!
+            handlePush(obs.id);
           }}
           title="Sync with Server"
           style={{
             display: "flex", alignItems: "center", gap: "4px",
             fontSize: "11px", fontWeight: "bold",
             color: "white",
-            background: "#4f46e5", // Indigo-600 (Blue/Purple)
+            background: "#4f46e5",
             border: "none",
             padding: "4px 10px", borderRadius: "4px", 
             cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
@@ -2920,12 +2942,7 @@ const lastSync = obs.lastSync || 0; // keep for tooltip display only
         </button>
       );
     }
-
-
-  
     // -------------------------------------------------------------------------
-
-
     return (
 <div
   key={obs.id}
