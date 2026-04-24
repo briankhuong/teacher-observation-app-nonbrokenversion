@@ -26,6 +26,7 @@ import { Bell, Activity, RefreshCw, Upload } from "lucide-react";
 import { isGrapeSeedTokenValid } from './utils/authHelpers';
 import { GrapeSeedLoginModal } from './components/GrapeSeedLoginModal';
 import type { TeacherEntry } from "./emailTemplates/adminUpdateBulk";
+import type { PerformanceRating } from "./constants";
 
 // ✅ CORRECT (Matches your screenshots & Vercel settings)
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
@@ -1086,6 +1087,8 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
   
 // NEW: State for tracking Merge process status (Add these two lines)
 const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
+const [showPerformanceModal, setShowPerformanceModal] = useState(false);
+const [pendingSyncObs, setPendingSyncObs] = useState<DashboardObservationRow | null>(null);
 const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
 
 const [isConflictModalOpen, setIsConflictModalOpen] = React.useState(false);
@@ -1239,13 +1242,12 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         return;
       }
 
-      // 🟢 GUARDRAIL: PERFORMANCE RATING
+            // 🟢 GUARDRAIL: PERFORMANCE RATING – show modal instead of redirecting
       if (!localData.performance_rating) {
-        const confirmMsg = "Performance Rating is not set. This helps other trainers understand the teacher's current level.\n\nClick 'OK' to go set the rating (Update), or 'Cancel' to sync anyway (Keep Syncing).";
-        if (window.confirm(confirmMsg)) {
-          window.location.hash = `/workspace/${id}`; 
-          return;
-        }
+        const obsRow = observations.find(o => o.id === id);
+        setPendingSyncObs(obsRow || null);
+        setShowPerformanceModal(true);
+        return;
       }
 
       // 2. CHECK FOR CONFLICTS (Unless Forced)
@@ -1378,6 +1380,16 @@ await set(storageKey, finalPayload);
 
 // 6. Refresh the whole dashboard to ensure UI matches the fresh IndexedDB data
 await refreshDashboard();
+// Force correct rawDate for this observation from meta.date
+const obsRow = observations.find(o => o.id === id);
+if (obsRow && obsRow.isoDate) {
+  const correctTs = new Date(obsRow.isoDate).getTime();
+  if (!isNaN(correctTs)) {
+    setObservations(prev => prev.map(o => 
+      o.id === id ? { ...o, rawDate: correctTs, dateLabel: new Date(correctTs).toLocaleDateString() } : o
+    ));
+  }
+}
 
 console.log("✅ Sync Complete and dashboard refreshed!");
 
@@ -4077,6 +4089,91 @@ useEffect(() => {
             }
           }}
         />
+            {/* ---------- PERFORMANCE RATING MODAL (replaces confirm toast) ---------- */}
+      {showPerformanceModal && pendingSyncObs && (
+        <div className="modal-backdrop" onClick={() => setShowPerformanceModal(false)} style={{ zIndex: 1200 }}>
+          <div className="modal-panel" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Performance Rating Required</div>
+              <button className="btn" onClick={() => setShowPerformanceModal(false)}>×</button>
+            </div>
+            <div className="modal-body" style={{ padding: '20px' }}>
+              <p style={{ marginBottom: '16px', fontSize: '14px' }}>
+                Please set a performance level for <strong>{pendingSyncObs.teacherName}</strong> before syncing.
+                This helps other trainers understand the teacher's current level.
+              </p>
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, fontSize: '13px' }}>
+                  Performance Rating
+                </label>
+                <select
+                  id="performance-select"
+                  className="select"
+                  style={{ width: '100%' }}
+                  defaultValue=""
+                >
+                  <option value="" disabled>Select rating...</option>
+                  <option value="Developing">Developing</option>
+                  <option value="Functioning">Functioning</option>
+                  <option value="Thriving">Thriving</option>
+                </select>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button className="btn" onClick={() => setShowPerformanceModal(false)}>Cancel</button>
+<button
+  className="btn"
+  style={{ background: '#4f46e5', color: 'white' }}
+  onClick={async () => {
+    const select = document.getElementById('performance-select') as HTMLSelectElement;
+    const rating = select.value as PerformanceRating;
+    if (!rating) {
+      alert('Please select a performance rating.');
+      return;
+    }
+    
+    const obs = pendingSyncObs;
+    if (!obs) return;
+    
+    const storageKey = `${STORAGE_PREFIX}${obs.id}`;
+    let fullData = await get(storageKey);
+    if (!fullData) {
+      fullData = {
+        id: obs.id,
+        meta: obs.meta || {},
+        indicators: [],
+        status: obs.status,
+        updatedAt: obs.updatedAt || Date.now(),
+        lastSync: obs.lastSync || 0,
+      };
+    }
+    
+    fullData.performance_rating = rating;
+    // 🟢 Also update the first indicator so the workspace sees it
+    if (fullData.indicators && fullData.indicators.length > 0) {
+      fullData.indicators = [...fullData.indicators];
+      fullData.indicators[0] = { ...fullData.indicators[0], performance_rating: rating };
+    } else {
+      // If no indicators, initialize with a placeholder
+      const { INITIAL_INDICATORS } = await import("./constants");
+      fullData.indicators = [{ ...INITIAL_INDICATORS[0], performance_rating: rating }];
+    }
+    fullData.updatedAt = Date.now();
+    
+    await set(storageKey, fullData);
+    
+    setShowPerformanceModal(false);
+    setPendingSyncObs(null);
+    
+    await handlePush(obs.id, fullData, true);
+  }}
+>
+  Set Rating & Sync Now
+</button>
+            </div>
+          </div>
+        </div>
+      )}  
     </>
   );
 };

@@ -1032,7 +1032,16 @@ useEffect(() => {
 
       if (localData && (localData.updatedAt > (localData.lastSync || 0))) {
         // Use local data if we have uncommitted changes
-        setIndicators(localData.indicators);
+        let localIndicators = localData.indicators;
+        if (!localIndicators || localIndicators.length === 0) {
+          localIndicators = INITIAL_INDICATORS;
+        }
+        // 🟢 Inject rating from localData into first indicator
+        if (localData.performance_rating && localIndicators.length > 0) {
+          localIndicators = [...localIndicators];
+          localIndicators[0] = { ...localIndicators[0], performance_rating: localData.performance_rating };
+        }
+        setIndicators(localIndicators);
         setObservationStatus(localData.status ?? "draft");
         setScratchpadText(localData.scratchpadText ?? "");
         setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
@@ -1040,10 +1049,17 @@ useEffect(() => {
       }
 
       // If Server is newer (or no local data), use Server data
-      const normalizedFromDb = normalizeIndicators(row.indicators);
-      setIndicators(normalizedFromDb.length > 0 ? normalizedFromDb : INITIAL_INDICATORS);
-      setObservationStatus(row.status ?? "draft");
-      setAdminSummaryVN(row.admin_summary_vn ?? null);
+          let normalizedFromDb = normalizeIndicators(row.indicators);
+          if (normalizedFromDb.length === 0) normalizedFromDb = INITIAL_INDICATORS;
+
+          // 🟢 Inject the top-level performance rating into the first indicator
+          if (row.performance_rating && normalizedFromDb.length > 0) {
+            normalizedFromDb = [...normalizedFromDb];
+            normalizedFromDb[0] = { ...normalizedFromDb[0], performance_rating: row.performance_rating };
+          }
+          setIndicators(normalizedFromDb);
+          setObservationStatus(row.status ?? "draft");
+          setAdminSummaryVN(row.admin_summary_vn ?? null);
 
     } catch (err) {
       console.warn("Offline: Using local backup.");
