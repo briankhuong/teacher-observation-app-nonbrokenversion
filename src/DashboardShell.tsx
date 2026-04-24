@@ -1089,6 +1089,7 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
 const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
 const [showPerformanceModal, setShowPerformanceModal] = useState(false);
 const [pendingSyncObs, setPendingSyncObs] = useState<DashboardObservationRow | null>(null);
+const [recentlyDeletedIds, setRecentlyDeletedIds] = useState<Set<string>>(new Set());
 const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
 const [syncingObservationId, setSyncingObservationId] = useState<string | null>(null);
 
@@ -1441,6 +1442,7 @@ const handleConflictResolved = async (mergedData: any) => {
         // --- PHASE A: PROCESS SERVER/CACHE ROWS ---
         for (const dbRow of sourceData) {
           if (pendingDeletes.includes(dbRow.id)) continue;
+          if (recentlyDeletedIds.has(dbRow.id)) continue;
           processedIds.add(dbRow.id);
 
           const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
@@ -1671,8 +1673,25 @@ const handleConflictResolved = async (mergedData: any) => {
       try {
         let pendingDeletes = (await get<string[]>("pending_deletes")) || [];
         if (navigator.onLine && pendingDeletes.length > 0) {
-           await supabase.from("observations").delete().in("id", pendingDeletes);
-           await del("pending_deletes");
+           const { data: deletedRows, error } = await supabase
+             .from("observations")
+             .delete()
+             .in("id", pendingDeletes)
+             .select("id");
+           if (!error && deletedRows && deletedRows.length > 0) {
+             // Successfully deleted at least some
+             const remaining = pendingDeletes.filter(id => !deletedRows.some((row: any) => row.id === id));
+             if (remaining.length === 0) {
+               await del("pending_deletes");
+             } else {
+               // Keep only the ones that didn't delete (maybe due to permissions)
+               await set("pending_deletes", remaining);
+             }
+             // Also remove local files for those deleted
+             await Promise.all(deletedRows.map((row: any) => del(`${STORAGE_PREFIX}${row.id}`)));
+           } else if (error) {
+             console.warn("Batch delete failed", error);
+           }
         }
 
         const { data, error } = await supabase
@@ -1706,6 +1725,7 @@ async function processRows(dbRows: any[], pendingDeletes: string[]) {
     // Step A: Process Server Rows
     for (const row of dbRows) {
         if (pendingDeletes.includes(row.id)) continue;
+        if (recentlyDeletedIds.has(row.id)) continue;
         processedIds.add(row.id);
 
         const storageKey = `${STORAGE_PREFIX}${row.id}`;
@@ -2721,61 +2741,61 @@ if (!silent) {
 };
 
 
-// ✅ DELETE HANDLER (Offline Robust + Queue)
   const handleDeleteObservation = async (obs: DashboardObservationRow) => {
     const confirmed = window.confirm(
       `Are you sure you want to DELETE the observation for:\n${obs.teacherName}?\n\n⚠️ This action cannot be undone.`
     );
-    
     if (!confirmed) return;
 
-    try {
-      // 🟠 BRANCH 1: OFFLINE MODE
-      if (!navigator.onLine) {
-         console.log("🟠 Offline: Deleting locally & queuing for server...");
-         
-         // 1. Remove from local file storage
-         await del(`${STORAGE_PREFIX}${obs.id}`);
+    // Immediately add to pending deletes to hide from UI and future syncs
+    const pendingDeletes = (await get<string[]>("pending_deletes")) || [];
+    if (!pendingDeletes.includes(obs.id)) {
+      await set("pending_deletes", [...pendingDeletes, obs.id]);
+    }
+    // Remove from UI optimistically
+    setObservations((prev) => prev.filter((o) => o.id !== obs.id));
 
-         // 2. Remove from local Backup List
-         try {
-            const currentBackup = (await get<any[]>("dashboard_backup_list")) || [];
-            const updatedBackup = currentBackup.filter(item => item.id !== obs.id);
-            await set("dashboard_backup_list", updatedBackup);
-         } catch (e) { console.warn("Backup list update failed", e); }
+    // If online, try to delete from server now
+    if (navigator.onLine) {
+      try {
+        const { data: deletedRows, error } = await supabase
+          .from("observations")
+          .delete()
+          .eq("id", obs.id)
+          .select("id");
 
-         // 3. 🟢 ADD TO PENDING DELETES QUEUE (The Fix)
-         // This remembers "I need to delete ID X" next time I'm online
-         const pending = (await get<string[]>("pending_deletes")) || [];
-         if (!pending.includes(obs.id)) {
-             await set("pending_deletes", [...pending, obs.id]);
-         }
+        if (error) throw error;
 
-         // 4. Update UI
-         setObservations((prev) => prev.filter((o) => o.id !== obs.id));
-         return;
+        if (!deletedRows || deletedRows.length === 0) {
+          // Delete failed on server – revert by removing from pending deletes
+          const updatedPending = (await get<string[]>("pending_deletes")) || [];
+          const filtered = updatedPending.filter((id) => id !== obs.id);
+          await set("pending_deletes", filtered);
+          alert(
+            "Failed to delete observation from server. It may reappear until the issue is resolved.\n\n" +
+            "Please check your permissions and try again."
+          );
+          // Re-add the observation to UI (since server still has it)
+          await refreshDashboard();
+          return;
+        }
+
+        // Delete succeeded – also clean local files
+        await del(`${STORAGE_PREFIX}${obs.id}`).catch(() => {});
+        const backup = (await get<any[]>("dashboard_backup_list")) || [];
+        await set("dashboard_backup_list", backup.filter((item) => item.id !== obs.id));
+        console.log("✅ Deleted from server and local.");
+
+      } catch (err) {
+        console.error("Online delete error:", err);
+        // Keep ID in pending_deletes so it will be retried on next sync or reload
+        alert(
+          "Could not connect to server. The observation will be deleted automatically when you go online."
+        );
       }
-
-      // 🔵 BRANCH 2: ONLINE MODE
-      const { error } = await supabase
-        .from("observations") 
-        .delete()
-        .eq("id", obs.id)
-        .select('id');
-
-      if (error) throw error;
-
-      setObservations((prev) => prev.filter((o) => o.id !== obs.id));
-      await del(`${STORAGE_PREFIX}${obs.id}`).catch(() => {});
-      
-      // Keep local backup clean
-      const currentBackup = (await get<any[]>("dashboard_backup_list")) || [];
-      const updatedBackup = currentBackup.filter(item => item.id !== obs.id);
-      await set("dashboard_backup_list", updatedBackup);
-
-    } catch (err: any) {
-      console.error("[Dashboard] delete error", err);
-      alert(`Failed to delete observation: ${err.message}`);
+    } else {
+      // Offline: already in pending_deletes, will be processed when back online
+      alert("You are offline. The observation will be deleted from the server when you reconnect.");
     }
   };
 
