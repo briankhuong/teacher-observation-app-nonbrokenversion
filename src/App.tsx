@@ -143,7 +143,12 @@ warmUpServices();
       window.removeEventListener('offline', handleStatusChange);
     };
   }, []);
-
+// Clear GrapeSEED token when Supabase session changes (sign-in, sign-out, or switch user)
+useEffect(() => {
+  // Always remove the token on any session change.
+  // This ensures a new user cannot use the previous user's token.
+  localStorage.removeItem('grapeseed_token');
+}, [session]);
 
 
 const goToDashboard = () => setScreen("dashboard");
