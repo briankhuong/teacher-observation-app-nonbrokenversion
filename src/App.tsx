@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DashboardShell } from "./DashboardShell";
 import { SCHOOL_MASTER_LIST } from "./schoolMaster";
 import { ObservationWorkspaceShell } from "./ObservationWorkspaceShell";
@@ -14,6 +14,7 @@ import { INITIAL_INDICATORS } from "./constants"; // 🟢 NEW (Correct)
 // ... existing imports
 import { flattenText } from "./utils/textUtils";
 import PlanningGrid from './pages/Planning/PlanningGrid';
+
 
 type Screen = "dashboard" | "workspace" | "teachers" | "schools" | "planning"; // 🟢 Add "planning"
 type SupportType = "Training" | "LVA" | "Visit";
@@ -88,6 +89,8 @@ const [screen, setScreen] = useState<Screen>("dashboard");
 const [selectedObservation, setSelectedObservation] =
     useState<SelectedObservationMeta | null>(null);
 const [highlightObservationId, setHighlightObservationId] = useState<string | null>(null);
+const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+const lastScrollY = useRef(0);
 
 
 // 1. AUTH & NETWORK LISTENERS
@@ -137,10 +140,23 @@ warmUpServices();
     window.addEventListener('online', handleStatusChange);
     window.addEventListener('offline', handleStatusChange);
 
+    // --- 🆕 Scroll listener to track header visibility ---
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      if (currentScrollY > lastScrollY.current && currentScrollY > 80) {
+        setIsHeaderVisible(false);
+      } else if (currentScrollY < lastScrollY.current) {
+        setIsHeaderVisible(true);
+      }
+      lastScrollY.current = currentScrollY;
+    };
+    window.addEventListener('scroll', handleScroll);
+
     return () => {
       subscription.unsubscribe();
       window.removeEventListener('online', handleStatusChange);
       window.removeEventListener('offline', handleStatusChange);
+      window.removeEventListener('scroll', handleScroll);
     };
   }, []);
 // Clear GrapeSEED token when Supabase session changes (sign-in, sign-out, or switch user)
@@ -211,7 +227,7 @@ const handleHighlightComplete = () => {
 
   return (
     <div className="app-root">
-      <header className="top-bar">
+      <header className={`top-bar ${!isHeaderVisible ? 'top-bar-hidden' : ''}`}>
         <div className="top-bar-left">
           <div className="app-title">GSVN • Trainer Webnotes</div>
         </div>
@@ -285,6 +301,7 @@ const handleHighlightComplete = () => {
     isOnline={isOnline}
     isSyncing={isSyncing}
     setIsSyncing={setIsSyncing}
+    headerVisible={isHeaderVisible}
   />
 )}
 

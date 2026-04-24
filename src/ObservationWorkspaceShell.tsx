@@ -198,11 +198,13 @@ interface ObservationWorkspaceProps {
     date: string;
     teacher_id?: string; 
     grapeseed_id?: string | null;
+    
   };
   onBack: () => void;
   isOnline: boolean;
   isSyncing: boolean;
   setIsSyncing: React.Dispatch<React.SetStateAction<boolean>>;
+  headerVisible?: boolean;
 }
 
 interface OcrResult {
@@ -381,7 +383,7 @@ function hasUserProgress(indicators: IndicatorState[]): boolean {
 
 export const ObservationWorkspaceShell: React.FC<
   ObservationWorkspaceProps
-> = ({ observationMeta, onBack, isOnline, isSyncing, setIsSyncing }) => {
+> = ({ observationMeta, onBack, isOnline, isSyncing, setIsSyncing, headerVisible }) => {
 const { user } = useAuth();
 const [indicators, setIndicators] =
   useState<IndicatorState[]>(INITIAL_INDICATORS);
@@ -511,6 +513,9 @@ useEffect(() => {
   window.addEventListener('resize', handleResize);
   return () => window.removeEventListener('resize', handleResize);
 }, []);
+
+
+
 const [textAreaHeight, setTextAreaHeight] = useState(getPersistedTextareaHeight);
 const [isTextareaResizing, setIsTextareaResizing] = useState(false);
 const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -2391,7 +2396,15 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
   return (
     <div className="workspace-root">
       <div className="workspace-top-bar"
-      style={{ zIndex: 100, position: 'relative' }}
+      style={{ 
+        zIndex: 100, 
+        position: 'sticky', 
+        top: headerVisible ? 'var(--header-height, 60px)' : '0', 
+        backgroundColor: '#1a202c', /* Solid dark background */
+        borderBottom: '1px solid #334155',
+        transition: 'top 0.2s ease-out',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.3)' /* Optional: adds depth */
+      }}
       >
         <div className="workspace-top-meta">
           <div className="workspace-top-line">

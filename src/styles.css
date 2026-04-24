@@ -3145,3 +3145,8 @@ display: -webkit-box;
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+
+.top-bar-hidden {
+  transform: translateY(-100%);
+  transition: transform 0.2s ease-out;
+}
