@@ -2284,6 +2284,7 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
     const gsToken = localStorage.getItem('grapeseed_token');
     const teacherEmail = await fetchTeacherEmail(obs.teacherName, obs.schoolName);
     let visitationId = null;
+    let schoolId = null;   // <-- new variable for official code
 
     // 🟢 2. PROCEED WITH LINK FETCHING
     try {
@@ -2295,6 +2296,7 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
         .maybeSingle();
 
       if (schoolData?.official_code) {
+        schoolId = schoolData.official_code;   // <-- store the official code
         const dateObj = new Date((obs as any).createdAt || (obs as any).created_at || new Date());
         const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
         const apiType = obs.supportType === 'LVA' ? 'LVA' : 'Visit';
@@ -2304,7 +2306,7 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            schoolCode: schoolData.official_code,
+            schoolCode: schoolId,
             monthKey: monthKey,
             type: apiType,
             userToken: gsToken,
@@ -2336,7 +2338,8 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
       campus: obs.campus,
       trainerName: trainerName, 
       teacherWorkbookUrl: obs.teacherWorkbookUrl,
-      visitationId: visitationId 
+      visitationId: visitationId,
+      schoolId: schoolId   // <-- add the official code
     });
 
     setEmailModalState({

@@ -6,6 +6,7 @@ export interface TeacherPostCallTemplateParams {
   teacherWorkbookUrl?: string | null;
   surveyUrl?: string | null;
   visitationId?: string | null;
+  schoolId?: string | null;   // official code
 }
 
 export function buildTeacherPostCallHtml({
@@ -16,6 +17,7 @@ export function buildTeacherPostCallHtml({
   teacherWorkbookUrl,
   surveyUrl,
   visitationId,
+  schoolId,
 }: TeacherPostCallTemplateParams): string {
   
   const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
@@ -27,8 +29,8 @@ export function buildTeacherPostCallHtml({
   const button = "display: inline-block; background-color: #059669; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 14px;";
   const footer = "background-color: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #6b7280;";
 
-  const portalUrl = visitationId 
-    ? `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/visitation/${visitationId}/teacher`
+  const portalUrl = visitationId && schoolId
+    ? `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${schoolId}/visitations/${visitationId}/teacher`
     : null;
 
   return `
