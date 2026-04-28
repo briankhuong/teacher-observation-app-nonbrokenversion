@@ -603,6 +603,26 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     useState<DashboardObservationRow[]>([]);
   // Stats sidebar data
   const [schoolsAll, setSchoolsAll] = useState<any[]>([]);
+  // Custom summary entries (inline editable)
+const defaultCustomEntries = {
+  trainingDelivered: { label: "Training Delivered", values: { GSE: "", "Com-LSE": "", "Com-Nexus": "", "Com-Connect": "", LSE: "", Connect: "", Nexus: "" } as Record<string, string>, position: 1, type: "multi-number" },
+  totalTraining: { label: "Total training", value: "", position: 2, type: "number" },
+  ir: { label: "IR", value: "", position: 3, type: "number" },
+  otherProjects: { label: "Other Projects", value: "", position: 4, type: "text" },
+  specialNotes: { label: "Special Notes", value: "", position: 5, type: "text" },
+};
+
+const [customEntries, setCustomEntries] = useState<any>(() => {
+  try {
+    const saved = localStorage.getItem("dashboardCustomEntries");
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return defaultCustomEntries;
+});
+const [customTotalTraining, setCustomTotalTraining] = useState<string>('');
+
+
+const [isEditingCustom, setIsEditingCustom] = useState(false);
   const [teachersAll, setTeachersAll] = useState<any[]>([]);
   const [searchText, setSearchText] = useState("");
   const [recentMergePanel, setRecentMergePanel] =
@@ -1026,6 +1046,10 @@ React.useEffect(() => {
   loadResources();
 }, [user?.id]);
 
+// Persist custom entries to localStorage
+useEffect(() => {
+  localStorage.setItem("dashboardCustomEntries", JSON.stringify(customEntries));
+}, [customEntries]);
 
 const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
@@ -3619,78 +3643,269 @@ useEffect(() => {
           </div>
 
           {/* 🟢 NEW: Stats Sidebar */}
+                    {/* 🟢 UPDATED: Merged System + Custom Stats Sidebar */}
           <div style={{
             width: '260px',
-            marginTop: '44px',
+            paddingTop: '48px',
+            paddingRight: '16px',
+            paddingBottom: '16px',
+            paddingLeft: '16px',
             position: 'sticky',
             top: '16px',
             background: 'var(--card-bg, #1e293b)',
             borderRadius: '12px',
             border: '1px solid #334155',
-            padding: '16px',
             fontSize: '13px',
             color: 'var(--text-main, #f8fafc)',
           }}>
-            <div style={{ fontWeight: 700, marginBottom: '16px', fontSize: '14px' }}>
-              📊 {stats.month} {stats.year}
-            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ fontWeight: 700, fontSize: '14px' }}>
+                📊 {stats.month} {stats.year}
+              </div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '2px 6px', fontSize: '18px', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  onClick={() => setIsEditingCustom(!isEditingCustom)}
+                  title="Edit custom entries"
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '2px 6px', fontSize: '18px', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  onClick={() => {
+                    const trainingValues = (customEntries as any).trainingDelivered?.values || {};
+                    const trainingNames = Object.entries(trainingValues)
+                      .filter(([_, val]: any) => val !== '')
+                      .map(([name]) => name)
+                      .join('; ') || '—';
+                    const sum = Object.values(trainingValues).reduce((acc, v) => acc + (Number(v) || 0), 0);
+                    const totalTraining = customTotalTraining !== '' ? customTotalTraining : (sum > 0 ? String(sum) : '—');
+                    const perf = [
+                      `  ${stats.thriving.count} (${stats.thriving.pct}%) Thriving`,
+                      `  ${stats.functioning.count} (${stats.functioning.pct}%) Functioning`,
+                      `  ${stats.developing.count} (${stats.developing.pct}%) Developing`,
+                    ].join('\n');
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontWeight: 600 }}>🏫 Active Schools</div>
-              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.exclusiveSchools}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)' }}>
-                Shared: {stats.sharedSchools}
+                    const text = [
+                      `Year: ${stats.year}`,
+                      `Month: ${stats.month}`,
+                      `Active Schools: ${stats.exclusiveSchools}`,
+                      `  Shared: ${stats.sharedSchools}`,
+                      `Active Teachers: ${stats.activeTeachers}`,
+                      `  Mutual: ${stats.mutualTeachers}`,
+                      `Visit per Year: ${stats.totalVisitCount || '—'}`,
+                      `Training Delivered: ${trainingNames}`,
+                      `Total Training: ${totalTraining}`,
+                      `Visits Done: ${stats.visitedSchools}`,
+                      `Teachers Visited: ${stats.visitedTeachers}`,
+                      `IR: ${(customEntries as any).ir?.value || '—'}`,
+                      `Teacher Performance:\n${perf}`,
+                      `Other Project: ${(customEntries as any).otherProjects?.value || '—'}`,
+                      `Special Notes: ${(customEntries as any).specialNotes?.value || '—'}`,
+                    ].join('\n');
+
+                    navigator.clipboard.writeText(text).then(() => {
+                      alert('Stats copied to clipboard!');
+                    }).catch(() => {
+                      alert('Failed to copy stats.');
+                    });
+                  }}
+                  title="Copy stats"
+                >
+                  📋
+                </button>
               </div>
             </div>
 
-                        <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontWeight: 600 }}>👩‍🏫 Active Teachers</div>
-              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.activeTeachers}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)' }}>
-                Mutual: {stats.mutualTeachers}
-              </div>
-            </div>
+            {/* Edit panel */}
+                        {isEditingCustom && (
+              <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px' }}>Edit Custom Entries</div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontWeight: 600 }}>📅 Visits per Year</div>
-              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.totalVisitCount}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
-                planned visits (active schools)
-              </div>
-            </div>
+                {/* 1. Paste block for training + IR */}
+                <div style={{ marginBottom: '10px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>Training & IR (paste all)</div>
+                  <textarea
+                    id="paste-custom-stats"
+                    style={{ width: '100%', fontSize: '11px', padding: '4px', border: '1px solid #334155', borderRadius: '4px', background: '#0f172a', color: '#f8fafc', marginBottom: '6px' }}
+                    placeholder={`Paste here, e.g.:\nTraining Delivered:\nGSE: 1\nCom-LSE: 2\nTotal Training: 15\nIR: 15`}
+                    rows={6}
+                  />
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ fontSize: '11px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px' }}
+                    onClick={() => {
+                      const raw = (document.getElementById('paste-custom-stats') as HTMLTextAreaElement).value;
+                      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+                      const trainingKeys = ['gse', 'com-lse', 'com-nexus', 'com-connect', 'lse', 'connect', 'nexus'];
+                      const newValues: Record<string, string> = { ...(customEntries as any).trainingDelivered.values };
+                      let irVal = (customEntries as any).ir?.value || '';
+                      let totalOverride = '';
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontWeight: 600 }}>✅ Visits Done</div>
-              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedSchools}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
-                unique schools this month
-              </div>
-            </div>
+                      for (const line of lines) {
+                        const match = line.match(/^(.+?):\s*(\d+)\s*$/i);
+                        if (match) {
+                          const key = match[1].trim().toLowerCase();
+                          const num = match[2];
+                          if (trainingKeys.includes(key)) {
+                            const origKey = Object.keys(newValues).find(k => k.toLowerCase() === key);
+                            if (origKey) newValues[origKey] = num;
+                          } else if (key === 'total training') {
+                            totalOverride = num;
+                          } else if (key === 'ir') {
+                            irVal = num;
+                          }
+                        }
+                      }
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontWeight: 600 }}>👤 Teachers Visited</div>
-              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedTeachers}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
-                unique teachers this month
-              </div>
-            </div>
+                      if (totalOverride !== '') {
+                        setCustomTotalTraining(totalOverride);
+                      } else {
+                        setCustomTotalTraining('');
+                      }
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontWeight: 600 }}>🎥 Videos Analyzed</div>
-              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.lvaCount}</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
-                LVA this month
-              </div>
-            </div>
+                      setCustomEntries((prev: any) => ({
+                        ...prev,
+                        trainingDelivered: { ...prev.trainingDelivered, values: newValues },
+                        ir: { ...prev.ir, value: irVal },
+                      }));
+                    }}
+                  >
+                    Parse & Fill
+                  </button>
+                </div>
 
-            <div style={{ marginBottom: '0' }}>
-              <div style={{ fontWeight: 600 }}>📈 Performance</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
-                <div><span style={{ color: '#22c55e', fontWeight: 700 }}>{stats.thriving.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.thriving.pct}%) Thriving</span></div>
-                <div><span style={{ color: '#3b82f6', fontWeight: 700 }}>{stats.functioning.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.functioning.pct}%) Functioning</span></div>
-                <div><span style={{ color: '#ef4444', fontWeight: 700 }}>{stats.developing.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.developing.pct}%) Developing</span></div>
+                {/* 2. Other Projects */}
+                <div style={{ marginBottom: '10px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>Other Projects</div>
+                  <textarea
+                    style={{ width: '100%', fontSize: '12px', padding: '4px', border: '1px solid #334155', borderRadius: '4px', background: '#0f172a', color: '#f8fafc' }}
+                    value={(customEntries as any).otherProjects?.value || ''}
+                    onChange={(e) => {
+                      setCustomEntries((prev: any) => ({
+                        ...prev,
+                        otherProjects: { ...prev.otherProjects, value: e.target.value },
+                      }));
+                    }}
+                    rows={3}
+                  />
+                </div>
+
+                {/* 3. Special Notes */}
+                <div style={{ marginBottom: '10px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>Special Notes</div>
+                  <textarea
+                    style={{ width: '100%', fontSize: '12px', padding: '4px', border: '1px solid #334155', borderRadius: '4px', background: '#0f172a', color: '#f8fafc' }}
+                    value={(customEntries as any).specialNotes?.value || ''}
+                    onChange={(e) => {
+                      setCustomEntries((prev: any) => ({
+                        ...prev,
+                        specialNotes: { ...prev.specialNotes, value: e.target.value },
+                      }));
+                    }}
+                    rows={3}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ fontSize: '12px', marginTop: '8px', background: '#334155', color: '#f8fafc', border: 'none', borderRadius: '4px', padding: '4px 8px' }}
+                  onClick={() => setIsEditingCustom(false)}
+                >
+                  Done
+                </button>
               </div>
-            </div>
+            )}
+
+            {/* Merged stat blocks */}
+            {(() => {
+              // Define system blocks with position index
+              const blocks: { key: string; label: string; value: React.ReactNode; position: number }[] = [
+                { key: 'activeSchools', label: '🏫 Active Schools', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.exclusiveSchools}</span><div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Shared: {stats.sharedSchools}</div></>, position: 0 },
+                { key: 'activeTeachers', label: '👩‍🏫 Active Teachers', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.activeTeachers}</span><div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Mutual: {stats.mutualTeachers}</div></>, position: 0.5 },
+                { key: 'visitsPerYear', label: '📅 Visits per Year', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.totalVisitCount}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>planned visits (active schools)</div></>, position: 1 },
+                { key: 'trainingDelivered', label: 'Training Delivered', value: null, position: 1.5 }, // custom placeholder, will be replaced below
+                { key: 'totalTraining', label: 'Total training', value: null, position: 1.7 },
+                { key: 'visitsDone', label: '✅ Visits Done', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedSchools}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>unique schools this month</div></>, position: 2 },
+                { key: 'teachersVisited', label: '👤 Teachers Visited', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedTeachers}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>unique teachers this month</div></>, position: 2.5 },
+                { key: 'ir', label: 'IR', value: null, position: 2.7 },
+                { key: 'videosAnalyzed', label: '🎥 Videos Analyzed', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.lvaCount}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>LVA this month</div></>, position: 3 },
+                { key: 'performance', label: '📈 Performance', value: <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}><div><span style={{ color: '#22c55e', fontWeight: 700 }}>{stats.thriving.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.thriving.pct}%) Thriving</span></div><div><span style={{ color: '#3b82f6', fontWeight: 700 }}>{stats.functioning.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.functioning.pct}%) Functioning</span></div><div><span style={{ color: '#ef4444', fontWeight: 700 }}>{stats.developing.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.developing.pct}%) Developing</span></div></div>, position: 4 },
+                { key: 'otherProjects', label: 'Other Projects', value: null, position: 4.5 },
+                { key: 'specialNotes', label: 'Special Notes', value: null, position: 5 },
+              ];
+
+              // Replace custom placeholders with actual values (only if non-empty)
+              const customMap = customEntries as any;
+                            const renderBlockValue = (block: any) => {
+                if (block.key === 'trainingDelivered') {
+                  const training = (customEntries as any).trainingDelivered?.values || {};
+                  const names = Object.entries(training)
+                    .filter(([_, val]: any) => val !== '')
+                    .map(([name]) => name);
+                  if (names.length === 0) return null;
+                  return (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {names.map(name => (
+                        <span key={name} style={{ fontSize: '12px', background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: '12px', color: 'var(--text-main)' }}>
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                }
+                if (block.key === 'totalTraining') {
+                  const trainingValues: Record<string, string> = (customEntries as any).trainingDelivered?.values || {};
+                  const numbers: number[] = Object.values(trainingValues).map(v => Number(v) || 0);
+                  const sum = numbers.reduce((a, b) => a + b, 0);
+                  const displayVal: number = customTotalTraining !== '' ? Number(customTotalTraining) : sum;
+                  if (displayVal === 0) return null;
+                  return <span style={{ fontSize: '24px', fontWeight: 700 }}>{displayVal}</span>;
+                }
+                if (block.key === 'ir') {
+                  const val = (customEntries as any).ir?.value;
+                  if (!val) return null;
+                  return <span style={{ fontSize: '24px', fontWeight: 700 }}>{val}</span>;
+                }
+                if (block.key === 'otherProjects' || block.key === 'specialNotes') {
+                  const val = (customEntries as any)[block.key]?.value;
+                  if (!val) return null;
+                  return <div style={{ fontSize: '12px', whiteSpace: 'pre-wrap', color: 'var(--text-muted)' }}>{val}</div>;
+                }
+                return block.value; // system value
+              };
+
+              return blocks
+                .filter(block => {
+                  // Only show if it has content
+                  if (block.key === 'trainingDelivered') {
+                    const parts = Object.entries(customMap.trainingDelivered?.values || {}).filter(([_, val]: any) => val !== '');
+                    return parts.length > 0;
+                  }
+                  if (block.key === 'totalTraining') {
+                    const trainingValues = customMap.trainingDelivered?.values || {};
+                    const hasTraining = Object.values(trainingValues).some((v: any) => v !== '');
+                    return hasTraining || customTotalTraining !== '';
+                  }
+                  if (block.key === 'ir' || block.key === 'otherProjects' || block.key === 'specialNotes') {
+                    return !!customMap[block.key]?.value;
+                  }
+                  return true; // always show system stats
+                })
+                .sort((a, b) => a.position - b.position)
+                .map(block => (
+                  <div key={block.key} style={{ marginBottom: block.key === 'specialNotes' ? '0' : '16px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>{block.label}</div>
+                    {renderBlockValue(block)}
+                  </div>
+                ));
+            })()}
           </div>
         </div>
       </div>
