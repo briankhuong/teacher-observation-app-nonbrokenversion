@@ -1010,10 +1010,10 @@ React.useEffect(() => {
   if (!user?.id) return;
   const loadResources = async () => {
     // Schools
-    const { data: sData } = await supabase
-      .from("schools")
-      .select("school_name, campus_name, disabled, exclusive")
-      .eq("trainer_id", user.id);
+          const { data: sData } = await supabase
+        .from("schools")
+        .select("school_name, campus_name, disabled, exclusive, visit_count")
+        .eq("trainer_id", user.id);
     if (sData) setSchoolsAll(sData);
 
     // Teachers
@@ -1909,7 +1909,7 @@ const stats = React.useMemo(() => {
   let activeTeachersCount = 0;
   let mutualTeachersCount = 0;
   let thriving = 0, functioning = 0, developing = 0;
-  (teachersAll as TeacherStatsRow[]).forEach(t => {
+    (teachersAll as TeacherStatsRow[]).forEach(t => {
     const tags: string[] = Array.isArray(t.tags) ? t.tags : [];
     const isInactive = tags.some((tag: string) => tag.toLowerCase() === 'inactive');
     if (isInactive || t.needs_review) return;
@@ -1917,12 +1917,16 @@ const stats = React.useMemo(() => {
     const key = `${t.school_name}||${t.campus}`;
     const exclusive = campusExclusive.get(key);
     if (exclusive === 'exclusive' || exclusive === 'shared') {
-      activeTeachersCount++;
-      // Mutual check
+      // Mutual check (same logic as TeachersScreen)
       const otherTags = tags.filter((tag: string) => tag !== 'No tag' && tag.toLowerCase() !== 'inactive');
-      if (otherTags.length > 0) mutualTeachersCount++;
+      if (otherTags.length > 0) {
+        mutualTeachersCount++;
+      } else {
+        // Only increment active count for non-mutual, solo teachers
+        activeTeachersCount++;
+      }
 
-      // Performance
+      // Performance (count for all active, including mutual)
       if (t.latest_performance === 'Thriving') thriving++;
       else if (t.latest_performance === 'Functioning') functioning++;
       else if (t.latest_performance === 'Developing') developing++;
@@ -1948,6 +1952,14 @@ const stats = React.useMemo(() => {
     }
   });
 
+  // Sum visit_count for active exclusive & shared schools
+  let totalVisitCount = 0;
+  (schoolsAll as Array<{ disabled: boolean; exclusive: string | null; visit_count: number | null }>).forEach(s => {
+    if (!s.disabled && (s.exclusive === 'exclusive' || s.exclusive === 'shared')) {
+      totalVisitCount += Number(s.visit_count) || 0;
+    }
+  });
+
   return {
     year,
     month: now.toLocaleString('default', { month: 'long' }),
@@ -1955,6 +1967,7 @@ const stats = React.useMemo(() => {
     sharedSchools: sharedSchools.size,
     activeTeachers: activeTeachersCount,
     mutualTeachers: mutualTeachersCount,
+    totalVisitCount,
     visitedSchools: visitedSchools.size,
     visitedTeachers: visitedTeachers.size,
     lvaCount,
@@ -3630,11 +3643,19 @@ useEffect(() => {
               </div>
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
+                        <div style={{ marginBottom: '16px' }}>
               <div style={{ fontWeight: 600 }}>👩‍🏫 Active Teachers</div>
               <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.activeTeachers}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)' }}>
                 Mutual: {stats.mutualTeachers}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontWeight: 600 }}>📅 Visits per Year</div>
+              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.totalVisitCount}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
+                planned visits (active schools)
               </div>
             </div>
 
