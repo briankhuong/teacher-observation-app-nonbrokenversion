@@ -3677,43 +3677,44 @@ useEffect(() => {
                   className="btn btn-ghost"
                   style={{ padding: '2px 6px', fontSize: '18px', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }}
                   onClick={() => {
-                    const trainingValues = (customEntries as any).trainingDelivered?.values || {};
-                    const trainingNames = Object.entries(trainingValues)
-                      .filter(([_, val]: any) => val !== '')
-                      .map(([name]) => name)
-                      .join('; ') || '—';
-                    const sum = Object.values(trainingValues).reduce((acc, v) => acc + (Number(v) || 0), 0);
-                    const totalTraining = customTotalTraining !== '' ? customTotalTraining : (sum > 0 ? String(sum) : '—');
-                    const perf = [
-                      `  ${stats.thriving.count} (${stats.thriving.pct}%) Thriving`,
-                      `  ${stats.functioning.count} (${stats.functioning.pct}%) Functioning`,
-                      `  ${stats.developing.count} (${stats.developing.pct}%) Developing`,
-                    ].join('\n');
+  const trainingValues = (customEntries as any).trainingDelivered?.values || {};
+  const trainingNames = Object.entries(trainingValues)
+    .filter(([_, val]: any) => val !== '')
+    .map(([name]) => name)
+    .join('; ') || '—';
+  const nums: number[] = Object.values(trainingValues).map((v: any) => Number(v) || 0);
+  const sum = nums.reduce((a: number, b: number) => a + b, 0);
+  const totalTraining = customTotalTraining !== '' ? customTotalTraining : (sum > 0 ? String(sum) : '—');
+  const perf = [
+    `  ${stats.thriving.count} (${stats.thriving.pct}%) Thriving`,
+    `  ${stats.functioning.count} (${stats.functioning.pct}%) Functioning`,
+    `  ${stats.developing.count} (${stats.developing.pct}%) Developing`,
+  ].join('\n');
 
-                    const text = [
-                      `Year: ${stats.year}`,
-                      `Month: ${stats.month}`,
-                      `Active Schools: ${stats.exclusiveSchools}`,
-                      `  Shared: ${stats.sharedSchools}`,
-                      `Active Teachers: ${stats.activeTeachers}`,
-                      `  Mutual: ${stats.mutualTeachers}`,
-                      `Visit per Year: ${stats.totalVisitCount || '—'}`,
-                      `Training Delivered: ${trainingNames}`,
-                      `Total Training: ${totalTraining}`,
-                      `Visits Done: ${stats.visitedSchools}`,
-                      `Teachers Visited: ${stats.visitedTeachers}`,
-                      `IR: ${(customEntries as any).ir?.value || '—'}`,
-                      `Teacher Performance:\n${perf}`,
-                      `Other Project: ${(customEntries as any).otherProjects?.value || '—'}`,
-                      `Special Notes: ${(customEntries as any).specialNotes?.value || '—'}`,
-                    ].join('\n');
+  const text = [
+    `Year: ${stats.year}`,
+    `Month: ${stats.month}`,
+    `Active Schools: ${stats.exclusiveSchools}`,
+    `  Shared: ${stats.sharedSchools}`,
+    `Active Teachers: ${stats.activeTeachers}`,
+    `  Mutual: ${stats.mutualTeachers}`,
+    `Visit per Year: ${stats.totalVisitCount || '—'}`,
+    `Training Delivered: ${trainingNames}`,
+    `Total Training: ${totalTraining}`,
+    `Visits Done: ${stats.visitedSchools}`,
+    `Teachers Visited: ${stats.visitedTeachers}`,
+    `IR: ${(customEntries as any).ir?.value || '—'}`,
+    `Teacher Performance:\n${perf}`,
+    `Other Project: ${(customEntries as any).otherProjects?.value || '—'}`,
+    `Special Notes: ${(customEntries as any).specialNotes?.value || '—'}`,
+  ].join('\n');
 
-                    navigator.clipboard.writeText(text).then(() => {
-                      alert('Stats copied to clipboard!');
-                    }).catch(() => {
-                      alert('Failed to copy stats.');
-                    });
-                  }}
+  navigator.clipboard.writeText(text).then(() => {
+    alert('Stats copied to clipboard!');
+  }).catch(() => {
+    alert('Failed to copy stats.');
+  });
+}}
                   title="Copy stats"
                 >
                   📋
