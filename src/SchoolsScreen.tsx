@@ -699,7 +699,7 @@ export const SchoolsScreen: React.FC = () => {
 
   const [refreshKey, setRefreshKey] = useState(0); 
   // 🟢 NEW: Status Filter State
-const [schoolFilter, setSchoolFilter] = useState<'all' | 'active' | 'inactive'>('active');
+const [schoolFilter, setSchoolFilter] = useState<'all' | 'active' | 'inactive' | 'no_teachers' | 'temporary'>('active');
   const [sorting, setSorting] = useState<SortingState>([
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
@@ -723,28 +723,48 @@ const [pulseResults, setPulseResults] = useState<{
 const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
   const active: SchoolRow[] = [];
   const inactive: SchoolRow[] = [];
+  const noTeachers: SchoolRow[] = [];   // 🟢 NEW
+  const temporary: SchoolRow[] = [];    // 🟢 NEW
 
   rows.forEach((r) => {
-    if (r.disabled) inactive.push(r);
-    else active.push(r);
+    if (r.disabled) {
+      inactive.push(r);
+      return; // Inactive can't be in other categories
+    }
+    // Active: only shared or exclusive, not temporary
+    if (r.exclusive === 'shared' || r.exclusive === 'exclusive') {
+      active.push(r);
+    }
+    if (r.has_empty_class) {
+      noTeachers.push(r);
+    }
+    if (r.exclusive === 'temporary') {
+      temporary.push(r);
+    }
   });
 
   let filtered: SchoolRow[] = [];
   if (schoolFilter === 'all') filtered = rows;
   else if (schoolFilter === 'active') filtered = active;
   else if (schoolFilter === 'inactive') filtered = inactive;
+  else if (schoolFilter === 'no_teachers') filtered = noTeachers;
+  else if (schoolFilter === 'temporary') filtered = temporary;
+
+  // Active breakdown now only shared/exclusive (temporary is separate)
+  const sharedSchools = new Set<string>();
+  const exclusiveSchools = new Set<string>();
+  active.forEach((r) => {
+    if (r.exclusive === 'shared') sharedSchools.add(r.school_name);
+    else if (r.exclusive === 'exclusive') exclusiveSchools.add(r.school_name);
+  });
+  const temporarySchools = new Set<string>();
+  temporary.forEach(r => temporarySchools.add(r.school_name));
 
   const breakdown = {
-    shared: 0,
-    exclusive: 0,
-    temporary: 0,
+    shared: sharedSchools.size,
+    exclusive: exclusiveSchools.size,
+    temporary: temporarySchools.size,
   };
-
-  active.forEach((r) => {
-    if (r.exclusive === 'shared') breakdown.shared++;
-    else if (r.exclusive === 'exclusive') breakdown.exclusive++;
-    else if (r.exclusive === 'temporary') breakdown.temporary++;
-  });
 
   return {
     filteredRows: filtered,
@@ -752,6 +772,8 @@ const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
       all: rows.length,
       active: active.length,
       inactive: inactive.length,
+      no_teachers: noTeachers.length,
+      temporary: temporary.length,
     },
     activeBreakdown: breakdown,
   };
@@ -769,12 +791,21 @@ const uniqueSchoolCount = useMemo(() => {
 
 // Unique school counts for Active and Inactive tabs (independent of filter)
 const activeUniqueCount = useMemo(() => {
-  const names = rows.filter(r => !r.disabled).map(r => r.school_name);
+  const names = rows.filter(r => !r.disabled && (r.exclusive === 'shared' || r.exclusive === 'exclusive')).map(r => r.school_name);
+  return new Set(names).size;
+}, [rows]);
+const inactiveUniqueCount = useMemo(() => {
+  const names = rows.filter(r => r.disabled).map(r => r.school_name);
+  return new Set(names).size;
+}, [rows]);
+// Unique school counts for No Teachers and Temporary tabs
+const noTeachersUniqueCount = useMemo(() => {
+  const names = rows.filter(r => r.has_empty_class && !r.disabled).map(r => r.school_name);
   return new Set(names).size;
 }, [rows]);
 
-const inactiveUniqueCount = useMemo(() => {
-  const names = rows.filter(r => r.disabled).map(r => r.school_name);
+const temporaryUniqueCount = useMemo(() => {
+  const names = rows.filter(r => r.exclusive === 'temporary' && !r.disabled).map(r => r.school_name);
   return new Set(names).size;
 }, [rows]);
 
@@ -1577,13 +1608,23 @@ const runPulseAudit = async () => {
                <span>
                  <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.active}</strong> active campuses
                  <span style={{ marginLeft: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                   (Shared: {activeBreakdown.shared} · Exclusive: {activeBreakdown.exclusive} · Temporary: {activeBreakdown.temporary})
+                   (Shared: {activeBreakdown.shared} · Exclusive: {activeBreakdown.exclusive})
                  </span>
                </span>
              )}
              {schoolFilter === 'inactive' && (
                <span>
-                 <strong style={{ color: 'var(--text-main)' }}>{filterCounts.inactive}</strong> inactive campuses
+                 <strong style={{ color: 'var(--text-main)' }}>{inactiveUniqueCount}</strong> unique inactive schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.inactive}</strong> campuses
+               </span>
+             )}
+             {schoolFilter === 'no_teachers' && (
+               <span>
+                 <strong style={{ color: 'var(--text-main)' }}>{noTeachersUniqueCount}</strong> unique schools with no assigned teachers across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.no_teachers}</strong> campuses
+               </span>
+             )}
+             {schoolFilter === 'temporary' && (
+               <span>
+                 <strong style={{ color: 'var(--text-main)' }}>{temporaryUniqueCount}</strong> unique temporary schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.temporary}</strong> campuses
                </span>
              )}
              {schoolFilter === 'all' && (
@@ -1677,6 +1718,18 @@ const runPulseAudit = async () => {
           onClick={() => setSchoolFilter('inactive')}
         >
           Inactive <span className="count-badge-color">{inactiveUniqueCount}</span>
+        </button>
+        <button
+          className={`filter-tab ${schoolFilter === 'no_teachers' ? 'active-yellow' : ''}`}
+          onClick={() => setSchoolFilter('no_teachers')}
+        >
+          No Teachers <span className="count-badge-color">{noTeachersUniqueCount}</span>
+        </button>
+        <button
+          className={`filter-tab ${schoolFilter === 'temporary' ? 'active-blue' : ''}`}
+          onClick={() => setSchoolFilter('temporary')}
+        >
+          Temporary <span className="count-badge-color">{temporaryUniqueCount}</span>
         </button>
       </div>
       </div>
