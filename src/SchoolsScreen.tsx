@@ -761,12 +761,22 @@ const totalUniqueSchoolCount = useMemo(() => {
   const names = rows.map((r) => r.school_name);
   return new Set(names).size;
 }, [rows]);
-
-// Count unique schools based on currently filtered rows (used by active/inactive subtitle)
+// Count unique schools based on currently filtered rows (used by active/inactive/all subtitles)
 const uniqueSchoolCount = useMemo(() => {
     const names = filteredRows.map((r) => r.school_name);
     return new Set(names).size;
 }, [filteredRows]);
+
+// Unique school counts for Active and Inactive tabs (independent of filter)
+const activeUniqueCount = useMemo(() => {
+  const names = rows.filter(r => !r.disabled).map(r => r.school_name);
+  return new Set(names).size;
+}, [rows]);
+
+const inactiveUniqueCount = useMemo(() => {
+  const names = rows.filter(r => r.disabled).map(r => r.school_name);
+  return new Set(names).size;
+}, [rows]);
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
     try {
@@ -1660,13 +1670,13 @@ const runPulseAudit = async () => {
           className={`filter-tab ${schoolFilter === 'active' ? 'active-green' : ''}`}
           onClick={() => setSchoolFilter('active')}
         >
-          Active <span className="count-badge-color">{filterCounts.active}</span>
+          Active <span className="count-badge-color">{activeUniqueCount}</span>
         </button>
         <button
           className={`filter-tab ${schoolFilter === 'inactive' ? 'active-red' : ''}`}
           onClick={() => setSchoolFilter('inactive')}
         >
-          Inactive <span className="count-badge-color">{filterCounts.inactive}</span>
+          Inactive <span className="count-badge-color">{inactiveUniqueCount}</span>
         </button>
       </div>
       </div>
