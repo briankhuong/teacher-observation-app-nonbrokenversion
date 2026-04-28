@@ -41,16 +41,18 @@ export interface SchoolRow {
   am_name: string | null;
   am_email: string | null;
   address: string | null;
-  district: string | null;
+  district: string | null;   // we’ll remove from UI but keep in type for backward compatibility (or you can delete)
   city: string | null;
   notes: string | null;
   admin_workbook_url: string | null;
-  has_empty_class: boolean; // 🟢 NEW FIELD
-  official_code: string | null; 
-  campus_id: string | null;     
+  has_empty_class: boolean;
+  official_code: string | null;
+  campus_id: string | null;
   caring: boolean;
   created_at: string;
   updated_at: string;
+  disabled: boolean;
+  exclusive: string | null;   // 'shared' | 'exclusive' | 'temporary'
 }
 
 type SchoolFormState = {
@@ -60,15 +62,15 @@ type SchoolFormState = {
   admin_email: string;
   admin_phone: string;
   am_name: string;
-  official_code: string; 
-  campus_id: string;     
+  official_code: string;
+  campus_id: string;
   am_email: string;
   address: string;
-  district: string;
-  city: string;
   notes: string;
   admin_workbook_url: string;
   caring: boolean;
+  disabled: boolean;
+  exclusive: string;   // "" means unset, but we'll enforce one of 'shared'/'exclusive'/'temporary'
 };
 
 const emptyForm: SchoolFormState = {
@@ -80,13 +82,13 @@ const emptyForm: SchoolFormState = {
   am_name: "",
   am_email: "",
   address: "",
-  district: "",
-  official_code: "", 
-  campus_id: "",     
-  city: "",
+  official_code: "",
+  campus_id: "",
   notes: "",
   admin_workbook_url: "",
   caring: false,
+  disabled: false,
+  exclusive: "exclusive",   // default value as per your request
 };
 
 interface SchoolFormModalProps {
@@ -168,13 +170,16 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
             <label>Address</label>
             <span>{row.address || "—"}</span>
           </div>
+                    {/* --- NEW: Status & Exclusive --- */}
           <div className="detail-row">
-            <label>District</label>
-            <span>{row.district || "—"}</span>
+            <label>Status</label>
+            <span style={{ color: row.disabled ? '#ef4444' : '#22c55e', fontWeight: 600 }}>
+              {row.disabled ? 'Inactive' : 'Active'}
+            </span>
           </div>
           <div className="detail-row">
-            <label>City</label>
-            <span>{row.city || "—"}</span>
+            <label>Exclusive</label>
+            <span>{row.exclusive ? row.exclusive.charAt(0).toUpperCase() + row.exclusive.slice(1) : "—"}</span>
           </div>
           
           <div className="detail-row">
@@ -513,24 +518,35 @@ return (
             />
           </div>
 
+                    {/* 🟢 NEW: Disabled Toggle */}
           <div className="form-row">
-            <label>District</label>
-            <input
-              className="input"
-              type="text"
-              value={form.district}
-              onChange={handleChange("district")}
-            />
+            <label>Campus Status</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                id="chk-disabled"
+                checked={form.disabled}
+                onChange={(e) => setForm(prev => ({ ...prev, disabled: e.target.checked }))}
+                style={{ width: 'auto', margin: 0 }}
+              />
+              <label htmlFor="chk-disabled" style={{ margin: 0, cursor: 'pointer', fontWeight: 600 }}>
+                Disabled (Inactive)
+              </label>
+            </div>
           </div>
 
+          {/* 🟢 NEW: Exclusive Dropdown */}
           <div className="form-row">
-            <label>City</label>
-            <input
-              className="input"
-              type="text"
-              value={form.city}
-              onChange={handleChange("city")}
-            />
+            <label>Exclusive</label>
+            <select
+              className="select"
+              value={form.exclusive}
+              onChange={(e) => setForm(prev => ({ ...prev, exclusive: e.target.value }))}
+            >
+              <option value="shared">Shared</option>
+              <option value="exclusive">Exclusive</option>
+              <option value="temporary">Temporary</option>
+            </select>
           </div>
 
       <div className="form-row">
@@ -641,6 +657,8 @@ export const SchoolsScreen: React.FC = () => {
   const [showViewModal, setShowViewModal] = useState(false);
 
   const [refreshKey, setRefreshKey] = useState(0); 
+  // 🟢 NEW: Status Filter State
+const [schoolFilter, setSchoolFilter] = useState<'all' | 'active' | 'inactive'>('active');
   const [sorting, setSorting] = useState<SortingState>([
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
@@ -660,12 +678,54 @@ const [pulseResults, setPulseResults] = useState<{
   nameMismatches: []
 });
 
-// 🟢 NEW: Count Unique Schools
-  const uniqueSchoolCount = useMemo(() => {
-    const names = rows.map((r) => r.school_name);
-    return new Set(names).size;
-  }, [rows]);
+// 🟢 NEW: Filtered rows and breakdown counts
+const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
+  const active: SchoolRow[] = [];
+  const inactive: SchoolRow[] = [];
 
+  rows.forEach((r) => {
+    if (r.disabled) inactive.push(r);
+    else active.push(r);
+  });
+
+  let filtered: SchoolRow[] = [];
+  if (schoolFilter === 'all') filtered = rows;
+  else if (schoolFilter === 'active') filtered = active;
+  else if (schoolFilter === 'inactive') filtered = inactive;
+
+  const breakdown = {
+    shared: 0,
+    exclusive: 0,
+    temporary: 0,
+  };
+
+  active.forEach((r) => {
+    if (r.exclusive === 'shared') breakdown.shared++;
+    else if (r.exclusive === 'exclusive') breakdown.exclusive++;
+    else if (r.exclusive === 'temporary') breakdown.temporary++;
+  });
+
+  return {
+    filteredRows: filtered,
+    filterCounts: {
+      all: rows.length,
+      active: active.length,
+      inactive: inactive.length,
+    },
+    activeBreakdown: breakdown,
+  };
+}, [rows, schoolFilter]);
+// Total unique schools across all rows (unfiltered)
+const totalUniqueSchoolCount = useMemo(() => {
+  const names = rows.map((r) => r.school_name);
+  return new Set(names).size;
+}, [rows]);
+
+// Count unique schools based on currently filtered rows (used by active/inactive subtitle)
+const uniqueSchoolCount = useMemo(() => {
+    const names = filteredRows.map((r) => r.school_name);
+    return new Set(names).size;
+}, [filteredRows]);
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
     try {
@@ -674,17 +734,19 @@ const [pulseResults, setPulseResults] = useState<{
     } catch (e) {
       console.error("Failed to load column visibility from local storage", e);
     }
-    return {
+        return {
       campus_name: false,
       admin_phone: false,
       am_email: false,
       address: false,
-      district: false,
-      city: false,
+      district: false,   // remove this line if you removed district column, but safe to keep if omitted
+      city: false,       // same
       notes: false,
       admin_workbook_url: false,
       created_at: false,
       updated_at: false,
+      disabled: false,
+      exclusive: false,
     };
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false); 
@@ -754,6 +816,51 @@ const [pulseResults, setPulseResults] = useState<{
             No Teacher
           </span>
         )}
+        {/* 🟢 NEW: Inactive Tag */}
+{info.row.original.disabled && (
+  <span
+    className="tag-pill"
+    style={{
+      background: 'rgba(239, 68, 68, 0.15)',
+      borderColor: '#ef4444',
+      border: '1px solid',
+      color: '#ef4444',
+      fontWeight: 600,
+      fontSize: '10px',
+      display: 'inline-block',
+      padding: '1px 8px',
+      borderRadius: '12px',
+    }}
+  >
+    Inactive
+  </span>
+)}
+{/* 🟢 NEW: Exclusive tag (only show if shared or temporary) */}
+{info.row.original.exclusive && info.row.original.exclusive !== 'exclusive' && (
+  <span
+    className="tag-pill"
+    style={{
+      background:
+        info.row.original.exclusive === 'temporary' ? 'rgba(234,179,8,0.15)' :
+        'rgba(59,130,246,0.15)',
+      borderColor:
+        info.row.original.exclusive === 'temporary' ? '#eab308' :
+        '#3b82f6',
+      border: '1px solid',
+      color:
+        info.row.original.exclusive === 'temporary' ? '#eab308' :
+        '#3b82f6',
+      fontWeight: 600,
+      fontSize: '10px',
+      display: 'inline-block',
+      padding: '1px 8px',
+      borderRadius: '12px',
+    }}
+  >
+    {info.row.original.exclusive === 'shared' ? 'Shared' : 'Temporary'}
+  </span>
+)}
+        
       </div>
       <div className="entity-cell-sub">{info.row.original.campus_name}</div>
     </>
@@ -819,19 +926,6 @@ const [pulseResults, setPulseResults] = useState<{
         size: 250,
       },
       {
-        accessorKey: "district",
-        header: "District",
-        minSize: 100,
-        size: 150,
-      },
-      {
-        accessorKey: "city",
-        header: "City",
-        id: "city",
-        minSize: 100,
-        size: 150,
-      },
-      {
         accessorKey: "notes",
         header: "Notes",
         enableSorting: false,
@@ -870,6 +964,57 @@ const [pulseResults, setPulseResults] = useState<{
         },
         minSize: 120,
         size: 180,
+      },
+            // 🟢 NEW: Disabled Status (Hidden by default)
+      {
+        accessorKey: "disabled",
+        header: "Status",
+        cell: (info) => (
+          <span style={{
+            padding: '2px 8px',
+            borderRadius: '12px',
+            fontSize: '11px',
+            fontWeight: 700,
+            border: '1px solid',
+            background: info.getValue() ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+            borderColor: info.getValue() ? '#ef4444' : '#22c55e',
+            color: info.getValue() ? '#ef4444' : '#22c55e',
+          }}>
+            {info.getValue() ? 'Inactive' : 'Active'}
+          </span>
+        ),
+        minSize: 90,
+        size: 100,
+      },
+      // 🟢 NEW: Exclusive (Hidden by default)
+      {
+        accessorKey: "exclusive",
+        header: "Exclusive",
+        cell: (info) => {
+          const val = info.getValue() as string | null;
+          if (!val) return <span>—</span>;
+          const colors: Record<string, { bg: string; text: string }> = {
+            shared: { bg: 'rgba(59,130,246,0.1)', text: '#3b82f6' },
+            exclusive: { bg: 'rgba(139,92,246,0.1)', text: '#8b5cf6' },
+            temporary: { bg: 'rgba(234,179,8,0.1)', text: '#eab308' },
+          };
+          const c = colors[val] || { bg: 'transparent', text: 'var(--text)' };
+          return (
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: '12px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: c.bg,
+              color: c.text,
+              border: `1px solid ${c.text}`,
+            }}>
+              {val.charAt(0).toUpperCase() + val.slice(1)}
+            </span>
+          );
+        },
+        minSize: 90,
+        size: 100,
       },
       {
         accessorKey: "created_at",
@@ -927,7 +1072,7 @@ const [pulseResults, setPulseResults] = useState<{
   );
 
 const table = useReactTable({
-    data: rows,
+    data: filteredRows,
     columns,
     state: {
       sorting,
@@ -974,7 +1119,7 @@ const table = useReactTable({
         setLoading(true);
         setLoadError(null);
 
-        const { data, error } = await supabase
+                const { data, error } = await supabase
           .from("schools")
           .select(
             `
@@ -991,13 +1136,13 @@ const table = useReactTable({
             am_name,
             am_email,
             address,
-            district,
-            city,
             notes,
             admin_workbook_url,
             has_empty_class,
             created_at,
-            updated_at
+            updated_at,
+            disabled,
+            exclusive
           `
           )
           .eq("trainer_id", trainerId)
@@ -1083,22 +1228,22 @@ const table = useReactTable({
     if (formMode === "create") {
       const { data, error } = await supabase
         .from("schools")
-        .insert({
+                .insert({
           trainer_id: user.id,
           school_name: values.school_name.trim(),
           campus_name: values.campus_name.trim(),
-          official_code: values.official_code.trim() || null, // 🟢 Added
-          campus_id: values.campus_id.trim() || null,         // 🟢 Added
+          official_code: values.official_code.trim() || null,
+          campus_id: values.campus_id.trim() || null,
           admin_name: values.admin_name.trim() || null,
           admin_email: values.admin_email.trim() || null,
           admin_phone: values.admin_phone.trim() || null,
           am_name: values.am_name.trim() || null,
           am_email: values.am_email.trim() || null,
           address: values.address.trim() || null,
-          district: values.district.trim() || null,
-          city: values.city.trim() || null,
           notes: values.notes.trim() || null,
           caring: values.caring,
+          disabled: values.disabled,
+          exclusive: values.exclusive || 'exclusive',   // fallback to default
           admin_workbook_url: values.admin_workbook_url.trim() || null,
         })
         .select()
@@ -1126,24 +1271,24 @@ const table = useReactTable({
 
     const { data, error } = await supabase
       .from("schools")
-      .update({
-        school_name: values.school_name.trim(),
-        campus_name: values.campus_name.trim(),
-        official_code: values.official_code.trim() || null, // 🟢 Added
-        campus_id: values.campus_id.trim() || null,         // 🟢 Added
-        admin_name: values.admin_name.trim() || null,
-        admin_email: values.admin_email.trim() || null,
-        admin_phone: values.admin_phone.trim() || null,
-        am_name: values.am_name.trim() || null,
-        am_email: values.am_email.trim() || null,
-        address: values.address.trim() || null,
-        district: values.district.trim() || null,
-        city: values.city.trim() || null,
-        notes: values.notes.trim() || null,
-        admin_workbook_url: values.admin_workbook_url.trim() || null,
-        caring: values.caring,
-        updated_at: new Date().toISOString(),
-      })
+              .update({
+          school_name: values.school_name.trim(),
+          campus_name: values.campus_name.trim(),
+          official_code: values.official_code.trim() || null,
+          campus_id: values.campus_id.trim() || null,
+          admin_name: values.admin_name.trim() || null,
+          admin_email: values.admin_email.trim() || null,
+          admin_phone: values.admin_phone.trim() || null,
+          am_name: values.am_name.trim() || null,
+          am_email: values.am_email.trim() || null,
+          address: values.address.trim() || null,
+          notes: values.notes.trim() || null,
+          admin_workbook_url: values.admin_workbook_url.trim() || null,
+          caring: values.caring,
+          disabled: values.disabled,
+          exclusive: values.exclusive || 'exclusive',
+          updated_at: new Date().toISOString(),
+        })
       .eq("id", editingRow.id)
       .eq("trainer_id", trainerId)
       .select()
@@ -1174,19 +1319,19 @@ const table = useReactTable({
       ? {
           school_name: editingRow.school_name,
           campus_name: editingRow.campus_name,
-          official_code: editingRow.official_code ?? "", // 🟢 Added
-          campus_id: editingRow.campus_id ?? "",         // 🟢 Added
+          official_code: editingRow.official_code ?? "",
+          campus_id: editingRow.campus_id ?? "",
           admin_name: editingRow.admin_name ?? "",
           admin_email: editingRow.admin_email ?? "",
           admin_phone: editingRow.admin_phone ?? "",
           am_name: editingRow.am_name ?? "",
           am_email: editingRow.am_email ?? "",
           address: editingRow.address ?? "",
-          district: editingRow.district ?? "",
-          city: editingRow.city ?? "",
           notes: editingRow.notes ?? "",
           admin_workbook_url: editingRow.admin_workbook_url ?? "",
           caring: editingRow.caring ?? false,
+          disabled: editingRow.disabled ?? false,
+          exclusive: editingRow.exclusive ?? "exclusive",
         }
       : undefined;
 
@@ -1245,11 +1390,27 @@ const runPulseAudit = async () => {
       <div className="card">
         <div className="card-header tm-header-layout">
         {/* Tier 1: Title & Info */}
-        <div className="tm-title-section">
+                <div className="tm-title-section">
           <div className="card-title">Schools & campuses</div>
-{/* 🟢 REPLACE WITH THIS */}
           <div className="card-subtitle">
-             Manage <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{rows.length}</strong> campuses.
+             {schoolFilter === 'active' && (
+               <span>
+                 <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.active}</strong> active campuses
+                 <span style={{ marginLeft: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                   (Shared: {activeBreakdown.shared} · Exclusive: {activeBreakdown.exclusive} · Temporary: {activeBreakdown.temporary})
+                 </span>
+               </span>
+             )}
+             {schoolFilter === 'inactive' && (
+               <span>
+                 <strong style={{ color: 'var(--text-main)' }}>{filterCounts.inactive}</strong> inactive campuses
+               </span>
+             )}
+             {schoolFilter === 'all' && (
+              <span>
+                <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.all}</strong> campuses
+              </span>
+            )}
           </div>
         </div>
 
@@ -1302,6 +1463,27 @@ const runPulseAudit = async () => {
             </button>
           </div>
         </div>
+              {/* 🟢 NEW: Status Filter Tabs */}
+      <div className="filter-tabs-row" style={{ marginTop: '16px' }}>
+        <button
+          className={`filter-tab ${schoolFilter === 'all' ? 'active' : ''}`}
+          onClick={() => setSchoolFilter('all')}
+        >
+All Schools <span className="count-badge">{totalUniqueSchoolCount}</span>
+        </button>
+        <button
+          className={`filter-tab ${schoolFilter === 'active' ? 'active-green' : ''}`}
+          onClick={() => setSchoolFilter('active')}
+        >
+          Active <span className="count-badge-color">{filterCounts.active}</span>
+        </button>
+        <button
+          className={`filter-tab ${schoolFilter === 'inactive' ? 'active-red' : ''}`}
+          onClick={() => setSchoolFilter('inactive')}
+        >
+          Inactive <span className="count-badge-color">{filterCounts.inactive}</span>
+        </button>
+      </div>
       </div>
 
         <div className="card-body" style={{ position: "relative" }}>
