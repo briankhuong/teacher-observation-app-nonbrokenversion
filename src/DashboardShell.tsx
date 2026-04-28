@@ -601,6 +601,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
 
   const [observations, setObservations] =
     useState<DashboardObservationRow[]>([]);
+  // Stats sidebar data
+  const [schoolsAll, setSchoolsAll] = useState<any[]>([]);
+  const [teachersAll, setTeachersAll] = useState<any[]>([]);
   const [searchText, setSearchText] = useState("");
   const [recentMergePanel, setRecentMergePanel] =
    useState<RecentMergePanel>(null);
@@ -1001,6 +1004,27 @@ const handleCheckPulseSilent = useCallback(async () => {
 React.useEffect(() => {
   handleCheckPulseSilent();
 }, [handleCheckPulseSilent]);
+
+// Fetch schools & teachers for stats sidebar
+React.useEffect(() => {
+  if (!user?.id) return;
+  const loadResources = async () => {
+    // Schools
+    const { data: sData } = await supabase
+      .from("schools")
+      .select("school_name, campus_name, disabled, exclusive")
+      .eq("trainer_id", user.id);
+    if (sData) setSchoolsAll(sData);
+
+    // Teachers
+    const { data: tData } = await supabase
+      .from("teachers")
+      .select("name, school_name, campus, tags, needs_review, latest_performance, grapeseed_id")
+      .eq("trainer_id", user.id);
+    if (tData) setTeachersAll(tData);
+  };
+  loadResources();
+}, [user?.id]);
 
 
 const [trainerSettings, setTrainerSettings] = React.useState<{
@@ -1857,6 +1881,88 @@ async function processRows(dbRows: any[], pendingDeletes: string[]) {
   /* ------------------------------
       FILTER + SORT + GROUP
   --------------------------------- */
+const stats = React.useMemo(() => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0‑based
+  const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+  // --- Schools breakdown ---
+  const exclusiveSchools = new Set<string>();
+  const sharedSchools = new Set<string>();
+  (schoolsAll as Array<{ school_name: string; campus_name: string; disabled: boolean; exclusive: string | null }>).forEach(s => {
+    if (!s.disabled) {
+      if (s.exclusive === 'exclusive') exclusiveSchools.add(s.school_name);
+      else if (s.exclusive === 'shared') sharedSchools.add(s.school_name);
+    }
+  });
+
+  // --- Teachers (active + mutual) ---
+  type TeacherStatsRow = { name: string; school_name: string; campus: string; tags: string[] | null; needs_review: boolean; latest_performance: string | null; grapeseed_id: string | null };
+
+  const campusExclusive = new Map<string, string | null>();
+  (schoolsAll as Array<{ school_name: string; campus_name: string; exclusive: string | null }>).forEach(s => {
+    const key = `${s.school_name}||${s.campus_name}`;
+    campusExclusive.set(key, s.exclusive);
+  });
+
+  let activeTeachersCount = 0;
+  let mutualTeachersCount = 0;
+  let thriving = 0, functioning = 0, developing = 0;
+  (teachersAll as TeacherStatsRow[]).forEach(t => {
+    const tags: string[] = Array.isArray(t.tags) ? t.tags : [];
+    const isInactive = tags.some((tag: string) => tag.toLowerCase() === 'inactive');
+    if (isInactive || t.needs_review) return;
+
+    const key = `${t.school_name}||${t.campus}`;
+    const exclusive = campusExclusive.get(key);
+    if (exclusive === 'exclusive' || exclusive === 'shared') {
+      activeTeachersCount++;
+      // Mutual check
+      const otherTags = tags.filter((tag: string) => tag !== 'No tag' && tag.toLowerCase() !== 'inactive');
+      if (otherTags.length > 0) mutualTeachersCount++;
+
+      // Performance
+      if (t.latest_performance === 'Thriving') thriving++;
+      else if (t.latest_performance === 'Functioning') functioning++;
+      else if (t.latest_performance === 'Developing') developing++;
+    }
+  });
+
+  const totalForPerf = thriving + functioning + developing;
+  const perfPct = (val: number) => totalForPerf > 0 ? Math.round((val / totalForPerf) * 100) : 0;
+
+  // --- Observations this month ---
+  const visitedSchools = new Set<string>();
+  const visitedTeachers = new Set<string>();
+  let lvaCount = 0;
+
+  observations.forEach(o => {
+    const iso = o.isoDate;
+    if (!iso || !iso.startsWith(monthStr)) return;
+    if (o.supportType === 'Visit') {
+      visitedSchools.add(o.schoolName);
+      visitedTeachers.add(o.teacherName);
+    } else if (o.supportType === 'LVA') {
+      lvaCount++;
+    }
+  });
+
+  return {
+    year,
+    month: now.toLocaleString('default', { month: 'long' }),
+    exclusiveSchools: exclusiveSchools.size,
+    sharedSchools: sharedSchools.size,
+    activeTeachers: activeTeachersCount,
+    mutualTeachers: mutualTeachersCount,
+    visitedSchools: visitedSchools.size,
+    visitedTeachers: visitedTeachers.size,
+    lvaCount,
+    thriving: { count: thriving, pct: perfPct(thriving) },
+    functioning: { count: functioning, pct: perfPct(functioning) },
+    developing: { count: developing, pct: perfPct(developing) },
+  };
+}, [schoolsAll, teachersAll, observations]);
 const filteredAndSorted = React.useMemo(() => {
     const flattenText = (text: string | null | undefined): string => {
       if (!text) return "";
@@ -3476,9 +3582,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <div className="obs-list">
-          {/* 🟢 SHOW SKELETONS IF LOADING & EMPTY */}
-          {loading && observations.length === 0 ? (
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+          <div className="obs-list" style={{ flex: 1 }}>
+            {/* existing obs-list content remains exactly the same */}
+            {loading && observations.length === 0 ? (
               <>
                 <SkeletonRow />
                 <SkeletonRow />
@@ -3486,19 +3593,84 @@ useEffect(() => {
                 <SkeletonRow />
                 <SkeletonRow />
               </>
-          ) : (
+            ) : (
               <>
-                {/* Existing Group Logic */}
                 {grouped.map(renderGroup)}
-                
-                {/* Existing Empty State Logic */}
                 {!loading && observations.length === 0 && (
-                   <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>
-                      No observations found.
-                   </div>
+                  <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>
+                    No observations found.
+                  </div>
                 )}
               </>
-          )}
+            )}
+          </div>
+
+          {/* 🟢 NEW: Stats Sidebar */}
+          <div style={{
+            width: '260px',
+            marginTop: '0',
+            position: 'sticky',
+            top: '16px',
+            background: 'var(--card-bg, #1e293b)',
+            borderRadius: '12px',
+            border: '1px solid #334155',
+            padding: '16px',
+            fontSize: '13px',
+            color: 'var(--text-main, #f8fafc)',
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: '16px', fontSize: '14px' }}>
+              📊 {stats.month} {stats.year}
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontWeight: 600 }}>🏫 Active Schools</div>
+              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.exclusiveSchools}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)' }}>
+                Shared: {stats.sharedSchools}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontWeight: 600 }}>👩‍🏫 Active Teachers</div>
+              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.activeTeachers}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted, #94a3b8)' }}>
+                Mutual: {stats.mutualTeachers}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontWeight: 600 }}>✅ Visits Done</div>
+              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedSchools}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
+                unique schools this month
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontWeight: 600 }}>👤 Teachers Visited</div>
+              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedTeachers}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
+                unique teachers this month
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontWeight: 600 }}>🎥 Videos Analyzed</div>
+              <div style={{ fontSize: '24px', fontWeight: 700 }}>{stats.lvaCount}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted, #94a3b8)' }}>
+                LVA this month
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '0' }}>
+              <div style={{ fontWeight: 600 }}>📈 Performance</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+                <div><span style={{ color: '#22c55e', fontWeight: 700 }}>{stats.thriving.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.thriving.pct}%) Thriving</span></div>
+                <div><span style={{ color: '#3b82f6', fontWeight: 700 }}>{stats.functioning.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.functioning.pct}%) Functioning</span></div>
+                <div><span style={{ color: '#ef4444', fontWeight: 700 }}>{stats.developing.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.developing.pct}%) Developing</span></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
