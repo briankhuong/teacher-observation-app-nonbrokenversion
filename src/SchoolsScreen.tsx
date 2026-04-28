@@ -18,7 +18,7 @@ import type {
   Table,
   FilterFn, // 🟢 Added FilterFn
 } from "@tanstack/react-table";
-import { Search, Plus, RefreshCw } from "lucide-react";
+import { Search, Plus, RefreshCw,Pencil } from "lucide-react";
 import { flattenText } from "./utils/textUtils";
 const fuzzyVietnameseFilter: FilterFn<SchoolRow> = (row, columnId, value) => {
   const itemValue = row.getValue(columnId);
@@ -53,6 +53,7 @@ export interface SchoolRow {
   updated_at: string;
   disabled: boolean;
   exclusive: string | null;   // 'shared' | 'exclusive' | 'temporary'
+  visit_count: number | null; // 🟢 NEW
 }
 
 type SchoolFormState = {
@@ -71,6 +72,7 @@ type SchoolFormState = {
   caring: boolean;
   disabled: boolean;
   exclusive: string;   // "" means unset, but we'll enforce one of 'shared'/'exclusive'/'temporary'
+  visit_count: string; // 🟢 NEW
 };
 
 const emptyForm: SchoolFormState = {
@@ -89,6 +91,7 @@ const emptyForm: SchoolFormState = {
   caring: false,
   disabled: false,
   exclusive: "exclusive",   // default value as per your request
+  visit_count: "",          // 🟢 NEW
 };
 
 interface SchoolFormModalProps {
@@ -180,6 +183,10 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           <div className="detail-row">
             <label>Exclusive</label>
             <span>{row.exclusive ? row.exclusive.charAt(0).toUpperCase() + row.exclusive.slice(1) : "—"}</span>
+          </div>
+          <div className="detail-row">
+            <label>Visit Count</label>
+            <span>{row.visit_count !== null && row.visit_count !== undefined ? row.visit_count : "—"}</span>
           </div>
           
           <div className="detail-row">
@@ -549,6 +556,20 @@ return (
             </select>
           </div>
 
+          {/* 🟢 NEW: Visit Count */}
+          <div className="form-row">
+            <label>Visit Count</label>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="1"
+              value={form.visit_count}
+              onChange={handleChange("visit_count")}
+              placeholder="e.g. 5"
+            />
+          </div>
+
       <div className="form-row">
             <label>Caring Status</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -647,6 +668,26 @@ export const SchoolsScreen: React.FC = () => {
   
   // 🟢 NEW: Background Task Tracking
   const [provisioningIds, setProvisioningIds] = useState<Set<string>>(new Set());
+    // 🟢 NEW: Bulk Edit State
+  const [isBulkEditMode, setIsBulkEditMode] = useState(false);
+
+  // 🟢 NEW: Optimistic Auto-Save Handler (for Schools)
+  const handleInlineUpdate = async (id: string, field: keyof SchoolRow, value: any) => {
+    // 1. Optimistic UI update
+    setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+
+    // 2. Background DB sync
+    const { error } = await supabase
+      .from("schools")
+      .update({ [field]: value, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("trainer_id", user?.id);
+
+    if (error) {
+      console.error(`Failed to update ${field}:`, error);
+      alert(`Could not save ${field}. Please refresh and try again.`);
+    }
+  };
 
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -747,6 +788,7 @@ const uniqueSchoolCount = useMemo(() => {
       updated_at: false,
       disabled: false,
       exclusive: false,
+      visit_count: false,
     };
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false); 
@@ -969,20 +1011,34 @@ const uniqueSchoolCount = useMemo(() => {
       {
         accessorKey: "disabled",
         header: "Status",
-        cell: (info) => (
-          <span style={{
-            padding: '2px 8px',
-            borderRadius: '12px',
-            fontSize: '11px',
-            fontWeight: 700,
-            border: '1px solid',
-            background: info.getValue() ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
-            borderColor: info.getValue() ? '#ef4444' : '#22c55e',
-            color: info.getValue() ? '#ef4444' : '#22c55e',
-          }}>
-            {info.getValue() ? 'Inactive' : 'Active'}
-          </span>
-        ),
+        cell: (info) => {
+          if (!isBulkEditMode) {
+            return (
+              <span style={{
+                padding: '2px 8px',
+                borderRadius: '12px',
+                fontSize: '11px',
+                fontWeight: 700,
+                border: '1px solid',
+                background: info.getValue() ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                borderColor: info.getValue() ? '#ef4444' : '#22c55e',
+                color: info.getValue() ? '#ef4444' : '#22c55e',
+              }}>
+                {info.getValue() ? 'Inactive' : 'Active'}
+              </span>
+            );
+          }
+          // Bulk edit mode: render checkbox
+          return (
+            <input
+              type="checkbox"
+              checked={!!info.getValue()}
+              onChange={(e) => handleInlineUpdate(info.row.original.id, "disabled", e.target.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 'auto', margin: 0 }}
+            />
+          );
+        },
         minSize: 90,
         size: 100,
       },
@@ -992,29 +1048,97 @@ const uniqueSchoolCount = useMemo(() => {
         header: "Exclusive",
         cell: (info) => {
           const val = info.getValue() as string | null;
-          if (!val) return <span>—</span>;
-          const colors: Record<string, { bg: string; text: string }> = {
-            shared: { bg: 'rgba(59,130,246,0.1)', text: '#3b82f6' },
-            exclusive: { bg: 'rgba(139,92,246,0.1)', text: '#8b5cf6' },
-            temporary: { bg: 'rgba(234,179,8,0.1)', text: '#eab308' },
-          };
-          const c = colors[val] || { bg: 'transparent', text: 'var(--text)' };
+          if (!isBulkEditMode) {
+            if (!val) return <span>—</span>;
+            const colors: Record<string, { bg: string; text: string }> = {
+              shared: { bg: 'rgba(59,130,246,0.1)', text: '#3b82f6' },
+              exclusive: { bg: 'rgba(139,92,246,0.1)', text: '#8b5cf6' },
+              temporary: { bg: 'rgba(234,179,8,0.1)', text: '#eab308' },
+            };
+            const c = colors[val] || { bg: 'transparent', text: 'var(--text)' };
+            return (
+              <span style={{
+                padding: '2px 8px',
+                borderRadius: '12px',
+                fontSize: '11px',
+                fontWeight: 600,
+                background: c.bg,
+                color: c.text,
+                border: `1px solid ${c.text}`,
+              }}>
+                {val.charAt(0).toUpperCase() + val.slice(1)}
+              </span>
+            );
+          }
+          // Bulk edit mode: render dropdown
           return (
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: '12px',
-              fontSize: '11px',
-              fontWeight: 600,
-              background: c.bg,
-              color: c.text,
-              border: `1px solid ${c.text}`,
-            }}>
-              {val.charAt(0).toUpperCase() + val.slice(1)}
-            </span>
+            <select
+              className="select"
+              style={{ padding: '2px 6px', fontSize: '11px', width: '110px', height: '28px' }}
+              value={val || ""}
+              onChange={(e) => handleInlineUpdate(info.row.original.id, "exclusive", e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <option value="">--</option>
+              <option value="shared">Shared</option>
+              <option value="exclusive">Exclusive</option>
+              <option value="temporary">Temporary</option>
+            </select>
           );
         },
         minSize: 90,
         size: 100,
+      },
+            // 🟢 NEW: Caring column (editable in bulk edit)
+      {
+        accessorKey: "caring",
+        header: "Caring",
+        cell: (info) => {
+          if (!isBulkEditMode) {
+            return info.getValue() ? <span style={{ color: '#22c55e', fontWeight: 600 }}>✓ Caring</span> : <span>—</span>;
+          }
+          return (
+            <input
+              type="checkbox"
+              checked={!!info.getValue()}
+              onChange={(e) => handleInlineUpdate(info.row.original.id, "caring", e.target.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 'auto', margin: 0 }}
+            />
+          );
+        },
+        minSize: 90,
+        size: 100,
+      },
+            // 🟢 NEW: Visit Count (Hidden by default, editable in bulk edit)
+      {
+        accessorKey: "visit_count",
+        header: "Visits",
+        cell: (info) => {
+          if (!isBulkEditMode) {
+            const val = info.getValue() as number | null;
+            return <span>{val !== null ? val : "—"}</span>;
+          }
+          // Bulk edit: inline number input
+          return (
+            <input
+              type="number"
+              min="0"
+              step="1"
+              className="input"
+              style={{ padding: '2px 6px', fontSize: '12px', width: '70px', height: '28px' }}
+              value={info.getValue() !== null ? String(info.getValue()) : ""}
+              onChange={(e) => {
+                const newVal = e.target.value === "" ? null : Number(e.target.value);
+                handleInlineUpdate(info.row.original.id, "visit_count", newVal);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="0"
+            />
+          );
+        },
+        minSize: 80,
+        size: 90,
       },
       {
         accessorKey: "created_at",
@@ -1068,7 +1192,7 @@ const uniqueSchoolCount = useMemo(() => {
         ),
       },
     ],
-    [setShowColumnMenu, provisioningIds] // 🟢 NEW: dependency on provisioningIds
+        [setShowColumnMenu, provisioningIds, isBulkEditMode, handleInlineUpdate]
   );
 
 const table = useReactTable({
@@ -1142,7 +1266,8 @@ const table = useReactTable({
             created_at,
             updated_at,
             disabled,
-            exclusive
+            exclusive,
+            visit_count
           `
           )
           .eq("trainer_id", trainerId)
@@ -1244,6 +1369,7 @@ const table = useReactTable({
           caring: values.caring,
           disabled: values.disabled,
           exclusive: values.exclusive || 'exclusive',   // fallback to default
+          visit_count: values.visit_count ? Number(values.visit_count) : null, // 🟢 NEW
           admin_workbook_url: values.admin_workbook_url.trim() || null,
         })
         .select()
@@ -1287,6 +1413,7 @@ const table = useReactTable({
           caring: values.caring,
           disabled: values.disabled,
           exclusive: values.exclusive || 'exclusive',
+          visit_count: values.visit_count ? Number(values.visit_count) : null,
           updated_at: new Date().toISOString(),
         })
       .eq("id", editingRow.id)
@@ -1332,6 +1459,7 @@ const table = useReactTable({
           caring: editingRow.caring ?? false,
           disabled: editingRow.disabled ?? false,
           exclusive: editingRow.exclusive ?? "exclusive",
+          visit_count: editingRow.visit_count !== null && editingRow.visit_count !== undefined ? String(editingRow.visit_count) : "",
         }
       : undefined;
 
@@ -1384,6 +1512,48 @@ const runPulseAudit = async () => {
     setIsPulsing(false);
   }
 };
+  // 🟢 NEW: Toggle Bulk Edit and adjust columns automatically
+  const toggleBulkEdit = () => {
+    setIsBulkEditMode(prev => {
+      const nextMode = !prev;
+      if (nextMode) {
+        setColumnVisibility({
+          // Show editable columns; hide some others to keep table clean
+          campus_name: false,
+          admin_phone: false,
+          am_email: false,
+          address: false,
+          notes: false,
+          admin_workbook_url: false,
+          created_at: false,
+          updated_at: false,
+          disabled: true,   // Show status column
+          exclusive: true,  // Show exclusive column
+          visit_count: true, // 🟢 Show visit count
+          // ───── we'll also show caring column (which was already visible by default) ─────
+        });
+      } else {
+        // Revert to default visibility (as defined initially)
+        setColumnVisibility({
+          campus_name: false,
+          admin_phone: false,
+          am_email: false,
+          address: false,
+          district: false,
+          city: false,
+          notes: false,
+          admin_workbook_url: false,
+          created_at: false,
+          updated_at: false,
+          disabled: false,
+          exclusive: false,
+          visit_count: false,
+        });
+      }
+      return nextMode;
+    });
+  };
+
 
   return (
     <>
@@ -1429,7 +1599,24 @@ const runPulseAudit = async () => {
 
           {/* Right: Icon Group + Primary Action */}
           <div className="tm-actions-group">
-            {/* 🟢 NEW: Pulse Sync Button */}
+                       {/* 🟢 NEW: Bulk Edit Toggle Button */}
+            <button
+              type="button"
+              className={`btn ${isBulkEditMode ? 'btn-primary' : 'btn-ghost'}`}
+              style={{ 
+                fontWeight: 600, 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px',
+                border: isBulkEditMode ? undefined : '1px solid #475569', 
+                borderRadius: '9999px', 
+                padding: '4px 16px' 
+              }}
+              onClick={toggleBulkEdit}
+            >
+              {isBulkEditMode ? "Done Editing" : <><Pencil size={14} /> Bulk Edit</>}
+            </button>
+
             <button
               type="button"
               className="tm-pure-icon"
@@ -1448,9 +1635,7 @@ const runPulseAudit = async () => {
                 className={isPulsing ? "tm-spin" : ""} 
               />
             </button>
-            {/* Note: Ensure ImportSchoolsBtn is updated to use the same .tm-pure-icon 
-                style with Lucide Download/Upload icons as we did for Teachers. 
-            */}
+
             <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
 
             <button
@@ -1469,7 +1654,7 @@ const runPulseAudit = async () => {
           className={`filter-tab ${schoolFilter === 'all' ? 'active' : ''}`}
           onClick={() => setSchoolFilter('all')}
         >
-All Schools <span className="count-badge">{totalUniqueSchoolCount}</span>
+        All Schools <span className="count-badge">{totalUniqueSchoolCount}</span>
         </button>
         <button
           className={`filter-tab ${schoolFilter === 'active' ? 'active-green' : ''}`}
