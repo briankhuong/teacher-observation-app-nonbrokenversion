@@ -3621,7 +3621,7 @@ useEffect(() => {
           {/* 🟢 NEW: Stats Sidebar */}
           <div style={{
             width: '260px',
-            marginTop: '0',
+            marginTop: '44px',
             position: 'sticky',
             top: '16px',
             background: 'var(--card-bg, #1e293b)',
