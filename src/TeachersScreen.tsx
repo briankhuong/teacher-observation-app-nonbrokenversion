@@ -2038,10 +2038,10 @@ const handleSync = async () => {
                   </div>
                 </div>
 
-                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' }}>
-                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Top Models</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '56px', overflowY: 'auto' }}>
-                    {stats.models.length > 0 ? stats.models.slice(0, 3).map(m => (
+                                <div className="stat-card" style={{ background: 'rgba(30, 41, 59, 0.4)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #334155' }}>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Teaching Models</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    {stats.models.length > 0 ? stats.models.map(m => (
                       <div key={m.name} style={{ fontSize: '12px' }}>
                         <span style={{ fontWeight: 700, color: '#f8fafc', display: 'inline-block', width: '24px' }}>{m.count}</span> 
                         <span style={{ color: 'var(--text-muted)' }}>({m.pct}%) {m.name}</span>
