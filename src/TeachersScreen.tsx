@@ -1898,8 +1898,26 @@ const handleSync = async () => {
     } else {
       console.warn("Year sync failed (non-blocking)");
     }
+          /* 4️⃣ 🆕 RUN Teaching Model Sync */
+    console.log("📚 Starting Teaching Model Sync...");
+    const modelsResp = await fetch(`${MERGE_SERVER_BASE}/api/sync-teaching-models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: access_token, userId: user.id }),
+    });
 
-    /* 4️⃣ UI Refresh */
+    if (modelsResp.ok) {
+      const modelsResult = await modelsResp.json();
+      if (modelsResult.logs && Array.isArray(modelsResult.logs)) {
+        console.groupCollapsed("📋 Teaching Model Sync Logs");
+        modelsResult.logs.forEach((log: string) => console.log(log));
+        console.groupEnd();
+      }
+    } else {
+      console.warn("Teaching model sync failed (non-blocking)");
+    }
+
+    /* 5️⃣ UI Refresh */
     // Trigger re-fetch of lists
     setRefreshKey((prev) => prev + 1);
 

@@ -1415,4 +1415,144 @@ router.post("/api/lookup-school-details", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// -------------------------------------------------- */
+// Teaching Model Sync (from class licenseType)
+// -------------------------------------------------- */
+router.post("/api/sync-teaching-models", async (req, res) => {
+  const { token, userId } = req.body;
+  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
+
+  const logs = [];
+  const log = (m) => { console.log(m); logs.push(m); };
+
+  try {
+    // 1. Get all active schools for this trainer
+    const { data: dbSchools, error: schoolsErr } = await supabase
+      .from("schools")
+      .select("id, official_code, campus_id, school_name, campus_name")
+      .eq("trainer_id", userId)
+      .eq("disabled", false);
+
+    if (schoolsErr) throw new Error(`Schools fetch error: ${schoolsErr.message}`);
+    if (!dbSchools || dbSchools.length === 0) {
+      log("⚠️ No schools found.");
+      return res.json({ success: true, logs });
+    }
+
+    // Map: teacherId (lowercase) → Set of licenseTypes
+    const teacherLicenseMap = new Map();
+
+    // 2. Loop schools/campuses to fetch class lists and then class details
+    await pMap(dbSchools, async (schoolRow) => {
+      try {
+        const classListUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/classes?campusId=${schoolRow.campus_id}&offset=0&limit=100&disabled=false`;
+        const listResp = await fetch(classListUrl, { headers: getHeaders(token) });
+        if (!listResp.ok) return;
+
+        const classData = await listResp.json();
+        const apiClasses = classData.schoolClasses || classData || [];
+
+        // For each class, fetch detail to get licenseType
+        const classDetails = await pMap(apiClasses, async (cls) => {
+          if (!cls.teacherId || !cls.id) return null;
+          try {
+            const detailUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/classes/${cls.id}?regionId=${VIETNAM_REGION_ID}&schoolId=${schoolRow.official_code}&campusId=${schoolRow.campus_id}&classId=${cls.id}&id=${cls.id}`;
+            const detailResp = await fetch(detailUrl, { headers: getHeaders(token) });
+            if (!detailResp.ok) return null;
+            const detail = await detailResp.json();
+            return { teacherId: cls.teacherId.toLowerCase(), licenseType: detail.licenseType };
+          } catch (e) {
+            return null;
+          }
+        }, { concurrency: 10 });
+
+        // Aggregate
+        for (const item of classDetails) {
+          if (!item) continue;
+          const tid = item.teacherId;
+          if (!teacherLicenseMap.has(tid)) teacherLicenseMap.set(tid, new Set());
+          teacherLicenseMap.get(tid).add(item.licenseType);
+        }
+      } catch (err) {
+        log(`⚠️ School ${schoolRow.school_name} error: ${err.message}`);
+      }
+    }, { concurrency: 5 });
+
+    log(`📡 Processed ${teacherLicenseMap.size} teachers from classes.`);
+
+    // 3. Fetch active/mutual teachers from DB
+    const { data: dbTeachers, error: teachersErr } = await supabase
+      .from("teachers")
+      .select("id, grapeseed_id, tags, teaching_model")
+      .eq("trainer_id", userId);
+
+    if (teachersErr) throw new Error(`Teachers fetch error: ${teachersErr.message}`);
+    if (!dbTeachers || dbTeachers.length === 0) {
+      log("⚠️ No teachers found.");
+      return res.json({ success: true, logs });
+    }
+
+    // Filter out Inactive teachers, only keep those with grapeseed_id
+    const activeTeachers = dbTeachers.filter(t => {
+      if (!t.grapeseed_id) return false;
+      const tagsArr = Array.isArray(t.tags) ? t.tags : [];
+      return !tagsArr.some(tag => tag.toLowerCase() === "inactive");
+    });
+
+    // 4. Compute model string from licenseTypes
+    const licenseToModel = { 1: "Classic", 2: "Connect", 3: "Nexus" };
+    const updates = [];
+    for (const teacher of activeTeachers) {
+      const gsId = teacher.grapeseed_id.toLowerCase();
+      const licenseTypes = teacherLicenseMap.get(gsId);
+      if (!licenseTypes || licenseTypes.size === 0) continue; // no classes → keep current
+
+      const models = [];
+      for (const lt of licenseTypes) {
+        const model = licenseToModel[lt];
+        if (model) models.push(model);
+      }
+      if (models.length === 0) continue;
+
+      const newModel = models.sort().join(" + "); // e.g. "Classic + Connect"
+      const currentModel = teacher.teaching_model || "";
+      if (currentModel !== newModel) {
+                updates.push({
+          id: teacher.id,
+          teaching_model: newModel,
+          needs_review: true,
+          updated_at: new Date(),
+        });
+      }
+    }
+
+        if (updates.length > 0) {
+      let updatedCount = 0;
+      for (const u of updates) {
+        const { error } = await supabase
+          .from("teachers")
+          .update({
+            teaching_model: u.teaching_model,
+            needs_review: u.needs_review,
+            updated_at: u.updated_at,
+          })
+          .eq("id", u.id);
+        if (error) {
+          log(`⚠️ Failed to update teacher ${u.id}: ${error.message}`);
+        } else {
+          updatedCount++;
+        }
+      }
+      log(`✅ Updated ${updatedCount} teachers' teaching models.`);
+    } else {
+      log("✅ All teaching models already up-to-date.");
+    }
+
+    res.json({ success: true, logs });
+  } catch (err) {
+    log(`❌ sync-teaching-models error: ${err.message}`);
+    res.status(500).json({ success: false, error: err.message, logs });
+  }
+});
 export default router;
