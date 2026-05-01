@@ -1173,4 +1173,105 @@ router.post("/api/match-visitation", async (req, res) => {
   }
 });
 
+// -------------------------------------------------- */
+// Year of Experience Sync (per-teacher tags)
+// -------------------------------------------------- */
+router.post("/api/sync-years", async (req, res) => {
+  const { token, userId } = req.body;
+  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
+  const currentYear = new Date().getFullYear();
+
+  const logs = [];
+  const log = (m) => { console.log(m); logs.push(m); };
+
+  try {
+    // 1. Fetch teachers that need year_count filled (active + mutual only)
+    const { data: candidates, error: fetchErr } = await supabase
+      .from("teachers")
+      .select("id, grapeseed_id, tags")
+      .eq("trainer_id", userId)
+      .is("year_count", null);
+
+    if (fetchErr) throw new Error(`DB fetch error: ${fetchErr.message}`);
+    if (!candidates || candidates.length === 0) {
+      log("✅ No teachers need year-of-experience update.");
+      return res.json({ success: true, logs });
+    }
+
+    // Filter out Inactive teachers
+    const activeCandidates = candidates.filter(t => {
+      const tagsArr = Array.isArray(t.tags) ? t.tags : [];
+      return !tagsArr.some(tag => tag.toLowerCase() === "inactive");
+    });
+
+    const validTeachers = activeCandidates.filter(t => t.grapeseed_id);
+    if (validTeachers.length === 0) {
+      log("⚠️ No active teachers with GrapeSEED ID.");
+      return res.json({ success: true, logs });
+    }
+
+    log(`📡 Fetching year tags for ${validTeachers.length} teachers...`);
+
+    // 2. Process each teacher concurrently
+    let updated = 0;
+    await pMap(validTeachers, async (teacher) => {
+      try {
+        const url = `https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${teacher.grapeseed_id}&regionId=${VIETNAM_REGION_ID}`;
+        const resp = await fetch(url, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+        if (!resp.ok) return;
+
+        const data = await resp.json();
+        // Universal parser (same as in sync-teachers)
+        let rawTagObjects = [];
+        if (data.tags) rawTagObjects = data.tags;
+        else if (data.entityTags) rawTagObjects = data.entityTags;
+        else if (Array.isArray(data)) {
+          if (data[0] && (data[0].tags || data[0].entityTags)) rawTagObjects = data[0].tags || data[0].entityTags;
+          else rawTagObjects = data;
+        }
+
+        // Find first valid year tag
+        let foundYear = null;
+        for (const tag of rawTagObjects) {
+          const name = (tag.name || "").trim();
+          const num = parseInt(name, 10);
+          if (!isNaN(num) && num >= 1990 && num <= currentYear) {
+            foundYear = num;
+            break;
+          }
+        }
+
+        if (foundYear === null) return;
+
+        const years = currentYear - foundYear;
+
+        // Update only if year_count is still NULL (protect manual edits)
+        const { error: updateErr } = await supabase
+          .from("teachers")
+          .update({
+            year_count: years,
+            needs_review: true,
+            updated_at: new Date()
+          })
+          .eq("id", teacher.id)
+          .is("year_count", null);
+
+        if (!updateErr) {
+          updated++;
+          log(`✅ ${teacher.grapeseed_id}: ${foundYear} → ${years} years`);
+        }
+      } catch (err) {
+        log(`⚠️ Error processing ${teacher.grapeseed_id}: ${err.message}`);
+      }
+    }, { concurrency: 10 });
+
+    log(`🏁 Updated ${updated} teachers with years of experience.`);
+    res.json({ success: true, logs });
+
+  } catch (err) {
+    log(`❌ sync-years error: ${err.message}`);
+    res.status(500).json({ success: false, error: err.message, logs });
+  }
+});
+
 export default router;

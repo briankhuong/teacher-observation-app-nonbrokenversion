@@ -1880,14 +1880,23 @@ const handleSync = async () => {
       throw new Error(result.error || "Unknown sync error");
     }
 
-    /* 3️⃣ Log Output (New Feature) */
-    // The new backend sends back a 'logs' array. We print it to console for clarity.
-    /* 3️⃣ Log Output (New Feature) */
-    if (result.logs && Array.isArray(result.logs)) {
-      console.groupCollapsed("📋 Sync Operation Logs");
-      // FIX: Add ': string' to the parameter
-      result.logs.forEach((log: string) => console.log(log));
-      console.groupEnd();
+  /* 3️⃣ 🆕 RUN Year of Experience Sync */
+    console.log("📅 Starting Year of Experience Sync...");
+    const yearsResp = await fetch(`${MERGE_SERVER_BASE}/api/sync-years`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: access_token, userId: user.id }),
+    });
+
+    if (yearsResp.ok) {
+      const yearsResult = await yearsResp.json();
+      if (yearsResult.logs && Array.isArray(yearsResult.logs)) {
+        console.groupCollapsed("📋 Year Sync Logs");
+        yearsResult.logs.forEach((log: string) => console.log(log));
+        console.groupEnd();
+      }
+    } else {
+      console.warn("Year sync failed (non-blocking)");
     }
 
     /* 4️⃣ UI Refresh */
