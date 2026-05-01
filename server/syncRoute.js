@@ -1273,5 +1273,98 @@ router.post("/api/sync-years", async (req, res) => {
     res.status(500).json({ success: false, error: err.message, logs });
   }
 });
+// -------------------------------------------------- */
+// School Details Lookup (Multi-Campus Import)
+// -------------------------------------------------- */
+router.post("/api/lookup-school-details", async (req, res) => {
+  const { schoolCode } = req.body;
+  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
 
+  if (!schoolCode) return res.status(400).json({ error: "Missing schoolCode" });
+
+  try {
+    const token = await getMasterToken();
+    const logs = [];
+
+    // 1. Get school name via breadcrumbs
+    const breadcrumbsUrl = `https://services.grapeseed.com/admin/v1/resources/breadcrumbs?breadcrumbIds=${VIETNAM_REGION_ID}&breadcrumbIds=${schoolCode}&breadcrumbTypes=113&breadcrumbTypes=112`;
+    const breadResp = await fetch(breadcrumbsUrl, { headers: getHeaders(token) });
+    if (!breadResp.ok) {
+      return res.status(404).json({ error: "School not found. Check the code." });
+    }
+    const breadData = await breadResp.json();
+    const schoolName = breadData.school?.name || "Unknown School";
+    logs.push(`✅ School: ${schoolName}`);
+
+    // 2. Get accessible campuses
+    const campusesUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolCode}/campuses/accessiblecampuses`;
+    const campResp = await fetch(campusesUrl, { headers: getHeaders(token) });
+    if (!campResp.ok) {
+      return res.status(404).json({ error: "Could not fetch campuses." });
+    }
+    const allCampuses = await campResp.json();
+    const activeCampuses = allCampuses.filter(c => !c.disabled);
+    logs.push(`📡 Found ${activeCampuses.length} active campuses (${allCampuses.length} total)`);
+
+    if (activeCampuses.length === 0) {
+      return res.json({ schoolName, campuses: [], logs });
+    }
+
+    // 3. For each active campus, get admin contacts + phone
+    const campusDetails = [];
+    for (const campus of activeCampuses) {
+      let adminName = null, adminEmail = null, adminPhone = null;
+
+      try {
+        const contactsUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolCode}/campuses/${campus.id}/contacts?schoolId=${schoolCode}&id=${campus.id}`;
+        const contResp = await fetch(contactsUrl, { headers: getHeaders(token) });
+
+        if (contResp.ok) {
+                      const contData = await contResp.json();
+            const admins = contData.admins || [];
+            console.log(`[lookup-school-details] Campus ${campus.name} admins:`, JSON.stringify(admins));
+                      if (admins.length > 0) {
+              const first = admins[0];
+              adminName = first.name?.trim() || null;
+              adminEmail = first.email?.trim() || null;
+
+              // Get missing details via user endpoint
+              if (first.id && (!adminName || !adminEmail || !adminPhone)) {
+                try {
+                  const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${first.id}`;
+                  const userResp = await fetch(userUrl, { headers: getHeaders(token) });
+                  if (userResp.ok) {
+                    const userData = await userResp.json();
+                    const user = Array.isArray(userData) ? userData[0] : userData;
+                    if (!adminName && user?.name) adminName = user.name.trim();
+                    if (!adminEmail && user?.email) adminEmail = user.email.trim();
+                    if (!adminPhone && user?.phone) adminPhone = user.phone;
+                  }
+                } catch (e) { /* ignore */ }
+              }
+            }
+        }
+      } catch (e) {
+        logs.push(`⚠️ Contacts error for campus ${campus.name}: ${e.message}`);
+      }
+
+      campusDetails.push({
+        campusId: campus.id,
+        campusName: campus.name,
+        address: campus.fullAddress || null,
+        campusPhone: campus.phone || null,
+        adminName,
+        adminEmail,
+        adminPhone: adminPhone || campus.phone || null,
+      });
+    }
+
+    logs.push(`✅ Processed ${campusDetails.length} campuses.`);
+    res.json({ schoolName, campuses: campusDetails, logs });
+
+  } catch (err) {
+    console.error("lookup-school-details error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 export default router;

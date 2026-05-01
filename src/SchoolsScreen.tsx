@@ -232,16 +232,31 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   open,
   mode,
   initial,
-  existingSchools, // 🟢 ADD THIS LINE
+  existingSchools,
   onCancel,
   onSubmit,
 }) => {
+  const { user } = useAuth(); // needed for handleSubmit
+
   const [form, setForm] = useState<SchoolFormState>(initial ?? emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [autoCreate, setAutoCreate] = useState(false);
 
-  const [isSearching, setIsSearching] = useState(false);
-  const [apiCampuses, setApiCampuses] = useState<any[]>([]);
+  // new state for multi‑campus lookup
+  const [lookupResult, setLookupResult] = useState<{
+    schoolName: string;
+    campuses: Array<{
+      campusId: string;
+      campusName: string;
+      address: string | null;
+      campusPhone: string | null;
+      adminName: string | null;
+      adminEmail: string | null;
+      adminPhone: string | null;
+    }>;
+  } | null>(null);
+  const [selectedCampusIds, setSelectedCampusIds] = useState<Set<string>>(new Set());
+  const [isLookingUp, setIsLookingUp] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
   // Clean name helper for matching logic in Phase B
@@ -252,6 +267,9 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       setForm(initial ?? emptyForm);
       setSubmitting(false);
       setAutoCreate(false);
+      setLookupResult(null);
+      setSelectedCampusIds(new Set());
+      setHasSearched(false);
     }
   }, [open, initial]);
 
@@ -263,49 +281,169 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
-const handleLookupCampuses = async () => {
-  if (!form.official_code.trim()) {
-    alert("Please enter an Official Code (School ID) first.");
-    return;
-  }
-
-  setIsSearching(true);
-  try {
-    // 🟢 NO MORE getGraphAccessToken() call here!
-    
-    const resp = await fetch(`${MERGE_SERVER_BASE}/api/lookup-campuses`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        schoolCode: form.official_code.trim(),
-        // 🟢 token is no longer sent
-      }),
-    });
-
-    if (!resp.ok) {
-      const errData = await resp.json();
-      throw new Error(errData.error || "Could not find school. Check the code.");
-    }
-    
-    const data = await resp.json();
-    const campusList = Array.isArray(data) ? data : [];
-    
-    if (campusList.length === 0) {
-      alert("No campuses found for this code.");
+  const handleLookupSchoolDetails = async () => {
+    if (!form.official_code.trim()) {
+      alert("Please enter an Official Code first.");
+      return;
     }
 
-    setApiCampuses(campusList);
+    setIsLookingUp(true);
+    setLookupResult(null);
+    setSelectedCampusIds(new Set());
     setHasSearched(true);
-  } catch (err: any) {
-    console.error("Lookup Error:", err);
-    alert(err.message || "Failed to fetch campuses.");
-  } finally {
-    setIsSearching(false);
-  }
-};
+
+    try {
+      const resp = await fetch(`${MERGE_SERVER_BASE}/api/lookup-school-details`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schoolCode: form.official_code.trim() }),
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json();
+        throw new Error(errData.error || "Lookup failed.");
+      }
+
+      const data = await resp.json();
+      if (!data.campuses || data.campuses.length === 0) {
+        alert("No active campuses found for this school.");
+        setLookupResult({ schoolName: data.schoolName, campuses: [] });
+        return;
+      }
+
+      setLookupResult(data);
+      // Pre‑fill AM fields from an existing record for this school code
+      const existingSameSchool = existingSchools.find(
+        (s) => s.official_code === form.official_code.trim()
+      );
+      setForm((prev) => ({
+        ...prev,
+        school_name: data.schoolName,
+        am_name: existingSameSchool?.am_name || prev.am_name || "",
+        am_email: existingSameSchool?.am_email || prev.am_email || "",
+      }));
+      // Auto‑select if only one campus and it's not already in DB
+      if (data.campuses.length === 1) {
+        const c = data.campuses[0];
+        // DEBUG: log the admin data from API
+        console.log("Single campus auto‑select admin data:", {
+          adminName: c.adminName,
+          adminEmail: c.adminEmail,
+          adminPhone: c.adminPhone,
+        });
+        const alreadyExists = existingSchools.some(
+          (s) => s.campus_id === c.campusId
+        );
+        if (!alreadyExists) {
+          setSelectedCampusIds(new Set([c.campusId]));
+          // AM fields already pre‑filled above, no need to repeat
+          setForm((prev) => ({
+            ...prev,
+            campus_id: c.campusId,
+            campus_name: c.campusName,
+            admin_name: c.adminName || "",
+            admin_email: c.adminEmail || "",
+            admin_phone: c.adminPhone || "",
+            address: c.address || "",
+          }));
+        } else {
+          setSelectedCampusIds(new Set());
+          alert("This campus is already in your list.");
+        }
+      }
+    } catch (err: any) {
+      console.error("Lookup Error:", err);
+      alert(err.message || "Failed to fetch school details.");
+    } finally {
+      setIsLookingUp(false);
+    }
+  };
+
+  const toggleCampusSelection = (campusId: string) => {
+    setSelectedCampusIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(campusId)) {
+        next.delete(campusId);
+      } else {
+        next.add(campusId);
+      }
+      return next;
+    });
+  };
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+
+    // Multi‑campus creation path
+    if (lookupResult && lookupResult.campuses.length > 0) {
+      const selected = lookupResult.campuses.filter((c) =>
+        selectedCampusIds.has(c.campusId)
+      );
+      if (selected.length === 0) {
+        alert("Please select at least one campus to add.");
+        return;
+      }
+
+      setSubmitting(true);
+      let token: string | undefined = undefined;
+      if (autoCreate) {
+        try {
+          token = await getGraphAccessToken();
+        } catch (err: any) {
+          console.error("Token error", err);
+          const cont = window.confirm(
+            `Could not sign in to Microsoft: ${err.message}\n\nSave schools anyway?`
+          );
+          if (!cont) {
+            setSubmitting(false);
+            return;
+          }
+        }
+      }
+
+      try {
+        for (const campus of selected) {
+          const payload = {
+            trainer_id: user!.id,
+            school_name: lookupResult.schoolName,
+            campus_name: campus.campusName,
+            official_code: form.official_code.trim(),
+            campus_id: campus.campusId,
+            admin_name: campus.adminName,
+            admin_email: campus.adminEmail,
+            admin_phone: campus.adminPhone,
+            am_name: null,
+            am_email: null,
+            address: campus.address,
+            caring: false,
+            disabled: false,
+            exclusive: "exclusive",
+            admin_workbook_url: form.admin_workbook_url.trim() || null,
+            notes: form.notes.trim() || null,
+          };
+
+          const { data, error } = await supabase
+            .from("schools")
+            .insert(payload)
+            .select()
+            .single();
+          if (error) {
+            console.error("Insert error:", error);
+            alert(`Failed to add campus "${campus.campusName}".`);
+            return;
+          }
+        }
+
+        onCancel();
+        // trigger parent refresh (will be handled by parent after onCancel)
+        window.location.reload();
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    // Original single‑campus flow
     if (!form.school_name.trim() || !form.campus_name.trim()) {
       alert("Please fill in School name and Campus.");
       return;
@@ -313,15 +451,14 @@ const handleLookupCampuses = async () => {
 
     setSubmitting(true);
     let token: string | undefined = undefined;
-
-    // 🟢 UPDATED: Get Token Logic
-    // If autoCreate is checked (regardless of mode), try to get the token
     if (autoCreate) {
       try {
         token = await getGraphAccessToken();
       } catch (err: any) {
         console.error("Token error", err);
-        const cont = window.confirm(`Could not sign in to Microsoft: ${err.message}\n\nSave school anyway (without workbook)?`);
+        const cont = window.confirm(
+          `Could not sign in to Microsoft: ${err.message}\n\nSave school anyway (without workbook)?`
+        );
         if (!cont) {
           setSubmitting(false);
           return;
@@ -334,22 +471,27 @@ const handleLookupCampuses = async () => {
     } finally {
       setSubmitting(false);
     }
-};
+  };
 
-const getCampusStatus = (apiId: string, apiName: string) => {
-  const match = existingSchools.find(s => 
-    s.campus_id === apiId || 
-    (cleanName(s.campus_name) === cleanName(apiName) && s.official_code === form.official_code)
-  );
+  const getCampusStatus = (apiId: string, apiName: string) => {
+    const match = existingSchools.find(
+      (s) =>
+        s.campus_id === apiId ||
+        (cleanName(s.campus_name) === cleanName(apiName) &&
+          s.official_code === form.official_code)
+    );
 
-  if (!match) return "selectable"; // New campus
-  if (!match.campus_id) return "repairable"; // Name match but ID is missing
-  return "linked"; // ID match (already healthy)
-};
+    if (!match) return "selectable";
+    if (!match.campus_id) return "repairable";
+    return "linked";
+  };
 
-return (
+  return (
     <div className="modal-backdrop">
-      <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
+      <div
+        className="modal-panel"
+        style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}
+      >
         <div className="modal-header">
           <div className="modal-title">
             {mode === "create" ? "Add school / campus" : "Edit school / campus"}
@@ -359,13 +501,11 @@ return (
           </button>
         </div>
 
-        {/* 🟢 FIX 1: Changed <form> to <div> and removed onSubmit */}
         <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
-         
-          {/* Row 1: Official Code + Search */}
+          {/* Official Code + Search */}
           <div className="form-row">
             <label>Official Code (School ID) *</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: "flex", gap: "8px" }}>
               <input
                 className="input"
                 type="text"
@@ -377,16 +517,22 @@ return (
               <button
                 type="button"
                 className="tm-pure-icon"
-                style={{ color: '#0d9488', border: '1px solid #334155', borderRadius: '8px', background: 'rgba(30, 41, 59, 0.4)' }}
-                onClick={handleLookupCampuses}
-                disabled={isSearching}
-                title="Search Campuses"
+                style={{
+                  color: "#0d9488",
+                  border: "1px solid #334155",
+                  borderRadius: "8px",
+                  background: "rgba(30, 41, 59, 0.4)",
+                }}
+                onClick={handleLookupSchoolDetails}
+                disabled={isLookingUp}
+                title="Search School & Campuses"
               >
-                <Search size={18} className={isSearching ? "tm-spin" : ""} />
+                <Search size={18} className={isLookingUp ? "tm-spin" : ""} />
               </button>
             </div>
           </div>
-          {/* Row 2: School Name */}
+
+          {/* School Name (filled by API) */}
           <div className="form-row">
             <label>School name *</label>
             <input
@@ -397,103 +543,205 @@ return (
               placeholder="e.g. VSK Sunshine"
             />
           </div>
-          {/* Row: Campus Name (Smart Dropdown) */}
-<div className="form-row">
-  <label>Campus name *</label>
-  {hasSearched && apiCampuses.length > 0 ? (
-    <select
-      className="input"
-      value={form.campus_id}
-      style={{ border: '1px solid #0d9488', backgroundColor: 'rgba(13, 148, 136, 0.05)' }}
-      onChange={(e) => {
-        const selected = apiCampuses.find(c => c.id === e.target.value);
-        if (selected) {
-          setForm(prev => ({ 
-            ...prev, 
-            campus_id: selected.id, 
-            campus_name: selected.name,
-            // 🟢 Set school name if empty
-            school_name: prev.school_name || selected.schoolName || "" 
-          }));
-        }
-      }}
-    >
-      <option value="">-- Choose a Campus from GrapeSEED --</option>
-      {apiCampuses.map((c) => {
-  const status = getCampusStatus(c.id, c.name);
-  
-  // Logic: Disable ONLY if it's already linked with an ID
-  const isDisabled = status === "linked";
-  
-  let labelSuffix = "";
-  if (status === "linked") labelSuffix = " (✓ Already Linked)";
-  if (status === "repairable") labelSuffix = " (⚠️ Campus Missing ID)";
 
-  return (
-    <option 
-      key={c.id} 
-      value={c.id} 
-      disabled={isDisabled}
-      style={{ 
-        color: isDisabled ? '#64748b' : (status === 'repairable' ? '#2563eb' : 'inherit'),
-        fontWeight: status === 'repairable' ? 600 : 400
-      }}
-    >
-      {c.name}{labelSuffix}
-    </option>
-  );
-})}
-    </select>
-  ) : (
-    <div style={{ position: 'relative' }}>
-       <input
-        className="input"
-        type="text"
-        value={form.campus_name}
-        onChange={handleChange("campus_name")}
-        placeholder={hasSearched ? "No campuses found. Type manually..." : "Search code to see campuses..."}
-      />
-      {hasSearched && apiCampuses.length === 0 && (
-         <small style={{ color: '#64748b', fontSize: '11px', marginTop: '4px', display: 'block' }}>
-           No API matches found. You can still type manually if needed.
-         </small>
-      )}
-    </div>
-  )}
-</div>
-
+          {/* Campus(es) – multi‑select UI */}
           <div className="form-row">
-            <label>Admin name</label>
-            <input
-              className="input"
-              type="text"
-              value={form.admin_name}
-              onChange={handleChange("admin_name")}
-            />
+            <label>Campus(es) *</label>
+            {hasSearched && lookupResult && lookupResult.campuses.length > 0 ? (
+              <div
+                style={{
+                  maxHeight: "200px",
+                  overflowY: "auto",
+                  border: "1px solid #334155",
+                  borderRadius: "8px",
+                  padding: "8px",
+                  background: "rgba(15, 23, 42, 0.6)",
+                }}
+              >
+                {lookupResult.campuses.map((campus) => {
+                  const alreadyAdded = existingSchools.some(
+                    (s) => s.campus_id === campus.campusId
+                  );
+                  return (
+                    <div
+                      key={campus.campusId}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "10px",
+                        padding: "8px 0",
+                        borderBottom: "1px solid #1e293b",
+                        opacity: alreadyAdded ? 0.6 : 1,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        id={`campus-${campus.campusId}`}
+                        checked={
+                          alreadyAdded
+                            ? false
+                            : selectedCampusIds.has(campus.campusId)
+                        }
+                        onChange={() =>
+                          !alreadyAdded && toggleCampusSelection(campus.campusId)
+                        }
+                        disabled={alreadyAdded}
+                        style={{ width: "auto", margin: "4px 0 0 0" }}
+                      />
+                      <label
+                        htmlFor={`campus-${campus.campusId}`}
+                        style={{
+                          flex: 1,
+                          cursor: alreadyAdded ? "default" : "pointer",
+                          textDecoration: alreadyAdded ? "line-through" : "none",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            color: "#f8fafc",
+                            fontSize: "13px",
+                          }}
+                        >
+                          {campus.campusName}
+                          {alreadyAdded && (
+                            <span
+                              style={{
+                                color: "#f87171",
+                                marginLeft: "8px",
+                                fontSize: "11px",
+                                textDecoration: "none",
+                              }}
+                            >
+                              (Already Added)
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "#94a3b8",
+                            marginTop: "2px",
+                          }}
+                        >
+                          {campus.adminName && <span>👤 {campus.adminName}</span>}
+                          {campus.adminEmail && (
+                            <span> ✉️ {campus.adminEmail}</span>
+                          )}
+                          {campus.adminPhone && (
+                            <span> 📞 {campus.adminPhone}</span>
+                          )}
+                          {!campus.adminName &&
+                            !campus.adminEmail &&
+                            !campus.adminPhone && (
+                              <span
+                                style={{
+                                  color: "#64748b",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                No admin contact found
+                              </span>
+                            )}
+                        </div>
+                        {campus.address && (
+                          <div
+                            style={{
+                              fontSize: "10px",
+                              color: "#64748b",
+                              marginTop: "1px",
+                            }}
+                          >
+                            📍 {campus.address}
+                          </div>
+                        )}
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ position: "relative" }}>
+                <input
+                  className="input"
+                  type="text"
+                  value={form.campus_name}
+                  onChange={handleChange("campus_name")}
+                  placeholder={
+                    hasSearched
+                      ? "No campuses found. Type manually..."
+                      : "Search code to see campuses..."
+                  }
+                />
+                {hasSearched &&
+                  lookupResult &&
+                  lookupResult.campuses.length === 0 && (
+                    <small
+                      style={{
+                        color: "#64748b",
+                        fontSize: "11px",
+                        marginTop: "4px",
+                        display: "block",
+                      }}
+                    >
+                      No active campuses found. Type manually if needed.
+                    </small>
+                  )}
+              </div>
+            )}
           </div>
 
-          <div className="form-row">
-            <label>Admin email</label>
-            <input
-              className="input"
-              type="email"
-              value={form.admin_email}
-              onChange={handleChange("admin_email")}
-              placeholder="admin@example.com"
-            />
-          </div>
+          {/* Admin & Address fields – hidden when multiple campuses are shown */}
+          {lookupResult && lookupResult.campuses.length > 1 ? (
+            <div className="form-row" style={{ color: '#fcd34d', fontSize: '12px', padding: '8px', background: 'rgba(251,191,36,0.1)', borderRadius: '6px', border: '1px solid #fcd34d' }}>
+              ℹ️ Each selected campus will be created with its own admin details shown in the checklist above.
+              You can edit the details individually after creation.
+            </div>
+          ) : (
+            <>
+              <div className="form-row">
+                <label>Admin name</label>
+                <input
+                  className="input"
+                  type="text"
+                  value={form.admin_name}
+                  onChange={handleChange("admin_name")}
+                />
+              </div>
+              <div className="form-row">
+                <label>Admin email</label>
+                <input
+                  className="input"
+                  type="email"
+                  value={form.admin_email}
+                  onChange={handleChange("admin_email")}
+                  placeholder="admin@example.com"
+                />
+              </div>
+              <div className="form-row">
+                <label>Admin phone</label>
+                <input
+                  className="input"
+                  type="tel"
+                  value={form.admin_phone}
+                  onChange={handleChange("admin_phone")}
+                  placeholder="+84…"
+                />
+              </div>
+              <div className="form-row">
+                <label>Address</label>
+                <input
+                  className="input"
+                  type="text"
+                  value={form.address}
+                  onChange={handleChange("address")}
+                  placeholder="Street, ward…"
+                />
+              </div>
+            </>
+          )}
 
-          <div className="form-row">
-            <label>Admin phone</label>
-            <input
-              className="input"
-              type="tel"
-              value={form.admin_phone}
-              onChange={handleChange("admin_phone")}
-              placeholder="+84…"
-            />
-          </div>
-
+          {/* AM fields always visible */}
           <div className="form-row">
             <label>Account Manager name</label>
             <input
@@ -503,7 +751,6 @@ return (
               onChange={handleChange("am_name")}
             />
           </div>
-
           <div className="form-row">
             <label>Account Manager email</label>
             <input
@@ -514,41 +761,36 @@ return (
             />
           </div>
 
-          <div className="form-row">
-            <label>Address</label>
-            <input
-              className="input"
-              type="text"
-              value={form.address}
-              onChange={handleChange("address")}
-              placeholder="Street, ward…"
-            />
-          </div>
-
-                    {/* 🟢 NEW: Disabled Toggle */}
+          {/* Status, Exclusive, Visit Count, Caring, Notes, Workbook */}
           <div className="form-row">
             <label>Campus Status</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <input
                 type="checkbox"
                 id="chk-disabled"
                 checked={form.disabled}
-                onChange={(e) => setForm(prev => ({ ...prev, disabled: e.target.checked }))}
-                style={{ width: 'auto', margin: 0 }}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, disabled: e.target.checked }))
+                }
+                style={{ width: "auto", margin: 0 }}
               />
-              <label htmlFor="chk-disabled" style={{ margin: 0, cursor: 'pointer', fontWeight: 600 }}>
+              <label
+                htmlFor="chk-disabled"
+                style={{ margin: 0, cursor: "pointer", fontWeight: 600 }}
+              >
                 Disabled (Inactive)
               </label>
             </div>
           </div>
 
-          {/* 🟢 NEW: Exclusive Dropdown */}
           <div className="form-row">
             <label>Exclusive</label>
             <select
               className="select"
               value={form.exclusive}
-              onChange={(e) => setForm(prev => ({ ...prev, exclusive: e.target.value }))}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, exclusive: e.target.value }))
+              }
             >
               <option value="shared">Shared</option>
               <option value="exclusive">Exclusive</option>
@@ -556,7 +798,6 @@ return (
             </select>
           </div>
 
-          {/* 🟢 NEW: Visit Count */}
           <div className="form-row">
             <label>Visit Count</label>
             <input
@@ -570,17 +811,22 @@ return (
             />
           </div>
 
-      <div className="form-row">
+          <div className="form-row">
             <label>Caring Status</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <input
                 type="checkbox"
                 id="chk-caring"
                 checked={form.caring}
-                onChange={(e) => setForm(prev => ({ ...prev, caring: e.target.checked }))}
-                style={{ width: 'auto', margin: 0 }}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, caring: e.target.checked }))
+                }
+                style={{ width: "auto", margin: 0 }}
               />
-              <label htmlFor="chk-caring" style={{ margin: 0, cursor: 'pointer', fontWeight: 600 }}>
+              <label
+                htmlFor="chk-caring"
+                style={{ margin: 0, cursor: "pointer", fontWeight: 600 }}
+              >
                 Mark as Caring
               </label>
             </div>
@@ -599,23 +845,37 @@ return (
 
           <div className="form-row">
             <label>Admin Workbook URL</label>
-            
-            {/* Auto-Create Checkbox Logic */}
-            {(mode === 'create' || !initial?.admin_workbook_url) && (
-               <div style={{marginBottom: '8px', display:'flex', alignItems:'center', gap:'8px'}}>
-                 <input 
-                   type="checkbox" 
-                   id="chk-auto-school" 
-                   checked={autoCreate} 
-                   onChange={(e) => setAutoCreate(e.target.checked)} 
-                   style={{width:'auto', margin:0}} 
-                 />
-                 <label htmlFor="chk-auto-school" style={{margin:0, fontWeight:600, color:'#2563eb', cursor:'pointer'}}>
-                   {mode === 'create' ? '✨ Auto-create Admin Workbook?' : '✨ Create missing workbook?'}
-                 </label>
-               </div>
+            {(mode === "create" || !initial?.admin_workbook_url) && (
+              <div
+                style={{
+                  marginBottom: "8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  id="chk-auto-school"
+                  checked={autoCreate}
+                  onChange={(e) => setAutoCreate(e.target.checked)}
+                  style={{ width: "auto", margin: 0 }}
+                />
+                <label
+                  htmlFor="chk-auto-school"
+                  style={{
+                    margin: 0,
+                    fontWeight: 600,
+                    color: "#2563eb",
+                    cursor: "pointer",
+                  }}
+                >
+                  {mode === "create"
+                    ? "✨ Auto-create Admin Workbook?"
+                    : "✨ Create missing workbook?"}
+                </label>
+              </div>
             )}
-
             {!autoCreate && (
               <input
                 className="input"
@@ -627,32 +887,49 @@ return (
             )}
           </div>
 
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="btn"
-              onClick={onCancel}
-              disabled={submitting}
-            >
-              Cancel
-            </button>
+          {(() => {
+                        const allAlreadyExist = !!(
+              lookupResult &&
+              lookupResult.campuses.length > 0 &&
+              lookupResult.campuses.every((c) =>
+                existingSchools.some((s) => s.campus_id === c.campusId)
+              )
+            );
 
-            {/* 🟢 FIX 2 & 3: Changed type to "button" and added onClick handler */}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => handleSubmit()}
-              disabled={submitting}
-            >
-              {submitting
-                ? mode === "create"
-                  ? "Creating…"
-                  : "Saving…"
-                : mode === "create"
-                ? "Create"
-                : "Save changes"}
-            </button>
-          </div>
+            return (
+              <div className="modal-footer" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                {allAlreadyExist && (
+                  <div style={{ color: '#f87171', fontSize: '12px', marginBottom: '8px', width: '100%' }}>
+                    All found campuses are already in your list. No new campuses to add.
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '8px', alignSelf: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={onCancel}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleSubmit()}
+                    disabled={submitting || allAlreadyExist}
+                  >
+                    {submitting
+                      ? mode === "create"
+                        ? "Creating…"
+                        : "Saving…"
+                      : mode === "create"
+                      ? "Create"
+                      : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
