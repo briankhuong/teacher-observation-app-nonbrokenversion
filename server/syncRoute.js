@@ -1310,43 +1310,91 @@ router.post("/api/lookup-school-details", async (req, res) => {
       return res.json({ schoolName, campuses: [], logs });
     }
 
-    // 3. For each active campus, get admin contacts + phone
+           // 3. For each active campus, get admin contacts + phone (with enhanced fallback)
     const campusDetails = [];
     for (const campus of activeCampuses) {
       let adminName = null, adminEmail = null, adminPhone = null;
 
+      // ---- Step A: Campus contacts ----
       try {
         const contactsUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolCode}/campuses/${campus.id}/contacts?schoolId=${schoolCode}&id=${campus.id}`;
         const contResp = await fetch(contactsUrl, { headers: getHeaders(token) });
 
         if (contResp.ok) {
-                      const contData = await contResp.json();
-            const admins = contData.admins || [];
-            console.log(`[lookup-school-details] Campus ${campus.name} admins:`, JSON.stringify(admins));
-                      if (admins.length > 0) {
-              const first = admins[0];
-              adminName = first.name?.trim() || null;
-              adminEmail = first.email?.trim() || null;
+          const contData = await contResp.json();
+          const campusAdmins = contData.admins || [];
+          console.log(`[lookup] Campus ${campus.name} admins:`, JSON.stringify(campusAdmins));
 
-              // Get missing details via user endpoint
-              if (first.id && (!adminName || !adminEmail || !adminPhone)) {
+          if (campusAdmins.length > 0) {
+            const first = campusAdmins[0];
+            adminName = first.name?.trim() || null;
+            adminEmail = first.email?.trim() || null;
+            adminPhone = first.phone || null;
+
+            // Enrich missing details via user endpoint
+            if (first.id && (!adminName || !adminEmail || !adminPhone)) {
+              try {
+                const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${first.id}`;
+                const userResp = await fetch(userUrl, { headers: getHeaders(token) });
+                if (userResp.ok) {
+                  const userData = await userResp.json();
+                  const user = Array.isArray(userData) ? userData[0] : userData;
+                  if (!adminName && user?.name) adminName = user.name.trim();
+                  if (!adminEmail && user?.email) adminEmail = user.email.trim();
+                  if (!adminPhone && user?.phone) adminPhone = user.phone;
+                }
+              } catch (e) { /* ignore */ }
+            }
+          }
+        }
+      } catch (e) {
+        logs.push(`⚠️ Campus contacts error for ${campus.name}: ${e.message}`);
+      }
+
+      // ---- Step B: Fallback to school contacts if any field still missing ----
+      if (!adminName || !adminEmail || !adminPhone) {
+        console.log(`[lookup] Campus ${campus.name}: missing fields (name:${!!adminName} email:${!!adminEmail} phone:${!!adminPhone}), trying school contacts...`);
+        try {
+          const schoolContactsUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolCode}/contacts?id=${schoolCode}`;
+          const schResp = await fetch(schoolContactsUrl, { headers: getHeaders(token) });
+          if (schResp.ok) {
+            const schData = await schResp.json();
+            console.log(`[lookup] School contacts for fallback:`, JSON.stringify(schData));
+
+            // Try admins array first
+            const schAdmins = schData.admins || [];
+            let fallback = schAdmins.find(a => a.name || a.email);
+            if (!fallback) {
+              // Use any main contact
+              fallback = schData.mainBillingContact || schData.mainShippingContact || schData.mainSupportContact;
+            }
+
+            if (fallback) {
+              if (!adminName && fallback.name?.trim()) adminName = fallback.name.trim();
+              if (!adminEmail && fallback.email?.trim()) adminEmail = fallback.email.trim();
+              if (!adminPhone && fallback.phone) adminPhone = fallback.phone;
+
+              // If phone still missing and we have an id, try user endpoint
+              if (!adminPhone && fallback.id) {
                 try {
-                  const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${first.id}`;
+                  const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${fallback.id}`;
                   const userResp = await fetch(userUrl, { headers: getHeaders(token) });
                   if (userResp.ok) {
                     const userData = await userResp.json();
                     const user = Array.isArray(userData) ? userData[0] : userData;
-                    if (!adminName && user?.name) adminName = user.name.trim();
-                    if (!adminEmail && user?.email) adminEmail = user.email.trim();
-                    if (!adminPhone && user?.phone) adminPhone = user.phone;
+                    if (user?.phone) adminPhone = user.phone;
                   }
                 } catch (e) { /* ignore */ }
               }
             }
+          }
+        } catch (e) {
+          logs.push(`⚠️ School contacts fallback error: ${e.message}`);
         }
-      } catch (e) {
-        logs.push(`⚠️ Contacts error for campus ${campus.name}: ${e.message}`);
       }
+
+      // Final phone fallback to campus phone
+      if (!adminPhone) adminPhone = campus.phone || null;
 
       campusDetails.push({
         campusId: campus.id,
@@ -1355,7 +1403,7 @@ router.post("/api/lookup-school-details", async (req, res) => {
         campusPhone: campus.phone || null,
         adminName,
         adminEmail,
-        adminPhone: adminPhone || campus.phone || null,
+        adminPhone,
       });
     }
 
