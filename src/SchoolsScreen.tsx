@@ -376,7 +376,37 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    // Determine the list of campuses to create
+    // If editing, use the original parent‑handled flow (no change)
+    if (mode === "edit") {
+      if (!form.school_name.trim() || !form.campus_name.trim()) {
+        alert("Please fill in School name and Campus.");
+        return;
+      }
+      setSubmitting(true);
+      let token: string | undefined = undefined;
+      if (autoCreate) {
+        try {
+          token = await getGraphAccessToken();
+        } catch (err: any) {
+          console.error("Token error", err);
+          const cont = window.confirm(
+            `Could not sign in to Microsoft: ${err.message}\n\nSave school anyway (without workbook)?`
+          );
+          if (!cont) {
+            setSubmitting(false);
+            return;
+          }
+        }
+      }
+      try {
+        await onSubmit(form, token);
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    // ---------- Creation mode (multi or single) ----------
     let campusesToCreate: Array<{
       campusId: string;
       campusName: string;
@@ -395,12 +425,10 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
         return;
       }
     } else {
-      // Single‑campus (manual / auto‑selected) path
       if (!form.school_name.trim() || !form.campus_name.trim()) {
         alert("Please fill in School name and Campus.");
         return;
       }
-      // Build a minimal campus object from the form
       campusesToCreate = [
         {
           campusId: form.campus_id || "",
@@ -431,6 +459,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
     }
 
     try {
+      const insertedRows: SchoolRow[] = [];
       for (const campus of campusesToCreate) {
         const payload = {
           trainer_id: user!.id,
@@ -454,7 +483,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           notes: form.notes.trim() || null,
         };
 
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from("schools")
           .insert(payload)
           .select()
@@ -465,6 +494,38 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           setSubmitting(false);
           return;
         }
+        if (data) insertedRows.push(data as SchoolRow);
+      }
+
+      // Auto‑create workbooks if requested
+      if (autoCreate && token && insertedRows.length > 0) {
+        const provisionPromises = insertedRows.map(async (row) => {
+          try {
+            const resp = await fetch(`${MERGE_SERVER_BASE}/api/provision-school`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                schoolName: row.school_name,
+                trainerId: user!.id,
+                schoolId: row.id,
+              }),
+            });
+            const result = await resp.json();
+            if (!result.ok) throw new Error(result.error || "Provisioning failed");
+            // Update the workbook URL in DB
+            await supabase
+              .from("schools")
+              .update({ admin_workbook_url: result.workbookUrl })
+              .eq("id", row.id);
+          } catch (err: any) {
+            console.warn(`Workbook creation failed for ${row.school_name}:`, err.message);
+            // Continue with other campuses even if one fails
+          }
+        });
+        await Promise.all(provisionPromises);
       }
 
       onCancel();
@@ -473,8 +534,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       setSubmitting(false);
     }
   };
-
-
   const getCampusStatus = (apiId: string, apiName: string) => {
     const match = existingSchools.find(
       (s) =>
