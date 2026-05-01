@@ -100,6 +100,7 @@ interface SchoolFormModalProps {
   initial?: SchoolFormState;
   existingSchools: SchoolRow[];
   onCancel: () => void;
+  onRefresh?: () => void;
   // 🟢 UPDATED: Accepts optional token
   onSubmit: (values: SchoolFormState, autoCreateToken?: string) => Promise<void>;
 }
@@ -234,6 +235,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   initial,
   existingSchools,
   onCancel,
+  onRefresh,
   onSubmit,
 }) => {
   const { user } = useAuth(); // needed for handleSubmit
@@ -374,79 +376,41 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    // Multi‑campus creation path
+    // Determine the list of campuses to create
+    let campusesToCreate: Array<{
+      campusId: string;
+      campusName: string;
+      address: string | null;
+      adminName: string | null;
+      adminEmail: string | null;
+      adminPhone: string | null;
+    }> | null = null;
+
     if (lookupResult && lookupResult.campuses.length > 0) {
-      const selected = lookupResult.campuses.filter((c) =>
+      campusesToCreate = lookupResult.campuses.filter((c) =>
         selectedCampusIds.has(c.campusId)
       );
-      if (selected.length === 0) {
+      if (campusesToCreate.length === 0) {
         alert("Please select at least one campus to add.");
         return;
       }
-
-      setSubmitting(true);
-      let token: string | undefined = undefined;
-      if (autoCreate) {
-        try {
-          token = await getGraphAccessToken();
-        } catch (err: any) {
-          console.error("Token error", err);
-          const cont = window.confirm(
-            `Could not sign in to Microsoft: ${err.message}\n\nSave schools anyway?`
-          );
-          if (!cont) {
-            setSubmitting(false);
-            return;
-          }
-        }
+    } else {
+      // Single‑campus (manual / auto‑selected) path
+      if (!form.school_name.trim() || !form.campus_name.trim()) {
+        alert("Please fill in School name and Campus.");
+        return;
       }
-
-      try {
-        for (const campus of selected) {
-          const payload = {
-            trainer_id: user!.id,
-            school_name: lookupResult.schoolName,
-            campus_name: campus.campusName,
-            official_code: form.official_code.trim(),
-            campus_id: campus.campusId,
-            admin_name: campus.adminName,
-            admin_email: campus.adminEmail,
-            admin_phone: campus.adminPhone,
-            am_name: null,
-            am_email: null,
-            address: campus.address,
-            caring: false,
-            disabled: false,
-            exclusive: "exclusive",
-            admin_workbook_url: form.admin_workbook_url.trim() || null,
-            notes: form.notes.trim() || null,
-          };
-
-          const { data, error } = await supabase
-            .from("schools")
-            .insert(payload)
-            .select()
-            .single();
-          if (error) {
-            console.error("Insert error:", error);
-            alert(`Failed to add campus "${campus.campusName}".`);
-            return;
-          }
-        }
-
-        onCancel();
-        // trigger parent refresh (will be handled by parent after onCancel)
-        window.location.reload();
-      } finally {
-        setSubmitting(false);
-      }
-      return;
-    }
-
-    // Original single‑campus flow
-    if (!form.school_name.trim() || !form.campus_name.trim()) {
-      alert("Please fill in School name and Campus.");
-      return;
+      // Build a minimal campus object from the form
+      campusesToCreate = [
+        {
+          campusId: form.campus_id || "",
+          campusName: form.campus_name,
+          address: form.address,
+          adminName: form.admin_name,
+          adminEmail: form.admin_email,
+          adminPhone: form.admin_phone,
+        },
+      ];
     }
 
     setSubmitting(true);
@@ -457,7 +421,7 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       } catch (err: any) {
         console.error("Token error", err);
         const cont = window.confirm(
-          `Could not sign in to Microsoft: ${err.message}\n\nSave school anyway (without workbook)?`
+          `Could not sign in to Microsoft: ${err.message}\n\nSave schools anyway?`
         );
         if (!cont) {
           setSubmitting(false);
@@ -467,11 +431,49 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
     }
 
     try {
-      await onSubmit(form, token);
+      for (const campus of campusesToCreate) {
+        const payload = {
+          trainer_id: user!.id,
+          school_name: lookupResult
+            ? lookupResult.schoolName
+            : form.school_name.trim(),
+          campus_name: campus.campusName,
+          official_code: form.official_code.trim(),
+          campus_id: campus.campusId || null,
+          admin_name: campus.adminName || null,
+          admin_email: campus.adminEmail || null,
+          admin_phone: campus.adminPhone || null,
+          am_name: form.am_name.trim() || null,
+          am_email: form.am_email.trim() || null,
+          address: campus.address || null,
+          caring: form.caring,
+          disabled: form.disabled,
+          exclusive: form.exclusive || "exclusive",
+          visit_count: form.visit_count ? Number(form.visit_count) : null,
+          admin_workbook_url: form.admin_workbook_url.trim() || null,
+          notes: form.notes.trim() || null,
+        };
+
+        const { error } = await supabase
+          .from("schools")
+          .insert(payload)
+          .select()
+          .single();
+        if (error) {
+          console.error("Insert error:", error);
+          alert(`Failed to add campus "${campus.campusName}".`);
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      onCancel();
+      if (onRefresh) onRefresh();
     } finally {
       setSubmitting(false);
     }
   };
+
 
   const getCampusStatus = (apiId: string, apiName: string) => {
     const match = existingSchools.find(
@@ -2158,6 +2160,7 @@ const runPulseAudit = async () => {
         initial={formInitial}
         existingSchools={rows}
         onCancel={() => setShowForm(false)}
+        onRefresh={() => setRefreshKey(prev => prev + 1)}
         onSubmit={submitForm}
       />
       
