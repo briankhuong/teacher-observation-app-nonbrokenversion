@@ -621,6 +621,17 @@ const [customEntries, setCustomEntries] = useState<any>(() => {
 });
 const [customTotalTraining, setCustomTotalTraining] = useState<string>('');
 
+// --- Monthly snapshot states ---
+const today = new Date();
+const [displayMonth, setDisplayMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+const [snapshot, setSnapshot] = useState<{ system_stats: any; custom_entries: any } | null>(null);
+const [savingSnapshot, setSavingSnapshot] = useState(false);
+
+// Helper: determine if displayMonth is current month
+const isCurrentMonth = React.useMemo(() => {
+  const now = new Date();
+  return displayMonth.getFullYear() === now.getFullYear() && displayMonth.getMonth() === now.getMonth();
+}, [displayMonth]);
 
 const [isEditingCustom, setIsEditingCustom] = useState(false);
   const [teachersAll, setTeachersAll] = useState<any[]>([]);
@@ -935,6 +946,67 @@ const runSyncPulse = async () => {
   }
 };
 
+  // Save current snapshot to Supabase + localStorage
+  const saveSnapshot = async () => {
+    if (!user?.id) return;
+    setSavingSnapshot(true);
+    try {
+      const y = displayMonth.getFullYear();
+      const m = displayMonth.getMonth() + 1;
+
+      const payload = {
+        trainer_id: user.id,
+        year: y,
+        month: m,
+        system_stats: stats,
+        custom_entries: {
+          ...customEntries,
+          customTotalTraining, // store the override as well
+        },
+        updated_at: new Date(),
+      };
+
+      // Save to Supabase (upsert)
+      const { error } = await supabase
+        .from("monthly_stats")
+        .upsert(payload, { onConflict: "trainer_id, year, month" });
+
+      if (error) {
+        console.error("Failed to save snapshot", error);
+        alert("Failed to save snapshot. Check console.");
+      } else {
+        // Update local cache
+        localStorage.setItem(`monthlySnapshot-${y}-${m}`, JSON.stringify({ system_stats: stats, custom_entries: payload.custom_entries }));
+        // Immediately update displayed snapshot (for immediate feedback if on current month)
+        setSnapshot({ system_stats: stats, custom_entries: payload.custom_entries });
+      }
+    } catch (err: any) {
+      alert("Error saving snapshot: " + err.message);
+    } finally {
+      setSavingSnapshot(false);
+    }
+  };
+
+  const fetchLatest = async () => {
+    // Re‑compute live stats by forcing a reload of schools and teachers from DB
+    if (!user?.id) return;
+    try {
+      const { data: sData } = await supabase
+        .from("schools")
+        .select("school_name, campus_name, disabled, exclusive, visit_count")
+        .eq("trainer_id", user.id);
+      if (sData) setSchoolsAll(sData);
+
+      const { data: tData } = await supabase
+        .from("teachers")
+        .select("name, school_name, campus, tags, needs_review, latest_performance, grapeseed_id")
+        .eq("trainer_id", user.id);
+      if (tData) setTeachersAll(tData);
+    } catch (err) {
+      console.error("Fetch latest failed", err);
+      alert("Failed to fetch latest stats.");
+    }
+  };
 
 const handleCheckPulseSilent = useCallback(async () => {
   const storedPulse = localStorage.getItem("lastPulseTime");
@@ -1046,10 +1118,67 @@ React.useEffect(() => {
   loadResources();
 }, [user?.id]);
 
-// Persist custom entries to localStorage
+  // When a snapshot is loaded, populate custom entries from it
+  useEffect(() => {
+    if (snapshot && snapshot.custom_entries) {
+      const ce = snapshot.custom_entries;
+      setCustomEntries((prev: any) => ({
+        ...prev,
+        ...ce,
+        trainingDelivered: {
+          ...prev.trainingDelivered,
+          ...(ce.trainingDelivered || {}),
+        },
+      }));
+      if (ce.customTotalTraining !== undefined) {
+        setCustomTotalTraining(ce.customTotalTraining);
+      }
+    }
+  }, [snapshot]);
+
+  // Persist custom entries to localStorage (only for current month)
+  useEffect(() => {
+    if (isCurrentMonth) {
+      localStorage.setItem("dashboardCustomEntries", JSON.stringify(customEntries));
+    }
+  }, [customEntries, isCurrentMonth]);
 useEffect(() => {
-  localStorage.setItem("dashboardCustomEntries", JSON.stringify(customEntries));
-}, [customEntries]);
+  if (!user?.id) return;
+
+  const loadSnapshot = async () => {
+    const y = displayMonth.getFullYear();
+    const m = displayMonth.getMonth() + 1;
+
+    // 1. Try Supabase
+    const { data, error } = await supabase
+      .from("monthly_stats")
+      .select("system_stats, custom_entries")
+      .eq("trainer_id", user.id)
+      .eq("year", y)
+      .eq("month", m)
+      .maybeSingle();
+
+    if (!error && data) {
+      setSnapshot(data);
+      // Update offline cache
+      localStorage.setItem(`monthlySnapshot-${y}-${m}`, JSON.stringify(data));
+    } else {
+      // 2. Fallback to localStorage
+      const cached = localStorage.getItem(`monthlySnapshot-${y}-${m}`);
+      if (cached) {
+        try {
+          setSnapshot(JSON.parse(cached));
+        } catch {
+          setSnapshot(null);
+        }
+      } else {
+        setSnapshot(null);
+      }
+    }
+  };
+
+  loadSnapshot();
+}, [user?.id, displayMonth, isCurrentMonth]);
 
 const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
@@ -3659,16 +3788,75 @@ useEffect(() => {
             color: 'var(--text-main, #f8fafc)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div style={{ fontWeight: 700, fontSize: '14px' }}>
-                📊 {stats.month} {stats.year}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '2px 6px', fontSize: '14px', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  onClick={() => {
+                    const prev = new Date(displayMonth);
+                    prev.setMonth(prev.getMonth() - 1);
+                    // Allow going to past months only (no future)
+                    setDisplayMonth(prev);
+                    setSnapshot(null); // will trigger reload
+                  }}
+                  title="Previous month"
+                >
+                  ◀
+                </button>
+                <div style={{ fontWeight: 700, fontSize: '14px', textAlign: 'center' }}>
+                  📊 {displayMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '2px 6px', fontSize: '14px', color: isCurrentMonth ? 'var(--text-muted)' : 'var(--text-main)', border: 'none', background: 'transparent', cursor: isCurrentMonth ? 'default' : 'pointer' }}
+                  onClick={() => {
+                    if (isCurrentMonth) return;
+                    const next = new Date(displayMonth);
+                    next.setMonth(next.getMonth() + 1);
+                    if (next.getTime() <= today.getTime()) {
+                      setDisplayMonth(next);
+                      setSnapshot(null);
+                    }
+                  }}
+                  disabled={isCurrentMonth}
+                  title={isCurrentMonth ? "You are on the current month" : "Next month"}
+                >
+                  ▶
+                </button>
               </div>
-              <div style={{ display: 'flex', gap: '4px' }}>
+                         <div style={{ display: 'flex', gap: '4px' }}>
+                {isCurrentMonth && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ padding: '2px 6px', fontSize: '12px', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                      onClick={fetchLatest}
+                      title="Fetch latest system stats (does not overwrite snapshot)"
+                    >
+                      🔄
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ padding: '2px 8px', fontSize: '12px', color: savingSnapshot ? '#94a3b8' : '#22c55e', border: '1px solid #22c55e', borderRadius: '4px', background: 'transparent', cursor: savingSnapshot ? 'default' : 'pointer' }}
+                      onClick={saveSnapshot}
+                      disabled={savingSnapshot}
+                      title="Save snapshot of current month"
+                    >
+                      {savingSnapshot ? 'Saving…' : '💾 Save'}
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   className="btn btn-ghost"
                   style={{ padding: '2px 6px', fontSize: '18px', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }}
                   onClick={() => setIsEditingCustom(!isEditingCustom)}
                   title="Edit custom entries"
+                  disabled={!isCurrentMonth}
                 >
                   ✏️
                 </button>
@@ -3691,18 +3879,19 @@ useEffect(() => {
     `  ${stats.developing.count} (${stats.developing.pct}%) Developing`,
   ].join('\n');
 
+  const sourceStats = (!isCurrentMonth && snapshot && snapshot.system_stats) ? snapshot.system_stats : stats;
   const text = [
-    `Year: ${stats.year}`,
-    `Month: ${stats.month}`,
-    `Active Schools: ${stats.exclusiveSchools}`,
-    `  Shared: ${stats.sharedSchools}`,
-    `Active Teachers: ${stats.activeTeachers}`,
-    `  Mutual: ${stats.mutualTeachers}`,
-    `Visit per Year: ${stats.totalVisitCount || '—'}`,
+    `Year: ${sourceStats.year}`,
+    `Month: ${sourceStats.month}`,
+    `Active Schools: ${sourceStats.exclusiveSchools}`,
+    `  Shared: ${sourceStats.sharedSchools}`,
+    `Active Teachers: ${sourceStats.activeTeachers}`,
+    `  Mutual: ${sourceStats.mutualTeachers}`,
+    `Visit per Year: ${sourceStats.totalVisitCount || '—'}`,
     `Training Delivered: ${trainingNames}`,
     `Total Training: ${totalTraining}`,
-    `Visits Done: ${stats.visitedSchools}`,
-    `Teachers Visited: ${stats.visitedTeachers}`,
+    `Visits Done: ${sourceStats.visitedSchools}`,
+    `Teachers Visited: ${sourceStats.visitedTeachers}`,
     `IR: ${(customEntries as any).ir?.value || '—'}`,
     `Teacher Performance:\n${perf}`,
     `Other Project: ${(customEntries as any).otherProjects?.value || '—'}`,
@@ -3719,8 +3908,15 @@ useEffect(() => {
                 >
                   📋
                 </button>
-              </div>
+                            </div>
             </div>
+
+            {/* No snapshot message for past months */}
+            {!isCurrentMonth && !snapshot && (
+              <div style={{ fontSize: '11px', color: '#94a3b8', textAlign: 'center', padding: '8px 0' }}>
+                No snapshot saved for this month.
+              </div>
+            )}
 
             {/* Edit panel */}
                         {isEditingCustom && (
@@ -3732,14 +3928,16 @@ useEffect(() => {
                   <div style={{ fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>Training & IR (paste all)</div>
                   <textarea
                     id="paste-custom-stats"
-                    style={{ width: '100%', fontSize: '11px', padding: '4px', border: '1px solid #334155', borderRadius: '4px', background: '#0f172a', color: '#f8fafc', marginBottom: '6px' }}
+                    disabled={!isCurrentMonth}
+                    style={{ width: '100%', fontSize: '11px', padding: '4px', border: '1px solid #334155', borderRadius: '4px', background: '#0f172a', color: isCurrentMonth ? '#f8fafc' : '#64748b', marginBottom: '6px', opacity: isCurrentMonth ? 1 : 0.6 }}
                     placeholder={`Paste here, e.g.:\nTraining Delivered:\nGSE: 1\nCom-LSE: 2\nTotal Training: 15\nIR: 15`}
                     rows={6}
                   />
                   <button
                     type="button"
                     className="btn"
-                    style={{ fontSize: '11px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px' }}
+                    disabled={!isCurrentMonth}
+                    style={{ fontSize: '11px', background: isCurrentMonth ? '#2563eb' : '#475569', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: isCurrentMonth ? 'pointer' : 'default' }}
                     onClick={() => {
                       const raw = (document.getElementById('paste-custom-stats') as HTMLTextAreaElement).value;
                       const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
@@ -3827,17 +4025,19 @@ useEffect(() => {
             {/* Merged stat blocks */}
             {(() => {
               // Define system blocks with position index
+                           // Use snapshot data if viewing a past month, otherwise live stats
+              const sourceStats = (snapshot && snapshot.system_stats) ? snapshot.system_stats : stats;
               const blocks: { key: string; label: string; value: React.ReactNode; position: number }[] = [
-                { key: 'activeSchools', label: '🏫 Active Schools', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.exclusiveSchools}</span><div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Shared: {stats.sharedSchools}</div></>, position: 0 },
-                { key: 'activeTeachers', label: '👩‍🏫 Active Teachers', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.activeTeachers}</span><div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Mutual: {stats.mutualTeachers}</div></>, position: 0.5 },
-                { key: 'visitsPerYear', label: '📅 Visits per Year', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.totalVisitCount}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>planned visits (active schools)</div></>, position: 1 },
+                { key: 'activeSchools', label: '🏫 Active Schools', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{sourceStats.exclusiveSchools}</span><div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Shared: {sourceStats.sharedSchools}</div></>, position: 0 },
+                { key: 'activeTeachers', label: '👩‍🏫 Active Teachers', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{sourceStats.activeTeachers}</span><div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Mutual: {sourceStats.mutualTeachers}</div></>, position: 0.5 },
+                { key: 'visitsPerYear', label: '📅 Visits per Year', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{sourceStats.totalVisitCount}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>planned visits (active schools)</div></>, position: 1 },
                 { key: 'trainingDelivered', label: 'Training Delivered', value: null, position: 1.5 }, // custom placeholder, will be replaced below
                 { key: 'totalTraining', label: 'Total training', value: null, position: 1.7 },
-                { key: 'visitsDone', label: '✅ Visits Done', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedSchools}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>unique schools this month</div></>, position: 2 },
-                { key: 'teachersVisited', label: '👤 Teachers Visited', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.visitedTeachers}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>unique teachers this month</div></>, position: 2.5 },
+                { key: 'visitsDone', label: '✅ Visits Done', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{sourceStats.visitedSchools}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>unique schools this month</div></>, position: 2 },
+                { key: 'teachersVisited', label: '👤 Teachers Visited', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{sourceStats.visitedTeachers}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>unique teachers this month</div></>, position: 2.5 },
                 { key: 'ir', label: 'IR', value: null, position: 2.7 },
-                { key: 'videosAnalyzed', label: '🎥 Videos Analyzed', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{stats.lvaCount}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>LVA this month</div></>, position: 3 },
-                { key: 'performance', label: '📈 Performance', value: <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}><div><span style={{ color: '#22c55e', fontWeight: 700 }}>{stats.thriving.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.thriving.pct}%) Thriving</span></div><div><span style={{ color: '#3b82f6', fontWeight: 700 }}>{stats.functioning.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.functioning.pct}%) Functioning</span></div><div><span style={{ color: '#ef4444', fontWeight: 700 }}>{stats.developing.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({stats.developing.pct}%) Developing</span></div></div>, position: 4 },
+                { key: 'videosAnalyzed', label: '🎥 Videos Analyzed', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{sourceStats.lvaCount}</span><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>LVA this month</div></>, position: 3 },
+                { key: 'performance', label: '📈 Performance', value: <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}><div><span style={{ color: '#22c55e', fontWeight: 700 }}>{sourceStats.thriving.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({sourceStats.thriving.pct}%) Thriving</span></div><div><span style={{ color: '#3b82f6', fontWeight: 700 }}>{sourceStats.functioning.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({sourceStats.functioning.pct}%) Functioning</span></div><div><span style={{ color: '#ef4444', fontWeight: 700 }}>{sourceStats.developing.count}</span> <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>({sourceStats.developing.pct}%) Developing</span></div></div>, position: 4 },
                 { key: 'otherProjects', label: 'Other Projects', value: null, position: 4.5 },
                 { key: 'specialNotes', label: 'Special Notes', value: null, position: 5 },
               ];
