@@ -1091,9 +1091,8 @@ const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
   rows.forEach((r) => {
     if (r.disabled) {
       inactive.push(r);
-      return; // Inactive can't be in other categories
+      return;
     }
-    // Active: only shared or exclusive, not temporary
     if (r.exclusive === 'shared' || r.exclusive === 'exclusive') {
       active.push(r);
     }
@@ -1112,6 +1111,32 @@ const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
   else if (schoolFilter === 'no_teachers') filtered = noTeachers;
   else if (schoolFilter === 'temporary') filtered = temporary;
   else if (schoolFilter === 'needs_review') filtered = rows.filter(r => r.needs_review); // NEW
+
+  // 🟢 Display original data for rows under review, and hide new unreviewed schools
+  if (schoolFilter !== 'needs_review') {
+    filtered = filtered
+      .filter(r => {
+        // Hide completely new schools (no previous_data) that are still under review
+        if (r.needs_review && !r.previous_data) return false;
+        return true;
+      })
+      .map(r => {
+        if (!r.needs_review || !r.previous_data) return r;
+        let prev;
+        try {
+          prev = typeof r.previous_data === 'string' ? JSON.parse(r.previous_data) : r.previous_data;
+        } catch { prev = null; }
+        if (!prev || typeof prev !== 'object') return r;
+        return {
+          ...r,
+          admin_name: prev.admin_name ?? r.admin_name,
+          admin_email: prev.admin_email ?? r.admin_email,
+          admin_phone: prev.admin_phone ?? r.admin_phone,
+          address: prev.address ?? r.address,
+          disabled: prev.disabled ?? r.disabled,
+        };
+      });
+  }
 
   // Active breakdown now only shared/exclusive (temporary is separate)
   const sharedSchools = new Set<string>();
@@ -1154,21 +1179,33 @@ const uniqueSchoolCount = useMemo(() => {
 
 // Unique school counts for Active and Inactive tabs (independent of filter)
 const activeUniqueCount = useMemo(() => {
-  const names = rows.filter(r => !r.disabled && (r.exclusive === 'shared' || r.exclusive === 'exclusive')).map(r => r.school_name);
+  const names = rows
+    .filter(r => !r.disabled && (r.exclusive === 'shared' || r.exclusive === 'exclusive'))
+    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+    .map(r => r.school_name);
   return new Set(names).size;
 }, [rows]);
 const inactiveUniqueCount = useMemo(() => {
-  const names = rows.filter(r => r.disabled).map(r => r.school_name);
+  const names = rows
+    .filter(r => r.disabled)
+    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+    .map(r => r.school_name);
   return new Set(names).size;
 }, [rows]);
 // Unique school counts for No Teachers and Temporary tabs
 const noTeachersUniqueCount = useMemo(() => {
-  const names = rows.filter(r => r.has_empty_class && !r.disabled).map(r => r.school_name);
+  const names = rows
+    .filter(r => r.has_empty_class && !r.disabled)
+    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+    .map(r => r.school_name);
   return new Set(names).size;
 }, [rows]);
 
 const temporaryUniqueCount = useMemo(() => {
-  const names = rows.filter(r => r.exclusive === 'temporary' && !r.disabled).map(r => r.school_name);
+  const names = rows
+    .filter(r => r.exclusive === 'temporary' && !r.disabled)
+    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+    .map(r => r.school_name);
   return new Set(names).size;
 }, [rows]);
 
@@ -1250,34 +1287,22 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
 
     // No previous data → this was a newly added school
     if (!prevData || typeof prevData !== 'object' || Object.keys(prevData).length === 0) {
-      const action = window.confirm(
-        `"${row.school_name} - ${row.campus_name}" was added by the sync.\n\nClick OK to DELETE it, or Cancel to just clear the review flag.`
+      const ok = window.confirm(
+        `Delete newly added school "${row.school_name} - ${row.campus_name}"?`
       );
-      if (action) {
-        // Delete the school
-        const { error } = await supabase
-          .from("schools")
-          .delete()
-          .eq("id", row.id)
-          .eq("trainer_id", user?.id);
-        if (error) {
-          alert("Failed to delete school.");
-          return;
-        }
-        setRows(prev => prev.filter(r => r.id !== row.id));
-      } else {
-        // Just clear the flag
-        const { error } = await supabase
-          .from("schools")
-          .update({ needs_review: false, updated_at: new Date() })
-          .eq("id", row.id)
-          .eq("trainer_id", user?.id);
-        if (error) {
-          alert("Failed to clear review flag.");
-          return;
-        }
-        setRows(prev => prev.map(r => r.id === row.id ? { ...r, needs_review: false } : r));
+      if (!ok) return;
+
+      // Delete the school
+      const { error } = await supabase
+        .from("schools")
+        .delete()
+        .eq("id", row.id)
+        .eq("trainer_id", user?.id);
+      if (error) {
+        alert("Failed to delete school.");
+        return;
       }
+      setRows(prev => prev.filter(r => r.id !== row.id));
       return;
     }
 
@@ -1822,7 +1847,7 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
             className="table-actions"
             onClick={(e) => e.stopPropagation()}
           >
-          {info.row.original.needs_review && (
+                    {schoolFilter === 'needs_review' && info.row.original.needs_review && (
               <>
                 <button
                   type="button"
