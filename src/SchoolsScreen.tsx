@@ -54,6 +54,8 @@ export interface SchoolRow {
   disabled: boolean;
   exclusive: string | null;   // 'shared' | 'exclusive' | 'temporary'
   visit_count: number | null; // 🟢 NEW
+    needs_review: boolean; // 🟢 NEW
+        previous_data: any; // 🟢 NEW
 }
 
 type SchoolFormState = {
@@ -148,19 +150,37 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
             <label>Campus Name</label>
             <span>{row.campus_name}</span>
           </div>
+          {/* Helper to highlight if changed */}
+          {(() => {
+            const prev = row.previous_data || {};
+            const isChanged = (field: string) =>
+              prev[field] !== undefined && prev[field] !== row[field as keyof SchoolRow];
 
-          <div className="detail-row">
-            <label>Admin Name</label>
-            <span>{row.admin_name || "—"}</span>
-          </div>
-          <div className="detail-row">
-            <label>Admin Email</label>
-            <span>{row.admin_email || "—"}</span>
-          </div>
-          <div className="detail-row">
-            <label>Admin Phone</label>
-            <span>{row.admin_phone || "—"}</span>
-          </div>
+            const highlightStyle = (changed: boolean) =>
+              changed ? { backgroundColor: '#fef9c3', padding: '2px 6px', borderRadius: '4px', color: '#000' } : {};
+
+            return (
+              <>
+                <div className="detail-row">
+                  <label>Admin Name</label>
+                  <span style={highlightStyle(isChanged('admin_name'))}>{row.admin_name || "—"}</span>
+                </div>
+                <div className="detail-row">
+                  <label>Admin Email</label>
+                  <span style={highlightStyle(isChanged('admin_email'))}>{row.admin_email || "—"}</span>
+                </div>
+                <div className="detail-row">
+                  <label>Admin Phone</label>
+                  <span style={highlightStyle(isChanged('admin_phone'))}>{row.admin_phone || "—"}</span>
+                </div>
+                <div className="detail-row">
+                  <label>Address</label>
+                  <span style={highlightStyle(isChanged('address'))}>{row.address || "—"}</span>
+                </div>
+              </>
+            );
+          })()}
+
           <div className="detail-row">
             <label>Account Manager Name</label>
             <span>{row.am_name || "—"}</span>
@@ -168,11 +188,6 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           <div className="detail-row">
             <label>Account Manager Email</label>
             <span>{row.am_email || "—"}</span>
-          </div>
-
-          <div className="detail-row">
-            <label>Address</label>
-            <span>{row.address || "—"}</span>
           </div>
                     {/* --- NEW: Status & Exclusive --- */}
           <div className="detail-row">
@@ -1037,7 +1052,7 @@ export const SchoolsScreen: React.FC = () => {
 
   const [refreshKey, setRefreshKey] = useState(0); 
   // 🟢 NEW: Status Filter State
-const [schoolFilter, setSchoolFilter] = useState<'all' | 'active' | 'inactive' | 'no_teachers' | 'temporary'>('active');
+const [schoolFilter, setSchoolFilter] = useState<'all' | 'active' | 'inactive' | 'no_teachers' | 'temporary' | 'needs_review'>('active');
   const [sorting, setSorting] = useState<SortingState>([
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
@@ -1087,6 +1102,7 @@ const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
   else if (schoolFilter === 'inactive') filtered = inactive;
   else if (schoolFilter === 'no_teachers') filtered = noTeachers;
   else if (schoolFilter === 'temporary') filtered = temporary;
+  else if (schoolFilter === 'needs_review') filtered = rows.filter(r => r.needs_review); // NEW
 
   // Active breakdown now only shared/exclusive (temporary is separate)
   const sharedSchools = new Set<string>();
@@ -1147,7 +1163,9 @@ const temporaryUniqueCount = useMemo(() => {
   return new Set(names).size;
 }, [rows]);
 
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+const needsReviewCount = useMemo(() => rows.filter(r => r.needs_review).length, [rows]);
+
+const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
     try {
       const saved = localStorage.getItem("schoolsColumnVisibility");
       if (saved) return JSON.parse(saved);
@@ -1171,6 +1189,7 @@ const temporaryUniqueCount = useMemo(() => {
     };
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false); 
+  const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(new Set());
 
   // 🟢 NEW: Background Provisioning Logic
   const runBackgroundProvisioning = async (school: SchoolRow, token: string) => {
@@ -1213,13 +1232,149 @@ const temporaryUniqueCount = useMemo(() => {
     }
   };
 
+  const handleRejectSchool = async (row: SchoolRow) => {
+    if (!row.previous_data || Object.keys(row.previous_data).length === 0) {
+      const ok = window.confirm(`No previous data available for ${row.school_name} - ${row.campus_name}. Clear review flag anyway?`);
+      if (!ok) return;
+      const { error } = await supabase
+        .from("schools")
+        .update({ needs_review: false, updated_at: new Date() })
+        .eq("id", row.id)
+        .eq("trainer_id", user?.id);
+      if (error) {
+        alert("Failed to clear review flag.");
+        return;
+      }
+      setRows(prev => prev.map(r => r.id === row.id ? { ...r, needs_review: false } : r));
+      return;
+    }
+    // … rest of the existing reject logic (unchanged)
+    const p = row.previous_data;
+    const updates: any = { needs_review: false, previous_data: null, updated_at: new Date() };
+    if (p.admin_name !== undefined) updates.admin_name = p.admin_name;
+    if (p.admin_email !== undefined) updates.admin_email = p.admin_email;
+    if (p.admin_phone !== undefined) updates.admin_phone = p.admin_phone;
+    if (p.address !== undefined) updates.address = p.address;
+    if (p.disabled !== undefined) updates.disabled = p.disabled;
+
+    const { error } = await supabase
+      .from("schools")
+      .update(updates)
+      .eq("id", row.id)
+      .eq("trainer_id", user?.id);
+    if (error) {
+      alert("Failed to reject changes.");
+      return;
+    }
+    setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...updates, previous_data: null } : r));
+  };
+
+  const handleRejectAllSchools = async (selectedIds?: string[]) => {
+    const idsToReject = selectedIds && selectedIds.length > 0 ? selectedIds : rows.filter(r => r.needs_review && r.previous_data).map(r => r.id);
+    if (idsToReject.length === 0) {
+      alert("No schools have previous data to restore.");
+      return;
+    }
+    const ok = window.confirm(`Reject changes for ${idsToReject.length} schools?`);
+    if (!ok) return;
+    for (const id of idsToReject) {
+      const row = rows.find(r => r.id === id);
+      if (!row) continue;
+      await handleRejectSchool(row);
+    }
+    setSelectedReviewIds(new Set());
+  };
+
+  const handleAcknowledgeSchool = async (row: SchoolRow) => {
+    const { error } = await supabase
+      .from("schools")
+      .update({ needs_review: false })
+      .eq("id", row.id)
+      .eq("trainer_id", user?.id);
+    if (error) {
+      alert("Failed to acknowledge school.");
+      return;
+    }
+    setRows(prev => prev.map(r => r.id === row.id ? { ...r, needs_review: false } : r));
+  };
+
+  const handleAcknowledgeAllSchools = async (selectedIds?: string[]) => {
+    const idsToAck = selectedIds && selectedIds.length > 0 ? selectedIds : rows.filter(r => r.needs_review).map(r => r.id);
+    const count = idsToAck.length;
+    if (count === 0) return;
+    const ok = window.confirm(`Acknowledge ${count} schools?`);
+    if (!ok) return;
+    // Bulk update
+    for (const id of idsToAck) {
+      const { error } = await supabase
+        .from("schools")
+        .update({ needs_review: false })
+        .eq("id", id)
+        .eq("trainer_id", user?.id);
+      if (error) {
+        alert(`Failed to acknowledge school ${id}: ${error.message}`);
+        return;
+      }
+    }
+    setRows(prev => prev.map(r => idsToAck.includes(r.id) ? { ...r, needs_review: false } : r));
+    setSelectedReviewIds(new Set());
+    if (idsToAck.length === needsReviewCount) setSchoolFilter('active');
+  };
   // Define Columns
-  const columns = useMemo<ColumnDef<SchoolRow>[]>(
+const columns = useMemo<ColumnDef<SchoolRow>[]>(
     () => [
-{
-  accessorKey: "school_name",
-  header: "School & Campus",
-  cell: (info) => (
+      // 🟢 Checkbox column only in Needs Review tab
+      ...(schoolFilter === 'needs_review'
+        ? [
+            {
+              id: 'select',
+              header: () => (
+                <input
+                  type="checkbox"
+                  checked={
+                    selectedReviewIds.size > 0 &&
+                    selectedReviewIds.size === filteredRows.filter(r => r.needs_review).length
+                  }
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      const allIds = filteredRows.filter(r => r.needs_review).map(r => r.id);
+                      setSelectedReviewIds(new Set(allIds));
+                    } else {
+                      setSelectedReviewIds(new Set());
+                    }
+                  }}
+                  style={{ width: 'auto', margin: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ),
+              cell: ({ row }: { row: any }) => (
+                <input
+                  type="checkbox"
+                  checked={selectedReviewIds.has(row.original.id)}
+                  onChange={() => {
+                    setSelectedReviewIds((prev) => {
+                      const next = new Set(prev);
+                      const id = row.original.id;
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      return next;
+                    });
+                  }}
+                  style={{ width: 'auto', margin: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ),
+              size: 40,
+              minSize: 40,
+              enableSorting: false,
+            } as ColumnDef<SchoolRow>,
+          ]
+        : []),
+      // ---------- existing school_name column ----------
+      {
+        accessorKey: "school_name",
+        header: "School & Campus",
+        cell: (info) => (
     <>
       <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         {info.row.original.school_name}
@@ -1560,6 +1715,34 @@ const temporaryUniqueCount = useMemo(() => {
             className="table-actions"
             onClick={(e) => e.stopPropagation()}
           >
+          {info.row.original.needs_review && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ color: '#eab308', fontSize: '14px', padding: '0 4px', marginRight: '4px' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAcknowledgeSchool(info.row.original);
+                  }}
+                  title="Acknowledge"
+                >
+                  ✨
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ color: '#ef4444', fontSize: '14px', padding: '0 4px', marginRight: '4px' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRejectSchool(info.row.original);
+                  }}
+                  title="Reject changes (restore previous)"
+                >
+                  ↩️
+                </button>
+              </>
+            )}
             <button
               type="button"
               className="btn btn-ghost"
@@ -1571,7 +1754,7 @@ const temporaryUniqueCount = useMemo(() => {
         ),
       },
     ],
-        [setShowColumnMenu, provisioningIds, isBulkEditMode, handleInlineUpdate]
+        [setShowColumnMenu, provisioningIds, isBulkEditMode, handleInlineUpdate, schoolFilter, selectedReviewIds, filteredRows]
   );
 
 const table = useReactTable({
@@ -1592,12 +1775,8 @@ const table = useReactTable({
   });
 
   useEffect(() => {
-    try {
-      localStorage.setItem("schoolsColumnVisibility", JSON.stringify(columnVisibility));
-    } catch (e) {
-      console.error("Failed to save column visibility to local storage", e);
-    }
-  }, [columnVisibility]);
+    setSelectedReviewIds(new Set());
+  }, [schoolFilter]);
 
   if (!user) {
     return (
@@ -1646,7 +1825,9 @@ const table = useReactTable({
             updated_at,
             disabled,
             exclusive,
-            visit_count
+            visit_count,
+            needs_review,
+            previous_data
           `
           )
           .eq("trainer_id", trainerId)
@@ -1842,6 +2023,44 @@ const table = useReactTable({
         }
       : undefined;
 
+  const handleSchoolSync = async () => {
+    if (!user?.id) return;
+
+    try {
+      setLoading(true);
+
+      const tokenResp = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, {
+        method: "POST",
+      });
+      if (!tokenResp.ok) throw new Error("Failed to get token");
+      const { access_token } = await tokenResp.json();
+
+      const syncResp = await fetch(`${MERGE_SERVER_BASE}/api/sync-school-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: access_token, userId: user.id }),
+      });
+
+      if (syncResp.ok) {
+        const result = await syncResp.json();
+        if (result.logs && Array.isArray(result.logs)) {
+          console.groupCollapsed("📋 School Sync Logs");
+          result.logs.forEach((log: string) => console.log(log));
+          console.groupEnd();
+        }
+        setRefreshKey(prev => prev + 1);
+      } else {
+        const err = await syncResp.text();
+        alert(`School sync failed: ${err}`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(`School sync error: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
 const runPulseAudit = async () => {
   if (isPulsing) return;
 
@@ -1987,8 +2206,8 @@ const runPulseAudit = async () => {
           </div>
 
           {/* Right: Icon Group + Primary Action */}
-          <div className="tm-actions-group">
-                       {/* 🟢 NEW: Bulk Edit Toggle Button */}
+                    <div className="tm-actions-group">
+            {/* Bulk Edit Toggle */}
             <button
               type="button"
               className={`btn ${isBulkEditMode ? 'btn-primary' : 'btn-ghost'}`}
@@ -2006,25 +2225,16 @@ const runPulseAudit = async () => {
               {isBulkEditMode ? "Done Editing" : <><Pencil size={14} /> Bulk Edit</>}
             </button>
 
+            {/* Sync Schools with GrapeSEED */}
             <button
               type="button"
               className="tm-pure-icon"
-              style={{ 
-                marginRight: '8px', 
-                color: isPulsing ? '#2563eb' : '#64748b',
-                cursor: isPulsing ? 'default' : 'pointer'
-              }}
-              onClick={runPulseAudit}
-              disabled={isPulsing}
-              title="Run Pulse Audit (Sync Discovery)"
+              onClick={handleSchoolSync}
+              title="Sync Schools with GrapeSEED"
+              style={{ marginLeft: '8px' }}
             >
-              <RefreshCw 
-                size={18} 
-                strokeWidth={2} 
-                className={isPulsing ? "tm-spin" : ""} 
-              />
+              <RefreshCw size={18} strokeWidth={2} />
             </button>
-
             <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
 
             <button
@@ -2069,6 +2279,13 @@ const runPulseAudit = async () => {
         >
           Temporary <span className="count-badge-color">{temporaryUniqueCount}</span>
         </button>
+
+        <button
+          className={`filter-tab ${schoolFilter === 'needs_review' ? 'active-yellow' : ''}`}
+          onClick={() => setSchoolFilter('needs_review')}
+        >
+          Needs Review <span className="count-badge-color">{needsReviewCount}</span>
+        </button>
       </div>
       </div>
 
@@ -2095,6 +2312,30 @@ const runPulseAudit = async () => {
 
           {!loading && table.getRowModel().rows.length > 0 && (
             <>
+                            {/* Bulk Acknowledge / Reject for Needs Review tab */}
+                            {schoolFilter === 'needs_review' && needsReviewCount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ background: '#eab308', color: '#000', border: 'none', fontWeight: 600 }}
+                    onClick={() => handleAcknowledgeAllSchools(Array.from(selectedReviewIds))}
+                    disabled={selectedReviewIds.size === 0}
+                  >
+                    ✨ Acknowledge Selected ({selectedReviewIds.size})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 600 }}
+                    onClick={() => handleRejectAllSchools(Array.from(selectedReviewIds))}
+                    disabled={selectedReviewIds.size === 0}
+                  >
+                    ↩️ Reject Selected ({selectedReviewIds.size})
+                  </button>
+                </div>
+              )}
+
               <div
                 style={{
                   position: "absolute",

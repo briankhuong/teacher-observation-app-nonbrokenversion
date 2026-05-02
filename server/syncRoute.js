@@ -1555,4 +1555,302 @@ router.post("/api/sync-teaching-models", async (req, res) => {
     res.status(500).json({ success: false, error: err.message, logs });
   }
 });
+
+// -------------------------------------------------- */
+// School Status Sync (from /visitations/schoolstatuses)
+// -------------------------------------------------- */
+// -------------------------------------------------- */
+// School Status Sync (from /visitations/schoolstatuses) – OPTIMIZED
+// -------------------------------------------------- */
+router.post("/api/sync-school-status", async (req, res) => {
+  const { token, userId } = req.body;
+  const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
+
+  const logs = [];
+  const log = (m) => { console.log(m); logs.push(m); };
+
+  try {
+    // 1. Fetch all exclusive schools for this trainer (including disabled)
+    const { data: dbSchools, error: dbErr } = await supabase
+      .from("schools")
+      .select("*")
+      .eq("trainer_id", userId)
+      .eq("exclusive", "exclusive");
+
+    if (dbErr) throw new Error(`DB schools fetch: ${dbErr.message}`);
+    if (!dbSchools) return res.json({ success: true, logs: ["No exclusive schools found."] });
+
+    // Group by official_code
+    const dbByCode = new Map();
+    for (const s of dbSchools) {
+      if (!s.official_code) continue;
+      const code = s.official_code.toLowerCase();
+      if (!dbByCode.has(code)) dbByCode.set(code, []);
+      dbByCode.get(code).push(s);
+    }
+
+    // 2. Fetch API school statuses
+    const apiUrl = "https://services.grapeseed.com/admin/v1/visitations/schoolstatuses";
+    const apiResp = await fetch(apiUrl, { headers: getHeaders(token) });
+    if (!apiResp.ok) throw new Error(`schoolstatuses failed: ${apiResp.status}`);
+    const apiData = await apiResp.json();
+    const apiSchools = Array.isArray(apiData) ? apiData : [];
+
+    const apiIdMap = new Map();
+    for (const s of apiSchools) {
+      const id = (s.schoolId || "").toLowerCase();
+      if (id) apiIdMap.set(id, s);
+    }
+
+    const apiIds = new Set(apiIdMap.keys());
+    const dbCodes = new Set(dbByCode.keys());
+
+    // Helper to enrich admin details for a campus
+    const enrichCampusAdmin = async (code, campus) => {
+      let adminName = null, adminEmail = null, adminPhone = null;
+      try {
+        const contUrl = `https://services.grapeseed.com/admin/v1/schools/${code}/campuses/${campus.id}/contacts?schoolId=${code}&id=${campus.id}`;
+        const contResp = await fetch(contUrl, { headers: getHeaders(token) });
+        if (contResp.ok) {
+          const contData = await contResp.json();
+          const admins = contData.admins || [];
+          if (admins.length > 0) {
+            const first = admins[0];
+            adminName = first.name?.trim() || null;
+            adminEmail = first.email?.trim() || null;
+            adminPhone = first.phone || null;
+            // Enrich from user endpoint if needed
+            if (first.id && (!adminName || !adminEmail || !adminPhone)) {
+              const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${first.id}`;
+              const userResp = await fetch(userUrl, { headers: getHeaders(token) });
+              if (userResp.ok) {
+                const userData = await userResp.json();
+                const user = Array.isArray(userData) ? userData[0] : userData;
+                if (!adminName && user?.name) adminName = user.name.trim();
+                if (!adminEmail && user?.email) adminEmail = user.email.trim();
+                if (!adminPhone && user?.phone) adminPhone = user.phone;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+
+      // Fallback to school contacts if any field still missing
+      if (!adminName || !adminEmail || !adminPhone) {
+        try {
+          const schContUrl = `https://services.grapeseed.com/admin/v1/schools/${code}/contacts?id=${code}`;
+          const schResp = await fetch(schContUrl, { headers: getHeaders(token) });
+          if (schResp.ok) {
+            const schData = await schResp.json();
+            const schAdmins = schData.admins || [];
+            let fb = schAdmins.find(a => a.name || a.email);
+            if (!fb) fb = schData.mainBillingContact || schData.mainShippingContact || schData.mainSupportContact;
+            if (fb) {
+              if (!adminName && fb.name?.trim()) adminName = fb.name.trim();
+              if (!adminEmail && fb.email?.trim()) adminEmail = fb.email.trim();
+              if (!adminPhone && fb.phone) adminPhone = fb.phone;
+              if (!adminPhone && fb.id) {
+                const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${fb.id}`;
+                const userResp = await fetch(userUrl, { headers: getHeaders(token) });
+                if (userResp.ok) {
+                  const userData = await userResp.json();
+                  const user = Array.isArray(userData) ? userData[0] : userData;
+                  if (user?.phone) adminPhone = user.phone;
+                }
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (!adminPhone) adminPhone = campus.phone || null;
+      return { adminName, adminEmail, adminPhone };
+    };
+
+    // 3. Process new schools (in API but not in DB) – parallel
+    const newCodes = [...apiIds].filter(id => !dbCodes.has(id));
+    let newSchoolCount = 0;
+    await pMap(newCodes, async (code) => {
+      const schoolName = apiIdMap.get(code)?.schoolName || "Unknown School";
+      log(`🏫 New school: ${schoolName} (${code})`);
+      try {
+        const campUrl = `https://services.grapeseed.com/admin/v1/schools/${code}/campuses/accessiblecampuses`;
+        const campResp = await fetch(campUrl, { headers: getHeaders(token) });
+        if (!campResp.ok) return;
+        const campuses = await campResp.json();
+        const active = campuses.filter(c => !c.disabled);
+        if (active.length === 0) return;
+
+        const campusRows = await pMap(active, async (campus) => {
+          const { adminName, adminEmail, adminPhone } = await enrichCampusAdmin(code, campus);
+          return {
+            trainer_id: userId,
+            school_name: schoolName,
+            campus_name: campus.name,
+            official_code: code,
+            campus_id: campus.id,
+            admin_name: adminName,
+            admin_email: adminEmail,
+            admin_phone: adminPhone,
+            address: campus.fullAddress || null,
+            caring: false,
+            disabled: false,
+            exclusive: "exclusive",
+            needs_review: true,
+            admin_workbook_url: null,
+            notes: null,
+            visit_count: null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          };
+        }, { concurrency: 10 });
+
+                if (campusRows.length > 0) {
+          // Check if any campus for this official_code already exists under this trainer
+          const { data: existingSameSchool } = await supabase
+            .from("schools")
+            .select("id")
+            .eq("trainer_id", userId)
+            .eq("official_code", code)
+            .limit(1);
+          if (existingSameSchool && existingSameSchool.length > 0) {
+            log(`⚠️ Skipping ${schoolName} – already exists with official_code ${code} (shared/temporary/exclusive).`);
+            return;
+          }
+          const { error: insertErr } = await supabase.from("schools").insert(campusRows);
+          if (insertErr) {
+            if (insertErr.code === "23505") {
+              log(`⚠️ ${schoolName} already exists (unique constraint). Skipping.`);
+            } else {
+              log(`❌ Insert error for ${schoolName}: ${insertErr.message}`);
+            }
+          } else {
+            newSchoolCount += campusRows.length;
+          }
+        }
+      } catch (e) {
+        log(`⚠️ Error processing new school ${code}: ${e.message}`);
+      }
+    }, { concurrency: 5 });
+
+    // 4. Disable schools in DB but not in API
+    const removedCodes = [...dbCodes].filter(code => !apiIds.has(code));
+    let disabledCount = 0;
+    await pMap(removedCodes, async (code) => {
+      const rows = dbByCode.get(code) || [];
+      for (const row of rows) {
+        const { error } = await supabase
+          .from("schools")
+          .update({
+            disabled: true,
+            needs_review: true,
+            previous_data: {
+              disabled: row.disabled,
+            },
+            updated_at: new Date()
+          })
+          .eq("id", row.id);
+        if (!error) disabledCount++;
+      }
+    }, { concurrency: 10 });
+
+    // 5. Existing schools: re‑enable, campus‑level sync, refresh admin – parallel
+    const existingCodes = [...dbCodes].filter(code => apiIds.has(code));
+    let reEnabledCount = 0, campusDisabledCount = 0, adminUpdatedCount = 0;
+    await pMap(existingCodes, async (code) => {
+      const dbRows = dbByCode.get(code) || [];
+      // Re‑enable any that were disabled
+      for (const row of dbRows) {
+        if (row.disabled) {
+          await supabase
+            .from("schools")
+          .update({
+            disabled: false,
+            needs_review: true,
+            previous_data: {
+              disabled: row.disabled,
+            },
+            updated_at: new Date()
+          })
+            .eq("id", row.id);
+          reEnabledCount++;
+        }
+      }
+
+      try {
+        const campUrl = `https://services.grapeseed.com/admin/v1/schools/${code}/campuses/accessiblecampuses`;
+        const campResp = await fetch(campUrl, { headers: getHeaders(token) });
+        if (!campResp.ok) return;
+        const apiCampuses = await campResp.json();
+        const apiCampMap = new Map(apiCampuses.map(c => [c.id, c]));
+
+        await pMap(dbRows, async (row) => {
+          if (!row.campus_id) return;
+          const apiCampus = apiCampMap.get(row.campus_id);
+          if (!apiCampus || apiCampus.disabled) {
+            const { error } = await supabase
+              .from("schools")
+                              .update({
+                  disabled: true,
+                  needs_review: true,
+                  previous_data: {
+                    disabled: row.disabled,
+                  },
+                  updated_at: new Date()
+                })
+              .eq("id", row.id);
+            if (!error) campusDisabledCount++;
+            return;
+          }
+
+          const { adminName, adminEmail, adminPhone } = await enrichCampusAdmin(code, apiCampus);
+          const finalPhone = adminPhone || apiCampus.phone || null;
+
+                    const normalized = (s) => (s || "").trim().toLowerCase();
+
+          if (
+            normalized(adminName) !== normalized(row.admin_name) ||
+            normalized(adminEmail) !== normalized(row.admin_email) ||
+            normalized(finalPhone) !== normalized(row.admin_phone)
+          ) {
+                        log(`🔍 Updating admin for ${row.school_name} - ${row.campus_name}: ${row.admin_name} → ${adminName}`);
+            const updatePayload = {
+              admin_name: adminName,
+              admin_email: adminEmail,
+              admin_phone: finalPhone,
+              address: apiCampus.fullAddress || row.address,
+              needs_review: true,
+              previous_data: {
+                admin_name: row.admin_name,
+                admin_email: row.admin_email,
+                admin_phone: row.admin_phone,
+                address: row.address,
+              },
+              updated_at: new Date(),
+            };
+            const { error: updErr } = await supabase
+              .from("schools")
+              .update(updatePayload)
+              .eq("id", row.id);
+            if (!updErr) adminUpdatedCount++;
+            else log(`❌ Update error: ${updErr.message}`);
+          }
+        }, { concurrency: 10 });
+      } catch (e) {
+        log(`⚠️ Campus sync error for ${code}: ${e.message}`);
+      }
+    }, { concurrency: 5 });
+
+    log(
+      `✅ Sync complete: ${newSchoolCount} new, ${disabledCount} disabled, ` +
+      `${reEnabledCount} re‑enabled, ${campusDisabledCount} campuses disabled, ${adminUpdatedCount} admin refreshed.`
+    );
+    res.json({ success: true, logs });
+
+  } catch (err) {
+    log(`❌ sync-school-status error: ${err.message}`);
+    res.status(500).json({ success: false, error: err.message, logs });
+  }
+});
+
 export default router;
