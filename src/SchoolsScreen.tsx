@@ -152,12 +152,21 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           </div>
           {/* Helper to highlight if changed */}
           {(() => {
-            const prev = row.previous_data || {};
+            // 🟢 Parse previous_data if it's a JSON string
+            let prev: any = row.previous_data;
+            if (typeof prev === 'string') {
+              try { prev = JSON.parse(prev); } catch (e) { prev = {}; }
+            }
+            if (!prev || typeof prev !== 'object') prev = {};
+
             const isChanged = (field: string) =>
               prev[field] !== undefined && prev[field] !== row[field as keyof SchoolRow];
 
             const highlightStyle = (changed: boolean) =>
               changed ? { backgroundColor: '#fef9c3', padding: '2px 6px', borderRadius: '4px', color: '#000' } : {};
+
+            // Debug: log the comparison
+            console.log(`[ViewModal] previous_data for ${row.school_name} - ${row.campus_name}:`, prev);
 
             return (
               <>
@@ -1233,29 +1242,56 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
   };
 
   const handleRejectSchool = async (row: SchoolRow) => {
-    if (!row.previous_data || Object.keys(row.previous_data).length === 0) {
-      const ok = window.confirm(`No previous data available for ${row.school_name} - ${row.campus_name}. Clear review flag anyway?`);
-      if (!ok) return;
-      const { error } = await supabase
-        .from("schools")
-        .update({ needs_review: false, updated_at: new Date() })
-        .eq("id", row.id)
-        .eq("trainer_id", user?.id);
-      if (error) {
-        alert("Failed to clear review flag.");
-        return;
+    // Parse previous_data (it may be a JSON string)
+    let prevData: any = row.previous_data;
+    if (typeof prevData === 'string') {
+      try { prevData = JSON.parse(prevData); } catch (e) { prevData = null; }
+    }
+
+    // No previous data → this was a newly added school
+    if (!prevData || typeof prevData !== 'object' || Object.keys(prevData).length === 0) {
+      const action = window.confirm(
+        `"${row.school_name} - ${row.campus_name}" was added by the sync.\n\nClick OK to DELETE it, or Cancel to just clear the review flag.`
+      );
+      if (action) {
+        // Delete the school
+        const { error } = await supabase
+          .from("schools")
+          .delete()
+          .eq("id", row.id)
+          .eq("trainer_id", user?.id);
+        if (error) {
+          alert("Failed to delete school.");
+          return;
+        }
+        setRows(prev => prev.filter(r => r.id !== row.id));
+      } else {
+        // Just clear the flag
+        const { error } = await supabase
+          .from("schools")
+          .update({ needs_review: false, updated_at: new Date() })
+          .eq("id", row.id)
+          .eq("trainer_id", user?.id);
+        if (error) {
+          alert("Failed to clear review flag.");
+          return;
+        }
+        setRows(prev => prev.map(r => r.id === row.id ? { ...r, needs_review: false } : r));
       }
-      setRows(prev => prev.map(r => r.id === row.id ? { ...r, needs_review: false } : r));
       return;
     }
-    // … rest of the existing reject logic (unchanged)
-    const p = row.previous_data;
-    const updates: any = { needs_review: false, previous_data: null, updated_at: new Date() };
-    if (p.admin_name !== undefined) updates.admin_name = p.admin_name;
-    if (p.admin_email !== undefined) updates.admin_email = p.admin_email;
-    if (p.admin_phone !== undefined) updates.admin_phone = p.admin_phone;
-    if (p.address !== undefined) updates.address = p.address;
-    if (p.disabled !== undefined) updates.disabled = p.disabled;
+
+    // Has previous data → restore old values
+    const updates: any = {
+      needs_review: false,
+      previous_data: null,
+      updated_at: new Date(),
+    };
+    if (prevData.admin_name !== undefined) updates.admin_name = prevData.admin_name;
+    if (prevData.admin_email !== undefined) updates.admin_email = prevData.admin_email;
+    if (prevData.admin_phone !== undefined) updates.admin_phone = prevData.admin_phone;
+    if (prevData.address !== undefined) updates.address = prevData.address;
+    if (prevData.disabled !== undefined) updates.disabled = prevData.disabled;
 
     const { error } = await supabase
       .from("schools")
@@ -1266,18 +1302,37 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
       alert("Failed to reject changes.");
       return;
     }
-    setRows(prev => prev.map(r => r.id === row.id ? { ...r, ...updates, previous_data: null } : r));
+    setRows(prev =>
+      prev.map(r =>
+        r.id === row.id ? { ...r, ...updates, previous_data: null } : r
+      )
+    );
   };
 
   const handleRejectAllSchools = async (selectedIds?: string[]) => {
-    const idsToReject = selectedIds && selectedIds.length > 0 ? selectedIds : rows.filter(r => r.needs_review && r.previous_data).map(r => r.id);
-    if (idsToReject.length === 0) {
-      alert("No schools have previous data to restore.");
+    // Use provided selection, or fallback to all review items with previous_data
+    const idsToProcess = selectedIds && selectedIds.length > 0
+      ? selectedIds
+      : rows.filter(r => r.needs_review && r.previous_data).map(r => r.id);
+
+    if (idsToProcess.length === 0) {
+      alert("No schools selected or no schools have previous data to restore.");
       return;
     }
-    const ok = window.confirm(`Reject changes for ${idsToReject.length} schools?`);
-    if (!ok) return;
-    for (const id of idsToReject) {
+
+    const schoolsWithoutData = idsToProcess.filter(id => {
+      const row = rows.find(r => r.id === id);
+      return row && (!row.previous_data || Object.keys(row.previous_data).length === 0);
+    });
+
+    if (schoolsWithoutData.length > 0) {
+      const ok = window.confirm(
+        `${schoolsWithoutData.length} selected school(s) have no previous data. Clear their review flag anyway?`
+      );
+      if (!ok) return;
+    }
+
+    for (const id of idsToProcess) {
       const row = rows.find(r => r.id === id);
       if (!row) continue;
       await handleRejectSchool(row);
@@ -1319,6 +1374,16 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
     setRows(prev => prev.map(r => idsToAck.includes(r.id) ? { ...r, needs_review: false } : r));
     setSelectedReviewIds(new Set());
     if (idsToAck.length === needsReviewCount) setSchoolFilter('active');
+  };
+
+  // Helper: safely parse previous_data into a plain object
+  const getPreviousData = (row: SchoolRow) => {
+    let prev: any = row.previous_data;
+    if (typeof prev === 'string') {
+      try { prev = JSON.parse(prev); } catch (e) { prev = null; }
+    }
+    if (!prev || typeof prev !== 'object') return {};
+    return prev;
   };
   // Define Columns
 const columns = useMemo<ColumnDef<SchoolRow>[]>(
@@ -1454,12 +1519,27 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
       {
         accessorKey: "admin_name",
         header: "Admin Name",
-        cell: (info) => (
-          <>
-            <div className="entity-cell-main">{String(info.getValue() || "—")}</div>
-            <div className="entity-cell-sub">{info.row.original.admin_phone || ""}</div>
-          </>
-        ),
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const nameChanged = prev.admin_name !== undefined && prev.admin_name !== row.admin_name;
+          const phoneChanged = prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
+          const style = (changed: boolean) =>
+            changed
+              ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
+              : {};
+
+          return (
+            <>
+              <div className="entity-cell-main">
+                <span style={style(nameChanged)}>{String(row.admin_name || "—")}</span>
+              </div>
+              <div className="entity-cell-sub">
+                <span style={style(phoneChanged)}>{row.admin_phone || ""}</span>
+              </div>
+            </>
+          );
+        },
         id: "admin_name",
         minSize: 150,
         size: 200,
@@ -1467,12 +1547,30 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
       {
         accessorKey: "admin_email",
         header: "Admin Email",
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const changed = prev.admin_email !== undefined && prev.admin_email !== row.admin_email;
+          const style = changed
+            ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
+            : {};
+          return <span style={style}>{String(info.getValue() || "—")}</span>;
+        },
         minSize: 150,
         size: 200,
       },
       {
         accessorKey: "admin_phone",
         header: "Admin Phone",
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const changed = prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
+          const style = changed
+            ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
+            : {};
+          return <span style={style}>{String(info.getValue() || "—")}</span>;
+        },
         minSize: 100,
         size: 150,
       },
@@ -1498,6 +1596,15 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
       {
         accessorKey: "address",
         header: "Address",
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const changed = prev.address !== undefined && prev.address !== row.address;
+          const style = changed
+            ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
+            : {};
+          return <span style={style}>{String(info.getValue() || "—")}</span>;
+        },
         minSize: 200,
         size: 250,
       },

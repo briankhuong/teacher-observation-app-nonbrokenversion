@@ -1744,9 +1744,7 @@ router.post("/api/sync-school-status", async (req, res) => {
           .update({
             disabled: true,
             needs_review: true,
-            previous_data: {
-              disabled: row.disabled,
-            },
+                          previous_data: JSON.stringify({ disabled: row.disabled ?? null }),
             updated_at: new Date()
           })
           .eq("id", row.id);
@@ -1767,9 +1765,7 @@ router.post("/api/sync-school-status", async (req, res) => {
           .update({
             disabled: false,
             needs_review: true,
-            previous_data: {
-              disabled: row.disabled,
-            },
+                          previous_data: JSON.stringify({ disabled: row.disabled ?? null }),
             updated_at: new Date()
           })
             .eq("id", row.id);
@@ -1793,9 +1789,7 @@ router.post("/api/sync-school-status", async (req, res) => {
                               .update({
                   disabled: true,
                   needs_review: true,
-                  previous_data: {
-                    disabled: row.disabled,
-                  },
+              previous_data: JSON.stringify({ disabled: row.disabled ?? null }),
                   updated_at: new Date()
                 })
               .eq("id", row.id);
@@ -1814,18 +1808,19 @@ router.post("/api/sync-school-status", async (req, res) => {
             normalized(finalPhone) !== normalized(row.admin_phone)
           ) {
                         log(`🔍 Updating admin for ${row.school_name} - ${row.campus_name}: ${row.admin_name} → ${adminName}`);
-            const updatePayload = {
+                          const updatePayload = {
               admin_name: adminName,
               admin_email: adminEmail,
               admin_phone: finalPhone,
               address: apiCampus.fullAddress || row.address,
               needs_review: true,
-              previous_data: {
-                admin_name: row.admin_name,
-                admin_email: row.admin_email,
-                admin_phone: row.admin_phone,
-                address: row.address,
-              },
+              // Store as a JSON string to avoid serialization issues
+              previous_data: JSON.stringify({
+                admin_name: row.admin_name ?? null,
+                admin_email: row.admin_email ?? null,
+                admin_phone: row.admin_phone ?? null,
+                address: row.address ?? null,
+              }),
               updated_at: new Date(),
             };
             const { error: updErr } = await supabase
