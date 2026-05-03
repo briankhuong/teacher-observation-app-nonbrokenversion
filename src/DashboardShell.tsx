@@ -3804,8 +3804,8 @@ useEffect(() => {
                 >
                   ◀
                 </button>
-                <div style={{ fontWeight: 700, fontSize: '14px', textAlign: 'center' }}>
-                  📊 {displayMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                <div style={{ fontWeight: 700, fontSize: '12px', textAlign: 'center' }}>
+                  {displayMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
                 </div>
                 <button
                   type="button"
@@ -3841,12 +3841,12 @@ useEffect(() => {
                     <button
                       type="button"
                       className="btn btn-ghost"
-                      style={{ padding: '2px 8px', fontSize: '12px', color: savingSnapshot ? '#94a3b8' : '#22c55e', border: '1px solid #22c55e', borderRadius: '4px', background: 'transparent', cursor: savingSnapshot ? 'default' : 'pointer' }}
+                      style={{ padding: '2px 8px', fontSize: '12px', color: savingSnapshot ? '#94a3b8' : '#22c55e', background: 'transparent', cursor: savingSnapshot ? 'default' : 'pointer' }}
                       onClick={saveSnapshot}
                       disabled={savingSnapshot}
                       title="Save snapshot of current month"
                     >
-                      {savingSnapshot ? 'Saving…' : '💾 Save'}
+                      {savingSnapshot ? 'Saving…' : '💾'}
                     </button>
                   </>
                 )}
