@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
 import ImportSchoolsBtn from "./components/ImportSchoolsBtn";
@@ -19,6 +19,8 @@ import type {
   FilterFn, // 🟢 Added FilterFn
 } from "@tanstack/react-table";
 import { Search, Plus, RefreshCw,Pencil } from "lucide-react";
+import { isGrapeSeedTokenValid } from "./utils/authHelpers";
+import { GrapeSeedLoginModal } from "./components/GrapeSeedLoginModal";
 import { flattenText } from "./utils/textUtils";
 const fuzzyVietnameseFilter: FilterFn<SchoolRow> = (row, columnId, value) => {
   const itemValue = row.getValue(columnId);
@@ -1234,7 +1236,9 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
       visit_count: false,
     };
   });
-  const [showColumnMenu, setShowColumnMenu] = useState(false); 
+  const [showGrapeLogin, setShowGrapeLogin] = useState(false);
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const pendingSchoolSync = useRef<(() => void) | null>(null);
   const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(new Set());
 
   // 🟢 NEW: Background Provisioning Logic
@@ -2155,22 +2159,15 @@ const table = useReactTable({
         }
       : undefined;
 
-  const handleSchoolSync = async () => {
+  const performSync = async (token: string) => {
     if (!user?.id) return;
-
     try {
       setLoading(true);
-
-      const tokenResp = await fetch(`${MERGE_SERVER_BASE}/api/get-grapeseed-token`, {
-        method: "POST",
-      });
-      if (!tokenResp.ok) throw new Error("Failed to get token");
-      const { access_token } = await tokenResp.json();
 
       const syncResp = await fetch(`${MERGE_SERVER_BASE}/api/sync-school-status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: access_token, userId: user.id }),
+        body: JSON.stringify({ token, userId: user.id }),
       });
 
       if (syncResp.ok) {
@@ -2192,6 +2189,30 @@ const table = useReactTable({
       setLoading(false);
     }
   };
+
+  const handleSchoolSync = async () => {
+    if (!user?.id) return;
+
+    // Check if we already have a valid user GrapeSEED token
+    if (isGrapeSeedTokenValid()) {
+      const token = localStorage.getItem("grapeseed_token")!;
+      await performSync(token);
+    } else {
+      // Need to prompt login – store the callback and show modal
+      pendingSchoolSync.current = () => handleSchoolSync();
+      setShowGrapeLogin(true);
+    }
+  };
+
+  const handleGrapeLoginSuccess = () => {
+    setShowGrapeLogin(false);
+    // If a sync was pending, re‑run it now that we have a fresh token
+    if (pendingSchoolSync.current) {
+      pendingSchoolSync.current();
+      pendingSchoolSync.current = null;
+    }
+  };
+
 
 const runPulseAudit = async () => {
   if (isPulsing) return;
@@ -2611,6 +2632,15 @@ const runPulseAudit = async () => {
         }
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
+           <GrapeSeedLoginModal
+        isOpen={showGrapeLogin}
+        onClose={() => {
+          setShowGrapeLogin(false);
+          pendingSchoolSync.current = null;
+        }}
+        onSuccess={handleGrapeLoginSuccess}
+      />
+ 
     </>
   );
 };
