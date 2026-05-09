@@ -1,17 +1,10 @@
-// src/ObservationWorkspaceShell.tsx
 import {
   DndContext, 
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
 } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core'; // 🟢 FIXED: Separated as a type import
 import {
   arrayMove,
   SortableContext,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
   useSortable
 } from '@dnd-kit/sortable';
@@ -22,9 +15,9 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { exportAdminExcel } from "./exportAdminExcel"; 
 import { emailTeacherReport } from "./emailTeacherReport";
 import { generateAdminSummary } from "./utils/gemini";
-import { getOptimizedInkImage } from "./utils/imageOptimizer"; // If you created this file
+
 // Add these imports
-import { get, set, del } from 'idb-keyval';
+import { get, set } from 'idb-keyval';
 // 1. Import the constant (the data array) normally
 import { INITIAL_INDICATORS } from "./constants";
 import type { 
