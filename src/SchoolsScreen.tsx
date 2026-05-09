@@ -169,28 +169,56 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           changed ? { backgroundColor: '#fef9c3', padding: '2px 6px', borderRadius: '4px', color: '#000' } : {};
 
             // Debug: log the comparison
-            console.log(`[ViewModal] previous_data for ${row.school_name} - ${row.campus_name}:`, prev);
-
+            console.log(`\[ViewModal\] previous_data for ${row.school_name} - ${row.campus_name}:`, prev);
             return (
               <>
                 <div className="detail-row">
                   <label>Admin Name</label>
-                  <span style={highlightStyle(isChanged('admin_name'))}>{row.admin_name || "—"}</span>
+                  {isChanged('admin_name') ? (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.9em' }}>{prev.admin_name || "—"}</span>
+                      <span style={{ color: '#22c55e', fontWeight: 600 }}>{row.admin_name || "—"}</span>
+                    </div>
+                  ) : (
+                    <span>{row.admin_name || "—"}</span>
+                  )}
                 </div>
                 <div className="detail-row">
                   <label>Admin Email</label>
-                  <span style={highlightStyle(isChanged('admin_email'))}>{row.admin_email || "—"}</span>
+                  {isChanged('admin_email') ? (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.9em' }}>{prev.admin_email || "—"}</span>
+                      <span style={{ color: '#22c55e', fontWeight: 600 }}>{row.admin_email || "—"}</span>
+                    </div>
+                  ) : (
+                    <span>{row.admin_email || "—"}</span>
+                  )}
                 </div>
                 <div className="detail-row">
                   <label>Admin Phone</label>
-                  <span style={highlightStyle(isChanged('admin_phone'))}>{row.admin_phone || "—"}</span>
+                  {isChanged('admin_phone') ? (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.9em' }}>{prev.admin_phone || "—"}</span>
+                      <span style={{ color: '#22c55e', fontWeight: 600 }}>{row.admin_phone || "—"}</span>
+                    </div>
+                  ) : (
+                    <span>{row.admin_phone || "—"}</span>
+                  )}
                 </div>
                 <div className="detail-row">
                   <label>Address</label>
-                  <span style={highlightStyle(isChanged('address'))}>{row.address || "—"}</span>
+                  {isChanged('address') ? (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.9em' }}>{prev.address || "—"}</span>
+                      <span style={{ color: '#22c55e', fontWeight: 600 }}>{row.address || "—"}</span>
+                    </div>
+                  ) : (
+                    <span>{row.address || "—"}</span>
+                  )}
                 </div>
               </>
             );
+
           })()}
 
           <div className="detail-row">
@@ -1546,28 +1574,36 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 100,
         size: 150,
       },
-        {
-    accessorKey: "admin_name",
-    header: "Admin Name",
-    cell: (info) => {
-      const row = info.row.original;
-      const prev = getPreviousData(row);
-
-      // 🟢 UPDATED: Check row.needs_review before highlighting
-      const nameChanged = row.needs_review && prev.admin_name !== undefined && prev.admin_name !== row.admin_name;
-      const phoneChanged = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
-const style = (changed: boolean) =>
-            changed
-              ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
-              : {};
+             {
+        accessorKey: "admin_name",
+        header: "Admin Name",
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const nameChanged = row.needs_review && prev.admin_name !== undefined && prev.admin_name !== row.admin_name;
+          const phoneChanged = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
 
           return (
             <>
               <div className="entity-cell-main">
-                <span style={style(nameChanged)}>{String(row.admin_name || "—")}</span>
+                {nameChanged ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
+                    <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.85em' }}>{String(prev.admin_name || "—")}</span>
+                    <span style={{ color: '#22c55e', fontWeight: 600 }}>{String(row.admin_name || "—")}</span>
+                  </div>
+                ) : (
+                  <span>{String(row.admin_name || "—")}</span>
+                )}
               </div>
               <div className="entity-cell-sub">
-                <span style={style(phoneChanged)}>{row.admin_phone || ""}</span>
+                {phoneChanged ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4', marginTop: '2px' }}>
+                    <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.85em' }}>{String(prev.admin_phone || "—")}</span>
+                    <span style={{ color: '#22c55e', fontWeight: 600 }}>{String(row.admin_phone || "—")}</span>
+                  </div>
+                ) : (
+                  <span>{row.admin_phone || ""}</span>
+                )}
               </div>
             </>
           );
@@ -1576,38 +1612,49 @@ const style = (changed: boolean) =>
         minSize: 150,
         size: 200,
       },
-        {
-    accessorKey: "admin_email",
-    header: "Admin Email",
-    cell: (info) => {
-      const row = info.row.original;
-      const prev = getPreviousData(row);
-      // 🟢 UPDATED: Check row.needs_review before highlighting
-      const changed = row.needs_review && prev.admin_email !== undefined && prev.admin_email !== row.admin_email;
-      const style = changed
-            ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
-            : {};
-          return <span style={style}>{String(info.getValue() || "—")}</span>;
+      {
+        accessorKey: "admin_email",
+        header: "Admin Email",
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const changed = row.needs_review && prev.admin_email !== undefined && prev.admin_email !== row.admin_email;
+          
+          if (changed) {
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
+                <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.85em' }}>{String(prev.admin_email || "—")}</span>
+                <span style={{ color: '#22c55e', fontWeight: 600 }}>{String(row.admin_email || "—")}</span>
+              </div>
+            );
+          }
+          return <span>{String(info.getValue() || "—")}</span>;
         },
         minSize: 150,
         size: 200,
       },
-        {
-    accessorKey: "admin_phone",
-    header: "Admin Phone",
-    cell: (info) => {
-      const row = info.row.original;
-      const prev = getPreviousData(row);
-      // 🟢 UPDATED: Check row.needs_review before highlighting
-      const changed = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
-      const style = changed
-            ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
-            : {};
-          return <span style={style}>{String(info.getValue() || "—")}</span>;
+      {
+        accessorKey: "admin_phone",
+        header: "Admin Phone",
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const changed = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
+          
+          if (changed) {
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
+                <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.85em' }}>{String(prev.admin_phone || "—")}</span>
+                <span style={{ color: '#22c55e', fontWeight: 600 }}>{String(row.admin_phone || "—")}</span>
+              </div>
+            );
+          }
+          return <span>{String(info.getValue() || "—")}</span>;
         },
         minSize: 100,
         size: 150,
       },
+
       {
         accessorKey: "am_name",
         header: "AM Name",
@@ -1633,16 +1680,26 @@ const style = (changed: boolean) =>
     cell: (info) => {
       const row = info.row.original;
       const prev = getPreviousData(row);
-      // 🟢 UPDATED: Check row.needs_review before highlighting
       const changed = row.needs_review && prev.address !== undefined && prev.address !== row.address;
-      const style = changed
-            ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
-            : {};
-          return <span style={style}>{String(info.getValue() || "—")}</span>;
-        },
-        minSize: 200,
-        size: 250,
+
+      if (changed) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
+            <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.85em' }}>
+              {String(prev.address || "—")}
+            </span>
+            <span style={{ color: '#22c55e', fontWeight: 600 }}>
+              {String(row.address || "—")}
+            </span>
+          </div>
+        );
+      }
+      return <span>{String(info.getValue() || "—")}</span>;
+    },
+    minSize: 200,
+    size: 250,
       },
+
       {
         accessorKey: "notes",
         header: "Notes",
