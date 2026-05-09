@@ -154,18 +154,19 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           </div>
           {/* Helper to highlight if changed */}
           {(() => {
-            // 🟢 Parse previous_data if it's a JSON string
-            let prev: any = row.previous_data;
-            if (typeof prev === 'string') {
-              try { prev = JSON.parse(prev); } catch (e) { prev = {}; }
-            }
-            if (!prev || typeof prev !== 'object') prev = {};
+                    // 🟢 Parse previous_data if it's a JSON string
+        let prev: any = row.previous_data;
+        if (typeof prev === 'string') {
+          try { prev = JSON.parse(prev); } catch (e) { prev = {}; }
+        }
+        if (!prev || typeof prev !== 'object') prev = {};
 
-            const isChanged = (field: string) =>
-              prev[field] !== undefined && prev[field] !== row[field as keyof SchoolRow];
+        // 🟢 UPDATED: Only highlight if needs_review is still true
+        const isChanged = (field: string) =>
+          row.needs_review && prev[field] !== undefined && prev[field] !== row[field as keyof SchoolRow];
 
-            const highlightStyle = (changed: boolean) =>
-              changed ? { backgroundColor: '#fef9c3', padding: '2px 6px', borderRadius: '4px', color: '#000' } : {};
+        const highlightStyle = (changed: boolean) =>
+          changed ? { backgroundColor: '#fef9c3', padding: '2px 6px', borderRadius: '4px', color: '#000' } : {};
 
             // Debug: log the comparison
             console.log(`[ViewModal] previous_data for ${row.school_name} - ${row.campus_name}:`, prev);
@@ -1545,15 +1546,17 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 100,
         size: 150,
       },
-      {
-        accessorKey: "admin_name",
-        header: "Admin Name",
-        cell: (info) => {
-          const row = info.row.original;
-          const prev = getPreviousData(row);
-          const nameChanged = prev.admin_name !== undefined && prev.admin_name !== row.admin_name;
-          const phoneChanged = prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
-          const style = (changed: boolean) =>
+        {
+    accessorKey: "admin_name",
+    header: "Admin Name",
+    cell: (info) => {
+      const row = info.row.original;
+      const prev = getPreviousData(row);
+
+      // 🟢 UPDATED: Check row.needs_review before highlighting
+      const nameChanged = row.needs_review && prev.admin_name !== undefined && prev.admin_name !== row.admin_name;
+      const phoneChanged = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
+const style = (changed: boolean) =>
             changed
               ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
               : {};
@@ -1573,14 +1576,15 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 150,
         size: 200,
       },
-      {
-        accessorKey: "admin_email",
-        header: "Admin Email",
-        cell: (info) => {
-          const row = info.row.original;
-          const prev = getPreviousData(row);
-          const changed = prev.admin_email !== undefined && prev.admin_email !== row.admin_email;
-          const style = changed
+        {
+    accessorKey: "admin_email",
+    header: "Admin Email",
+    cell: (info) => {
+      const row = info.row.original;
+      const prev = getPreviousData(row);
+      // 🟢 UPDATED: Check row.needs_review before highlighting
+      const changed = row.needs_review && prev.admin_email !== undefined && prev.admin_email !== row.admin_email;
+      const style = changed
             ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
             : {};
           return <span style={style}>{String(info.getValue() || "—")}</span>;
@@ -1588,14 +1592,15 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 150,
         size: 200,
       },
-      {
-        accessorKey: "admin_phone",
-        header: "Admin Phone",
-        cell: (info) => {
-          const row = info.row.original;
-          const prev = getPreviousData(row);
-          const changed = prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
-          const style = changed
+        {
+    accessorKey: "admin_phone",
+    header: "Admin Phone",
+    cell: (info) => {
+      const row = info.row.original;
+      const prev = getPreviousData(row);
+      // 🟢 UPDATED: Check row.needs_review before highlighting
+      const changed = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
+      const style = changed
             ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
             : {};
           return <span style={style}>{String(info.getValue() || "—")}</span>;
@@ -1622,14 +1627,15 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 150,
         size: 200,
       },
-      {
-        accessorKey: "address",
-        header: "Address",
-        cell: (info) => {
-          const row = info.row.original;
-          const prev = getPreviousData(row);
-          const changed = prev.address !== undefined && prev.address !== row.address;
-          const style = changed
+        {
+    accessorKey: "address",
+    header: "Address",
+    cell: (info) => {
+      const row = info.row.original;
+      const prev = getPreviousData(row);
+      // 🟢 UPDATED: Check row.needs_review before highlighting
+      const changed = row.needs_review && prev.address !== undefined && prev.address !== row.address;
+      const style = changed
             ? { backgroundColor: '#fef9c3', padding: '2px 4px', borderRadius: '4px', color: '#000' }
             : {};
           return <span style={style}>{String(info.getValue() || "—")}</span>;
