@@ -44,7 +44,7 @@ export const INITIAL_INDICATORS: IndicatorState[] = [
     title: "Organized Teaching Area",
     description: "- Teaching area is highly organized; materials, props, and technology are easily accessible. Students can see the teaching materials well.",
     hasPreComment: true,
-    preComment: "The classroom was spacious, which is ideal for students to learn English with GrapeSEED.",
+    preComment: "The materials were well-organized, and the students could see the cards clearly.",
     good: false,
     growth: false,
     commentText: "",

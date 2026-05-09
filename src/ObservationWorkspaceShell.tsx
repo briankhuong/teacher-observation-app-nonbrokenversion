@@ -1208,19 +1208,27 @@ const executeBatchPolish = async () => {
     setIndicators(prev => prev.map(ind => {
       const polishedText = results[ind.id];
       if (polishedText) {
-        return {
-          ...ind,
-          originalCommentText: ind.commentText, // 🟢 NEW: Save the history
-          commentText: polishedText,
-          aiPendingReview: true 
-        } as unknown as IndicatorState;
+        // 🟢 NEW: Check if text actually changed
+        if (polishedText !== ind.commentText) {
+          return {
+            ...ind,
+            originalCommentText: ind.commentText,
+            commentText: polishedText,
+            aiPendingReview: true 
+          } as unknown as IndicatorState;
+        } else {
+          // If the AI returned the exact same text, clear the pending flag silently
+          return {
+            ...ind,
+            aiPendingReview: false,
+            originalCommentText: undefined
+          } as unknown as IndicatorState;
+        }
       }
-      return ind;
+      return ind; 
     }));
     
   } catch (err: any) {
-
-
     console.error("Batch polish failed", err);
     alert("Batch polish failed. Please try doing them individually.");
   } finally {
@@ -1722,13 +1730,18 @@ const handleMarkAllReviewed = () => {
            const results = await polishBatchWithGroq(candidates);
            const polishedIndicators = indicators.map(ind => {
                const pText = results[ind.id];
-               return pText ? { ...ind, originalCommentText: ind.commentText, commentText: pText, aiPendingReview: true } as unknown as IndicatorState : ind;
+               if (pText) {
+                 // 🟢 NEW: Only trigger review if the text ACTUALLY changed
+                 if (pText !== ind.commentText) {
+                   return { ...ind, originalCommentText: ind.commentText, commentText: pText, aiPendingReview: true } as unknown as IndicatorState;
+                 } else {
+                   return { ...ind, aiPendingReview: false, originalCommentText: undefined } as unknown as IndicatorState;
+                 }
+               }
+               return ind;
            });
            
            setIndicators(polishedIndicators);
-
-
-
            // Re-run load logic to update preview
            const metaForExport = { teacherName, schoolName, campus, unit, lesson, supportType, date: observationMeta.date };
            const exportInds = polishedIndicators.map(ind => ({
@@ -2086,14 +2099,22 @@ const handlePolishWithAi = async () => {
   setIsAiPolishing(true);
   try {
     const polished = await polishTextWithGroq(currentText);
-    updateIndicator(activeIndex, {
-      originalCommentText: currentText, // 🟢 NEW: Save the history
-      commentText: polished,
-      aiPendingReview: true,
-    } as unknown as Partial<IndicatorState>);
+    
+    // 🟢 NEW: Explicitly clear review state if text is identical
+    if (polished !== currentText) {
+      updateIndicator(activeIndex, {
+        originalCommentText: currentText,
+        commentText: polished,
+        aiPendingReview: true,
+      } as unknown as Partial<IndicatorState>);
+    } else {
+      updateIndicator(activeIndex, {
+        aiPendingReview: false,
+        originalCommentText: undefined
+      } as unknown as Partial<IndicatorState>);
+    }
+    
   } catch (err: any) {
-
-
     console.error("Groq Single Polish failed", err);
     const errorMsg = err?.status === 429 
       ? "Groq is busy. Wait a few seconds." 
