@@ -94,12 +94,18 @@ router.post("/api/polish-text", async (req, res) => {
              - "do not seem to focus" -> "appeared distracted" or "struggled to focus"
              - "read from memory" -> "recited from memory"
 
-          3. BRACKET LOGIC [Action > Result]:
-             - The user uses brackets to show: [Action to take > Intended result].
-             - **You MUST fix grammar INSIDE the brackets**, but strictly preserve the ">" separator.
-             - **Rule:** Ensure the 'Result' side (right of >) starts with "to" if it implies a purpose.
-             - Input: "[ask them to repeat > stay engaged]"
-             - Output: "[ask them to repeat > to maintain engagement]"
+          3\. BRACKET LOGIC \[DO NOT TOUCH\]:
+
+             - The user uses brackets to store specific internal shorthand: \[...\].
+
+             - \*\*ABSOLUTE RULE:\*\* NEVER edit, expand, correct, or touch ANY text inside square brackets \[...\].
+
+             - Leave the content inside the brackets EXACTLY as it is.
+
+             - Input: "The teacher speak too fast \[ask them to repeat > stay engaged\]"
+
+             - Output: "The teacher spoke too fast \[ask them to repeat > stay engaged\]"
+
 
           4. PRESERVE STRUCTURE:
              - Keep "(GA)" tags, hyphens "-", and bullet points exactly as they are.
@@ -137,10 +143,15 @@ router.post("/api/polish-batch", async (req, res) => {
     2. If a word looks like a sound code, keep it as is.
     
     STRICT MACHINE RULES:
-    1. Return ONLY a valid JSON object. 
-    2. PRESERVE TAGS: Do not remove "(GA)" tags.
-    3. PROTECT ANCHORS: Do NOT edit, expand, or fix text inside square brackets "[...]".
-    4. PRESERVE HYPHENS.
+
+    1\. Return ONLY a valid JSON object. 
+
+    2\. PRESERVE TAGS: Do not remove "(GA)" tags.
+
+    3\. PROTECT BRACKETS: ABSOLUTELY DO NOT touch, edit, expand, correct, or alter ANY text inside square brackets "\[...\]". Leave it exactly as provided.
+
+    4\. PRESERVE HYPHENS.
+
     
     JSON OUTPUT FORMAT: { "indicator_id": "polished text string" }`;
 
