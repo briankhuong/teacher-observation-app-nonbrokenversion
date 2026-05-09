@@ -3197,8 +3197,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
           .slice() // Copy array before sorting
           .sort((a, b) => ((a as any).sortOrder || 0) - ((b as any).sortOrder || 0))
           .map((ind, sortedIdx) => {
-            
-            // 🟢 FIXED: Calculate the true index in the original state array
+          
             const globalIndex = indicators.findIndex(x => x.id === ind.id);
 
             if (filterMode === "good" && !ind.good) return null;
