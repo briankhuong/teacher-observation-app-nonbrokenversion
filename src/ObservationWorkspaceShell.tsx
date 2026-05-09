@@ -145,10 +145,46 @@ function setPersistedTextareaHeight(height: number) {
   }
 }
 
+// 🟢 NEW: Track Changes Diff Algorithm
+function getDiff(oldString: string = "", newString: string = "") {
+  const oldWords = oldString.split(/(\s+)/);
+  const newWords = newString.split(/(\s+)/);
+  const dp: number[][] = Array(oldWords.length + 1).fill(null).map(() => Array(newWords.length + 1).fill(0));
+  
+  for (let i = 1; i <= oldWords.length; i++) {
+    for (let j = 1; j <= newWords.length; j++) {
+      if (oldWords[i - 1] === newWords[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+  
+  const result: { type: 'equal' | 'add' | 'remove', value: string }[] = [];
+  let i = oldWords.length;
+  let j = newWords.length;
+  
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
+      result.unshift({ type: 'equal', value: oldWords[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ type: 'add', value: newWords[j - 1] });
+      j--;
+    } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+      result.unshift({ type: 'remove', value: oldWords[i - 1] });
+      i--;
+    }
+  }
+  return result;
+}
+
 // 🟢 UPDATED CLEANER: 
-// 1. Removes [OCR]/[Hints]
+// 1. Removes \[OCR\]/\[Hints\]
 // 2. Removes (GA) tags (so they don't show up in the text box)
 // 3. KEEPS empty lines and hyphens
+
 function cleanTextForPreview(text: string): string {
     if (!text) return "";
     return text
@@ -1163,28 +1199,28 @@ const isFirstRun = useRef(true);
 const executeBatchPolish = async () => {
   setIsAiPolishing(true);
   setShowBatchModal(false); 
-
   try {
     const batchItems = batchCandidates.map(c => ({
       id: c.id,
       text: c.text 
     }));
-
     const results = await polishBatchWithGroq(batchItems);
-
     setIndicators(prev => prev.map(ind => {
       const polishedText = results[ind.id];
       if (polishedText) {
         return {
           ...ind,
+          originalCommentText: ind.commentText, // 🟢 NEW: Save the history
           commentText: polishedText,
           aiPendingReview: true 
-        };
+        } as unknown as IndicatorState;
       }
       return ind;
     }));
     
   } catch (err: any) {
+
+
     console.error("Batch polish failed", err);
     alert("Batch polish failed. Please try doing them individually.");
   } finally {
@@ -1684,13 +1720,14 @@ const handleMarkAllReviewed = () => {
            }
 
            const results = await polishBatchWithGroq(candidates);
-
            const polishedIndicators = indicators.map(ind => {
                const pText = results[ind.id];
-               return pText ? { ...ind, commentText: pText, aiPendingReview: true } : ind;
+               return pText ? { ...ind, originalCommentText: ind.commentText, commentText: pText, aiPendingReview: true } as unknown as IndicatorState : ind;
            });
            
            setIndicators(polishedIndicators);
+
+
 
            // Re-run load logic to update preview
            const metaForExport = { teacherName, schoolName, campus, unit, lesson, supportType, date: observationMeta.date };
@@ -2046,18 +2083,17 @@ const handlePolishWithAi = async () => {
   const currentText = active.commentText.trim();
   if (!currentText) return;
   if (isAiPolishing) return;
-
   setIsAiPolishing(true);
-
   try {
     const polished = await polishTextWithGroq(currentText);
-
     updateIndicator(activeIndex, {
+      originalCommentText: currentText, // 🟢 NEW: Save the history
       commentText: polished,
       aiPendingReview: true,
-    });
-
+    } as unknown as Partial<IndicatorState>);
   } catch (err: any) {
+
+
     console.error("Groq Single Polish failed", err);
     const errorMsg = err?.status === 429 
       ? "Groq is busy. Wait a few seconds." 
@@ -3173,10 +3209,12 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 stopRecording={stopRecording}
                 handleCommentChange={handleCommentChange}
                 handleSendToTop={handleSendToTop}
+                updateIndicator={updateIndicator}
               />
             );
         })}
       </SortableContext>
+
     </div>
   </DndContext>
             ) : (
@@ -3589,6 +3627,31 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   flexGrow: 1 
                 }}
               >
+              {/* 🟢 NEW: Track Changes (Diff) View for iPad Mode */}
+              {active.aiPendingReview && (active as IndicatorState & { originalCommentText?: string }).originalCommentText && (
+                <div style={{
+                  padding: "12px",
+                  background: "#020617",
+                  border: "1px solid rgba(168, 85, 247, 0.5)",
+                  borderRadius: "10px",
+                  fontSize: "13px",
+                  marginBottom: "8px",
+                  whiteSpace: "pre-wrap",
+                  lineHeight: "1.5",
+                  color: "#e2e8f0"
+                }}>
+                  <div style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", marginBottom: "6px", color: "#c084fc" }}>Track Changes (AI Edits):</div>
+                  {getDiff((active as IndicatorState & { originalCommentText?: string }).originalCommentText, active.commentText).map((part, index) => {
+                    if (part.type === 'add') {
+                      return <span key={index} style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', fontWeight: 600, padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                    } else if (part.type === 'remove') {
+                      return <span key={index} style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', textDecoration: 'line-through', padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                    }
+                    return <span key={index}>{part.value}</span>;
+                  })}
+                </div>
+              )}
+
               <div
                 style={{
                   fontSize: 12,
@@ -3607,16 +3670,34 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                 {active.aiPendingReview ? (
                   <>
                     <span>✨ AI polished this text. Please review.</span>
-                    <button
-                      type="button"
-                      className="btn"
-                      style={{ padding: "2px 8px", fontSize: 11 }}
-                      onClick={() => updateIndicator(activeIndex, { aiPendingReview: false })}
-                    >
-                      ✅ Accept
-                    </button>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ padding: "2px 8px", fontSize: 11, background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)" }}
+                        onClick={() => updateIndicator(activeIndex, { 
+                          commentText: (active as IndicatorState & { originalCommentText?: string }).originalCommentText || active.commentText, 
+                          aiPendingReview: false,
+                          originalCommentText: undefined 
+                        } as unknown as Partial<IndicatorState>)}
+                      >
+                        ↩️ Revert
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ padding: "2px 8px", fontSize: 11 }}
+                        onClick={() => updateIndicator(activeIndex, { 
+                          aiPendingReview: false,
+                          originalCommentText: undefined 
+                        } as unknown as Partial<IndicatorState>)}
+                      >
+                        ✅ Accept
+                      </button>
+                    </div>
                   </>
                 ) : active.ocrPendingReview ? (
+
                   <>
                     <span>OCR text added – please review.</span>
                     <button
@@ -3632,6 +3713,7 @@ const updateIndicator = (index: number, patch: Partial<IndicatorState>) => {
                   "Comments for this indicator"
                 )}
               </div>
+
               <textarea
                 ref={textareaRef}
                 value={active.commentText}
@@ -4269,16 +4351,20 @@ interface IndicatorRowProps {
   stopRecording: (target: 'indicator' | 'admin') => void;
   handleCommentChange: (idx: number, val: string) => void;
   handleSendToTop: (id: string) => void;
+  updateIndicator: (index: number, patch: Partial<IndicatorState>) => void;
 }  
+
 // 🟢 REFACTORED UNIFIED ROW COMPONENT
+
 const IndicatorRow = React.memo(({ 
   ind, idx, isSidebar = false, activeRowId, openRowIds, pinnedRowIds, 
   activeIndex, isAiPolishing, isRecording, isTranscribing,
   setActiveIndex, handleRowToggle, setActiveRowId, togglePin,
   insertPreComment, toggleGood, toggleGrowth, toggleIncludeInTrainerSummary,
-  handlePolishWithAi, startRecording, stopRecording, handleCommentChange, handleSendToTop
+  handlePolishWithAi, startRecording, stopRecording, handleCommentChange, handleSendToTop, updateIndicator
 }: IndicatorRowProps) => {
 const isExpanded = 
+
   openRowIds.has(ind.id) ||   // 🟢 Priority: Global Expand/Collapse state
   activeRowId === ind.id ||   // Individual selection
   pinnedRowIds.has(ind.id);   // Individual pins
@@ -4456,10 +4542,59 @@ return (
           
           {!isSidebar && (
             <>
+              {/* 🟢 NEW: Track Changes (Diff) View for PC Mode */}
+              {ind.aiPendingReview && (ind as IndicatorState & { originalCommentText?: string }).originalCommentText && (
+                <div style={{
+                  padding: "12px", background: "#020617", border: "1px solid rgba(168, 85, 247, 0.5)",
+                  borderRadius: "8px", fontSize: "13px", marginBottom: "8px",
+                  whiteSpace: "pre-wrap", lineHeight: "1.5", color: "#e2e8f0"
+                }}>
+                  <div style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", marginBottom: "6px", color: "#c084fc" }}>Track Changes (AI Edits):</div>
+                  {getDiff((ind as IndicatorState & { originalCommentText?: string }).originalCommentText, ind.commentText).map((part, index) => {
+                    if (part.type === 'add') {
+                      return <span key={index} style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', fontWeight: 600, padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                    } else if (part.type === 'remove') {
+                      return <span key={index} style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', textDecoration: 'line-through', padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                    }
+                    return <span key={index}>{part.value}</span>;
+                  })}
+                </div>
+              )}
+
+              {ind.aiPendingReview && (
+                <div style={{ 
+                  display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, 
+                  background: "rgba(168, 85, 247, 0.1)", padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(168, 85, 247, 0.3)" 
+                }}>
+                  <span style={{ fontSize: 12, color: "#c084fc", fontWeight: 600 }}>✨ AI polished this text. Please review.</span>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)" }}
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        updateIndicator(idx, { 
+                          commentText: (ind as IndicatorState & { originalCommentText?: string }).originalCommentText || ind.commentText, 
+                          aiPendingReview: false 
+                        } as unknown as Partial<IndicatorState>); 
+                      }}>
+                      ↩️ Revert
+                    </button>
+                    <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "#10b981", color: "white", border: "none" }}
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        updateIndicator(idx, { aiPendingReview: false } as unknown as Partial<IndicatorState>); 
+                      }}>
+                      ✅ Accept
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* End of AI Polish UI */}
+
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 <button type="button" className="btn" onClick={(e) => { e.stopPropagation();setActiveIndex(idx); handlePolishWithAi(); }} disabled={isAiPolishing || ind.commentText.length < 5}>
                   {isAiPolishing ? "✨..." : "✨ AI Polish"}
                 </button>
+
                 <button type="button" className="btn" onClick={(e) => { 
                     e.stopPropagation(); 
                     setActiveIndex(idx); 
