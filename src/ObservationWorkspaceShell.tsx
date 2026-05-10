@@ -827,6 +827,7 @@ export const ObservationWorkspaceShell: React.FC<
   const audioChunksRef = useRef<Blob[]>([]);
   const transcriptionTargetRef = useRef<'indicator' | 'admin'>('indicator');
   const isDirtyRef = useRef(false);
+  const scrollToIndicatorRef = useRef<string | null>(null);
   useEffect(() => {
     if (indicators.length === 0) return;
     if (activeIndex >= indicators.length) {
@@ -862,6 +863,17 @@ export const ObservationWorkspaceShell: React.FC<
     }
     hydrateIds();
   }, [observationMeta.id]);
+  // Scroll to the indicator after the DOM updates
+  useEffect(() => {
+    if (!scrollToIndicatorRef.current) return;
+    const targetId = scrollToIndicatorRef.current;
+    scrollToIndicatorRef.current = null;
+    // The row has just been expanded; DOM now contains the fully sized element
+    const el = document.querySelector(`[data-indicator-id="${targetId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [openRowIds, activeIndex]); // triggers when expansion/active changes
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -2806,6 +2818,8 @@ export const ObservationWorkspaceShell: React.FC<
                                     onClick={() => {
                                       const globalIndex = indicators.findIndex(ind => ind.id === item.id);
                                       if (globalIndex === -1) return;
+                                      // Set the scroll target before updating state – the effect will handle it
+                                      scrollToIndicatorRef.current = item.id;
                                       setActiveIndex(globalIndex);
                                       setOpenRowIds(prev => {
                                         const next = new Set(prev);
@@ -2813,13 +2827,6 @@ export const ObservationWorkspaceShell: React.FC<
                                         return next;
                                       });
                                       setActiveRowId(item.id);
-                                      // Use a small delay to guarantee the DOM has rendered the expanded row
-                                      setTimeout(() => {
-                                        const el = document.querySelector<HTMLElement>(`[data-indicator-id="${item.id}"]`);
-                                        if (el) {
-                                          el.scrollIntoView({ behavior: "smooth", block: "center" });
-                                        }
-                                      }, 100);
                                     }}
                                     style={{
                                       background: "rgba(167, 139, 250, 0.15)",
@@ -4139,8 +4146,9 @@ const IndicatorRow = React.memo(({
   };
   return (
     <div
-      ref={setNodeRef} /* 🟢 FIXED: Attach DND Ref */
+      ref={setNodeRef}
       key={ind.id}
+      data-indicator-id={ind.id}
       className={`pc-row ${isExpanded ? "active" : ""}`}
       onClick={handleClick}
       onDoubleClick={(e) => {
@@ -4255,96 +4263,98 @@ const IndicatorRow = React.memo(({
             style={{ marginLeft: 4, accentColor: "var(--accent)" }} />
         </div>
       </div>
-      {isExpanded && (
-        <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
-          <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: isSidebar ? 0 : 12 }}>{ind.description}</p>
-          {!isSidebar && (
-            <>
-              {/* 🟢 NEW: Track Changes (Diff) View for PC Mode */}
-              {ind.aiPendingReview && (ind.originalCommentText || ind.originalCommentText === "") && (
-                <div style={{
-                  padding: "12px", background: "#020617", border: "1px solid rgba(168, 85, 247, 0.5)",
-                  borderRadius: "8px", fontSize: "13px", marginBottom: "8px",
-                  whiteSpace: "pre-wrap", lineHeight: "1.5", color: "#e2e8f0"
-                }}>
-                  <div style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", marginBottom: "6px", color: "#c084fc" }}>Track Changes (AI Edits):</div>
-                  {getDiff((ind as IndicatorState & { originalCommentText?: string }).originalCommentText, ind.commentText).map((part, index) => {
-                    if (part.type === 'add') {
-                      return <span key={index} style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', fontWeight: 600, padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
-                    } else if (part.type === 'remove') {
-                      return <span key={index} style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', textDecoration: 'line-through', padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
-                    }
-                    return <span key={index}>{part.value}</span>;
-                  })}
-                </div>
-              )}
-              {ind.aiPendingReview && (
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
-                  background: "rgba(168, 85, 247, 0.1)", padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(168, 85, 247, 0.3)"
-                }}>
-                  <span style={{ fontSize: 12, color: "#c084fc", fontWeight: 600 }}>✨ AI polished this text. Please review.</span>
-                  <div style={{ display: "flex", gap: "6px" }}>
-                    <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)" }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        updateIndicator(idx, {
-                          commentText: ind.originalCommentText || ind.commentText,
-                          aiPendingReview: false,
-                          originalCommentText: null
-                        });
-                      }}>
-                      ↩️ Revert
-                    </button>
-                    <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "#10b981", color: "white", border: "none" }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        updateIndicator(idx, {
-                          aiPendingReview: false,
-                          originalCommentText: null
-                        });
-                      }}>
-                      ✅ Accept
-                    </button>
+      {
+        isExpanded && (
+          <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
+            <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: isSidebar ? 0 : 12 }}>{ind.description}</p>
+            {!isSidebar && (
+              <>
+                {/* 🟢 NEW: Track Changes (Diff) View for PC Mode */}
+                {ind.aiPendingReview && (ind.originalCommentText || ind.originalCommentText === "") && (
+                  <div style={{
+                    padding: "12px", background: "#020617", border: "1px solid rgba(168, 85, 247, 0.5)",
+                    borderRadius: "8px", fontSize: "13px", marginBottom: "8px",
+                    whiteSpace: "pre-wrap", lineHeight: "1.5", color: "#e2e8f0"
+                  }}>
+                    <div style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", marginBottom: "6px", color: "#c084fc" }}>Track Changes (AI Edits):</div>
+                    {getDiff((ind as IndicatorState & { originalCommentText?: string }).originalCommentText, ind.commentText).map((part, index) => {
+                      if (part.type === 'add') {
+                        return <span key={index} style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', fontWeight: 600, padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                      } else if (part.type === 'remove') {
+                        return <span key={index} style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', textDecoration: 'line-through', padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                      }
+                      return <span key={index}>{part.value}</span>;
+                    })}
                   </div>
-                </div>
-              )}
-              {/* End of AI Polish UI */}
-              {/* End of AI Polish UI */}
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setActiveIndex(idx); handlePolishWithAi(idx); }} disabled={isAiPolishing || ind.commentText.length < 5}>
-                  {isAiPolishing ? "✨..." : "✨ AI Polish"}
-                </button>
-                <button type="button" className="btn" onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveIndex(idx);
-                  isRecording ? stopRecording('indicator') : startRecording();
-                }}
-                  style={{
-                    background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
-                    border: "1px solid var(--accent)",
-                    color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
-                    padding: "4px 12px", fontSize: 12, borderRadius: 20
+                )}
+                {ind.aiPendingReview && (
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
+                    background: "rgba(168, 85, 247, 0.1)", padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(168, 85, 247, 0.3)"
+                  }}>
+                    <span style={{ fontSize: 12, color: "#c084fc", fontWeight: 600 }}>✨ AI polished this text. Please review.</span>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateIndicator(idx, {
+                            commentText: ind.originalCommentText || ind.commentText,
+                            aiPendingReview: false,
+                            originalCommentText: null
+                          });
+                        }}>
+                        ↩️ Revert
+                      </button>
+                      <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "#10b981", color: "white", border: "none" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateIndicator(idx, {
+                            aiPendingReview: false,
+                            originalCommentText: null
+                          });
+                        }}>
+                        ✅ Accept
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* End of AI Polish UI */}
+                {/* End of AI Polish UI */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setActiveIndex(idx); handlePolishWithAi(idx); }} disabled={isAiPolishing || ind.commentText.length < 5}>
+                    {isAiPolishing ? "✨..." : "✨ AI Polish"}
+                  </button>
+                  <button type="button" className="btn" onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveIndex(idx);
+                    isRecording ? stopRecording('indicator') : startRecording();
                   }}
-                >
-                  {isTranscribing && activeIndex === idx ? "⌛..." : (isRecording && activeIndex === idx) ? "🛑 Stop" : "🎤 Rec"}
-                </button>
-              </div>
-              <textarea
-                ref={textareaRef} // 🟢 STABILIZER: Controlled focus
-                value={ind.commentText}
-                onChange={(e) => handleCommentChange(idx, e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  width: "100%", minHeight: 120, background: "#020617", color: "white", padding: 12, borderRadius: 8,
-                  border: isMissingComment ? "1px solid #ef4444" : needsReview ? "1px solid #eab308" : "1px solid #475569"
-                }}
-                placeholder="Type your observations here..."
-              />
-            </>
-          )}
-        </div>
-      )}
-    </div>
+                    style={{
+                      background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
+                      border: "1px solid var(--accent)",
+                      color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
+                      padding: "4px 12px", fontSize: 12, borderRadius: 20
+                    }}
+                  >
+                    {isTranscribing && activeIndex === idx ? "⌛..." : (isRecording && activeIndex === idx) ? "🛑 Stop" : "🎤 Rec"}
+                  </button>
+                </div>
+                <textarea
+                  ref={textareaRef} // 🟢 STABILIZER: Controlled focus
+                  value={ind.commentText}
+                  onChange={(e) => handleCommentChange(idx, e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "100%", minHeight: 120, background: "#020617", color: "white", padding: 12, borderRadius: 8,
+                    border: isMissingComment ? "1px solid #ef4444" : needsReview ? "1px solid #eab308" : "1px solid #475569"
+                  }}
+                  placeholder="Type your observations here..."
+                />
+              </>
+            )}
+          </div>
+        )
+      }
+    </div >
   );
 });
