@@ -1053,7 +1053,7 @@ export const ObservationWorkspaceShell: React.FC<
         }
       }));
       isDirtyRef.current = true;
-      // Show the result modal
+      // Set the result modal data (unchanged modal will still show both lists)
       setBatchResult({ changed, unchanged });
       setShowBatchResultModal(true);
     } catch (err: any) {
@@ -2789,18 +2789,118 @@ export const ObservationWorkspaceShell: React.FC<
               {isDesktopMode ? (
                 <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                   <div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={handleToggleAll}
-                        style={{ background: "rgba(30, 41, 59, 0.5)", border: "1px solid #334155", color: "#94a3b8", fontSize: 12 }}
-                      >
-                        {openRowIds.size === indicators.length ? "▲ Collapse All Rows" : "▼ Expand All Rows"}
-                      </button>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                      {/* Left side: List of indicators currently needing review (clickable, no trailing commas) */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {indicators.filter(ind => ind.aiPendingReview).length > 0 && (
+                          <>
+                            <span style={{ fontSize: 12, color: "#a78bfa", fontWeight: 600, whiteSpace: "nowrap" }}>
+                              ✨ Polished:
+                            </span>
+                            {indicators
+                              .filter(ind => ind.aiPendingReview)
+                              .map((item, idx) => (
+                                <React.Fragment key={item.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const globalIndex = indicators.findIndex(ind => ind.id === item.id);
+                                      if (globalIndex === -1) return;
+                                      setActiveIndex(globalIndex);
+                                      setOpenRowIds(prev => {
+                                        const next = new Set(prev);
+                                        next.add(item.id);
+                                        return next;
+                                      });
+                                      setActiveRowId(item.id);
+                                      // Use a small delay to guarantee the DOM has rendered the expanded row
+                                      setTimeout(() => {
+                                        const el = document.querySelector<HTMLElement>(`[data-indicator-id="${item.id}"]`);
+                                        if (el) {
+                                          el.scrollIntoView({ behavior: "smooth", block: "center" });
+                                        }
+                                      }, 100);
+                                    }}
+                                    style={{
+                                      background: "rgba(167, 139, 250, 0.15)",
+                                      border: "1px solid rgba(167, 139, 250, 0.4)",
+                                      color: "#c4b5fd",
+                                      borderRadius: "4px",
+                                      padding: "2px 8px",
+                                      fontSize: 12,
+                                      cursor: "pointer",
+                                      fontWeight: 500,
+                                    }}
+                                  >
+                                    {item.number}
+                                  </button>
+                                  {idx < indicators.filter(ind => ind.aiPendingReview).length - 1 && ' '}
+                                </React.Fragment>
+                              ))}
+                          </>
+                        )}
+                      </div>
+                      {/* Right side: Action buttons */}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {indicators.filter(ind => ind.aiPendingReview).length > 2 && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => {
+                                setIndicators(prev => prev.map(ind =>
+                                  ind.aiPendingReview ? { ...ind, aiPendingReview: false, originalCommentText: null } : ind
+                                ));
+                              }}
+                              style={{
+                                background: "rgba(34, 197, 94, 0.1)",
+                                border: "1px solid rgba(34, 197, 94, 0.4)",
+                                color: "#4ade80",
+                                fontSize: 12,
+                                padding: "4px 12px"
+                              }}
+                            >
+                              ✅ Approve All
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => {
+                                setIndicators(prev => prev.map(ind => {
+                                  if (!ind.aiPendingReview) return ind;
+                                  if (ind.originalCommentText != null) {
+                                    return {
+                                      ...ind,
+                                      commentText: ind.originalCommentText,
+                                      aiPendingReview: false,
+                                      originalCommentText: null
+                                    };
+                                  }
+                                  return { ...ind, aiPendingReview: false };
+                                }));
+                              }}
+                              style={{
+                                background: "rgba(239, 68, 68, 0.1)",
+                                border: "1px solid rgba(239, 68, 68, 0.4)",
+                                color: "#f87171",
+                                fontSize: 12,
+                                padding: "4px 12px"
+                              }}
+                            >
+                              ↩️ Reject All
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={handleToggleAll}
+                          style={{ background: "rgba(30, 41, 59, 0.5)", border: "1px solid #334155", color: "#94a3b8", fontSize: 12 }}
+                        >
+                          {openRowIds.size === indicators.length ? "▲ Collapse All Rows" : "▼ Expand All Rows"}
+                        </button>
+                      </div>
                     </div>
-                    {/* 🟢 FIXED: Add SortableContext wrapper and sort the map */}
-                    {/* 🟢 FIXED: Add SortableContext wrapper and sort the map */}
                     <SortableContext items={indicators.map(i => i.id)} strategy={verticalListSortingStrategy}>
                       {indicators
                         .slice() // Copy array before sorting
