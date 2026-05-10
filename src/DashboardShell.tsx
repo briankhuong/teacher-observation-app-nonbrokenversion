@@ -15,7 +15,6 @@ import { buildTeacherPreCallHtml } from "./emailTemplates/teacherPreCall";
 import { buildTeacherPostCallHtml } from "./emailTemplates/teacherPostCall";
 import { buildAdminUpdateHtml } from "./emailTemplates/adminUpdate";
 import { buildAdminUpdateBulkHtml } from "./emailTemplates/adminUpdateBulk";
-
 import { clientMergeTeacherSheet, clientMergeAdminSheet } from './utils/clientExcelMerge';
 import { EditObservationModal } from './components/EditObservationModal';
 import { get, set, keys, del } from 'idb-keyval';
@@ -27,17 +26,13 @@ import { isGrapeSeedTokenValid } from './utils/authHelpers';
 import { GrapeSeedLoginModal } from './components/GrapeSeedLoginModal';
 import type { TeacherEntry } from "./emailTemplates/adminUpdateBulk";
 import type { PerformanceRating } from "./constants";
-
 // ✅ CORRECT (Matches your screenshots & Vercel settings)
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
-
 const SUMMARY_STATE_KEY = "obs-am-summary-v1";
 const STORAGE_PREFIX = "obs-v1-";
-
 type StatusColor = "good" | "mixed" | "growth";
 type GroupMode = "none" | "month" | "school" | "campus";
 type SortMode = "newest" | "oldest" | "teacher-az" | "teacher-za";
-
 // --- Skeleton Component (Dark Mode) ---
 const SkeletonRow = () => (
   <div className="obs-row" style={{ pointerEvents: "none", opacity: 0.6 }}>
@@ -56,7 +51,6 @@ const SkeletonRow = () => (
     </div>
   </div>
 );
-
 export interface DashboardObservationRow {
   id: string;
   teacherName: string;
@@ -81,17 +75,15 @@ export interface DashboardObservationRow {
   lastSync?: number;
   syncStatus?: string;
 }
-
 type RecentMergePanel =
   | null
   | {
-      obsId: string;
-      kind: "teacher" | "admin";
-      sheetUrl: string;
-      sheetName: string;
-      mergedAt: string; // ISO
-    };
-
+    obsId: string;
+    kind: "teacher" | "admin";
+    sheetUrl: string;
+    sheetName: string;
+    mergedAt: string; // ISO
+  };
 interface DashboardProps {
   onOpenObservation: (obs: {
     id: string;
@@ -106,18 +98,15 @@ interface DashboardProps {
   highlightObservationId?: string | null;
   onHighlightComplete?: () => void;
 }
-
 /* ------------------------------
    SCHOOL → AM MAPPING
 --------------------------------- */
-
 interface SchoolInfo {
   schoolName: string;
   campus: string;
   amName: string;
   amEmail: string;
 }
-
 const SCHOOL_DIRECTORY: SchoolInfo[] = [
   { schoolName: "19/5", campus: "Tứ Hiệp", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
   { schoolName: "Ánh Trăng", campus: "Yên Xá", amName: "Emma", amEmail: "emma.swanepoel@grapeseed.com" },
@@ -175,7 +164,6 @@ const SCHOOL_DIRECTORY: SchoolInfo[] = [
   { schoolName: "VSK", campus: "158 Võ Chí Công", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
   { schoolName: "VSK Sunshine", campus: "Cổ Nhuế", amName: "Vivian", amEmail: "vivian.pham@grapeseed.com" },
 ];
-
 function findSchoolInfo(
   schoolName: string,
   campus: string
@@ -188,22 +176,17 @@ function findSchoolInfo(
     ) ?? null
   );
 }
-
 function amKeyFromSchool(info: SchoolInfo): string {
   return `${info.amEmail}|${info.amName}`;
 }
-
 function parseAmKey(key: string): { email: string; name: string } {
   const [email, name] = key.split("|");
   return { email, name };
 }
-
 /* ------------------------------
    AM SUMMARY TYPES
 --------------------------------- */
-
 type SummaryStatus = "none" | "green" | "red";
-
 // Add adminSummaryVn here
 export interface AmSummaryRow {
   schoolName: string;
@@ -213,20 +196,16 @@ export interface AmSummaryRow {
   nextSteps: string;
   adminSummaryVn?: string | null; // <--- ADD THIS LINE
 }
-
 type AmSummarySentMap = Record<string, number>; // key = `${amKey}::${monthKey}`
-
 /* ------------------------------
    DATE HELPERS
 --------------------------------- */
-
 // Parse "YYYY-MM-DD" or similar into timestamp
 function safeParseTimestamp(dateStr: string): number | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   return Number.isNaN(d.getTime()) ? null : d.getTime();
 }
-
 // Month key for internal calculations
 function monthKeyFromTs(ts: number | null): string | null {
   if (!ts) return null;
@@ -235,20 +214,16 @@ function monthKeyFromTs(ts: number | null): string | null {
   const y = d.getFullYear();
   return `${String(m).padStart(2, "0")}.${y}`; // e.g. "11.2025"
 }
-
 /* ------------------------------
    META PERSISTENCE HELPER
 --------------------------------- */
 // src/DashboardShell.tsx
-
 async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
   let nextMeta: any = {};
   let fullLocalData: any = null;
-
   // 1. Try to read from IndexedDB first (primary storage)
   const idbKey = `${STORAGE_PREFIX}${obsId}`;
   fullLocalData = await get(idbKey);
-
   if (fullLocalData) {
     // Update the meta in the local copy
     fullLocalData.meta = { ...(fullLocalData.meta || {}), ...patch };
@@ -257,7 +232,6 @@ async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
     // Fallback to localStorage for migration
     const key = `${STORAGE_PREFIX}${obsId}`;
     const rawLocal = localStorage.getItem(key);
-    
     if (rawLocal) {
       const parsed = JSON.parse(rawLocal);
       parsed.meta = { ...(parsed.meta || {}), ...patch };
@@ -271,7 +245,6 @@ async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
         .select("id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn")
         .eq("id", obsId)
         .single();
-
       if (!error && data) {
         nextMeta = { ...(data.meta || {}), ...patch };
         fullLocalData = {
@@ -288,14 +261,12 @@ async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
       }
     }
   }
-
   // 2. Save to Supabase
   try {
     const { error } = await supabase
       .from("observations")
       .update({ meta: nextMeta })
       .eq("id", obsId);
-
     if (error) throw error;
     console.log("[persistMerged] Saved to DB:", patch);
   } catch (e) {
@@ -303,26 +274,21 @@ async function persistMergedLinkToObservationMeta(obsId: string, patch: any) {
     alert("Warning: Could not save status to database. Check internet connection.");
     return nextMeta;
   }
-
   // 3. Fetch the server's updated_at to sync timestamps
   const { data: updatedRow, error: fetchError } = await supabase
     .from("observations")
     .select("updated_at")
     .eq("id", obsId)
     .single();
-
   const serverUpdatedAt = fetchError ? Date.now() : new Date(updatedRow.updated_at).getTime();
-
   // 4. Update local IndexedDB with the correct timestamps
   if (fullLocalData) {
     fullLocalData.lastSync = serverUpdatedAt;
     fullLocalData.updatedAt = serverUpdatedAt;
     await set(idbKey, fullLocalData);
   }
-
   return nextMeta;
 }
-
 /* ------------------------------
    GROUPING HELPERS
 --------------------------------- */
@@ -336,14 +302,12 @@ function groupBy<T>(
     if (!buckets[key]) buckets[key] = [];
     buckets[key].push(item);
   });
-
   return Object.entries(buckets).map(([key, list]) => ({
     key,
     label: key,
     items: list,
   }));
 }
-
 // ------------------------------
 // SHEET NAME HELPERS
 // ------------------------------
@@ -352,11 +316,9 @@ function excelSafeSheetName(input: string): string {
     .replace(/[:\\\/\?\*\[\]]/g, " ") // illegal chars
     .replace(/\s+/g, " ")
     .trim();
-
   const nonEmpty = cleaned.length > 0 ? cleaned : "Sheet";
   return nonEmpty.slice(0, 31);
 }
-
 function monthYearFromDate(dateStr?: string | null): string {
   if (!dateStr) return "00.0000";
   const d = new Date(dateStr);
@@ -365,36 +327,29 @@ function monthYearFromDate(dateStr?: string | null): string {
   const year = d.getFullYear();
   return `${month}.${year}`; // "12.2025"
 }
-
 /** TEACHER: "MM.YYYY" */
 function buildTeacherSheetName(obs: DashboardObservationRow): string {
   const dateStr =
     (obs as any).meta?.date ||
     obs.isoDate ||
     null;
-
   return excelSafeSheetName(monthYearFromDate(dateStr));
 }
-
 /** ADMIN: "TeacherName MM.YYYY SupportType" */
 function buildAdminSheetName(obs: DashboardObservationRow): string {
   const teacherName = String((obs as any).meta?.teacherName || obs.teacherName || "Teacher").trim();
-
   const rawSupport = String((obs as any).meta?.supportType || obs.supportType || "Visit").trim();
   const supportType =
     rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
       ? rawSupport
       : "Visit";
-
   const dateStr =
     (obs as any).meta?.date ||
     obs.isoDate ||
     null;
-
   const base = `${teacherName} ${monthYearFromDate(dateStr)} ${supportType}`;
   return excelSafeSheetName(base);
 }
-
 /* ------------------------------
    DATA LOAD HELPERS
 --------------------------------- */
@@ -408,12 +363,10 @@ function readMetaFromLocalStorage(obsId: string): any | null {
     return null;
   }
 }
-
 function getStableMetaForRow(obs: DashboardObservationRow): any {
   // prefer row meta, fallback to localStorage meta (survives reload)
   return (obs as any).meta || readMetaFromLocalStorage(obs.id) || {};
 }
-
 function loadFullObservation(observationId: string): any | null {
   const key = `obs-v1-${observationId}`;
   const raw = localStorage.getItem(key);
@@ -424,14 +377,12 @@ function loadFullObservation(observationId: string): any | null {
     return null;
   }
 }
-
 function normalizeIndicators(full: any): any[] {
   const ind = full?.indicators;
   if (Array.isArray(ind)) return ind;
   if (Array.isArray(ind?.indicators)) return ind.indicators;
   return [];
 }
-
 function toMetaForExport(
   full: any,
   obs: DashboardObservationRow
@@ -442,7 +393,6 @@ function toMetaForExport(
     rawSupport === "Training" || rawSupport === "LVA" || rawSupport === "Visit"
       ? rawSupport
       : "Visit";
-
   return {
     teacherName: m.teacherName || obs.teacherName || "",
     schoolName: m.schoolName || obs.schoolName || "",
@@ -453,10 +403,8 @@ function toMetaForExport(
     date: m.date || obs.isoDate || undefined,
   };
 }
-
 function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
   const list = normalizeIndicators(full);
-
   return list.map((i: any) => ({
     id: String(i.id || ""),
     number: String(i.number || ""),
@@ -468,8 +416,6 @@ function toIndicatorsForExport(full: any): IndicatorStateForExport[] {
     includeInTrainerSummary: i.includeInTrainerSummary === true,
   }));
 }
-
-
 function cleanTextForAdmin(text: string) {
   if (!text) return "";
   return text
@@ -478,7 +424,7 @@ function cleanTextForAdmin(text: string) {
       let clean = line.trim();
       // Remove (GA) (case insensitive)
       if (clean.toUpperCase().startsWith("(GA)")) {
-        clean = clean.substring(4).trim(); 
+        clean = clean.substring(4).trim();
       }
       // Remove Hyphen
       else if (clean.startsWith("-")) {
@@ -492,13 +438,10 @@ function cleanTextForAdmin(text: string) {
 // ✅ NEW: Helper to bulk-fetch defaults for a list of observations
 async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[]) {
   if (rawObs.length === 0) return rawObs;
-
   const schoolNames = [...new Set(rawObs.map(o => o.schoolName).filter(Boolean))];
   const teacherNames = [...new Set(rawObs.map(o => o.teacherName).filter(Boolean))];
-
   let schoolData: any[] = [];
   let teacherData: any[] = [];
-
   // 1. FETCH DATA (Online vs Offline Strategy)
   if (navigator.onLine) {
     // Online: Query Supabase
@@ -521,7 +464,6 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
     try {
       const allSchools = (await get<any[]>("offline_schools")) || [];
       const allTeachers = (await get<any[]>("offline_teachers")) || [];
-      
       // Filter in memory (mimic the DB query)
       schoolData = allSchools.filter(s => schoolNames.includes(s.school_name));
       teacherData = allTeachers.filter(t => teacherNames.includes(t.name));
@@ -529,7 +471,6 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
       console.warn("Failed to load offline defaults", e);
     }
   }
-
   // 2. Build Maps
   let schoolMap = new Map<string, { adminUrl: string; viewUrl: string }>();
   schoolData.forEach((s: any) => {
@@ -538,37 +479,31 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
       viewUrl: s.admin_workbook_view_url
     });
   });
-
-  let teacherMap = new Map<string, string>(); 
+  let teacherMap = new Map<string, string>();
   teacherData.forEach((t: any) => {
-    const key = `${t.name}|${t.school_name}`; 
+    const key = `${t.name}|${t.school_name}`;
     teacherMap.set(key, t.worksheet_url);
   });
-
   // 3. Merge Defaults
   return rawObs.map(obs => {
     const sDefaults = schoolMap.get(obs.schoolName);
     const tKey = `${obs.teacherName}|${obs.schoolName}`;
     const tDefaultUrl = teacherMap.get(tKey);
-
-    const finalTeacherUrl = 
+    const finalTeacherUrl =
       (obs as any).teacherWorkbookUrl ||
-      obs.meta?.teacherWorkbookUrl || 
-      tDefaultUrl || 
+      obs.meta?.teacherWorkbookUrl ||
+      tDefaultUrl ||
       null;
-
-    const finalAdminUrl = 
+    const finalAdminUrl =
       (obs as any).adminWorkbookUrl ||
-      obs.meta?.adminWorkbookUrl || 
-      sDefaults?.adminUrl || 
+      obs.meta?.adminWorkbookUrl ||
+      sDefaults?.adminUrl ||
       null;
-
-    const finalViewUrl = 
+    const finalViewUrl =
       (obs as any).adminViewOnlyUrl ||
-      obs.meta?.adminWorkbookViewUrl || 
-      sDefaults?.viewUrl || 
+      obs.meta?.adminWorkbookViewUrl ||
+      sDefaults?.viewUrl ||
       null;
-
     return {
       ...obs,
       teacherWorkbookUrl: finalTeacherUrl,
@@ -583,7 +518,6 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
     };
   });
 }
-
 /* ------------------------------
    COMPONENT
 --------------------------------- */
@@ -593,303 +527,258 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   onHighlightComplete,
 }) => {
   const { user } = useAuth();
-  const trainerName = 
-    user?.user_metadata?.full_name || 
-    user?.user_metadata?.name || 
+  const trainerName =
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
     user?.user_metadata?.display_name ||
     (user?.email ? user.email.split('@')[0] : "GrapeSEED Trainer");
-
   const [observations, setObservations] =
     useState<DashboardObservationRow[]>([]);
   // Stats sidebar data
   const [schoolsAll, setSchoolsAll] = useState<any[]>([]);
   // Custom summary entries (inline editable)
-const defaultCustomEntries = {
-  trainingDelivered: { label: "Training Delivered", values: { GSE: "", "Com-LSE": "", "Com-Nexus": "", "Com-Connect": "", LSE: "", Connect: "", Nexus: "" } as Record<string, string>, position: 1, type: "multi-number" },
-  totalTraining: { label: "Total training", value: "", position: 2, type: "number" },
-  ir: { label: "IR", value: "", position: 3, type: "number" },
-  otherProjects: { label: "Other Projects", value: "", position: 4, type: "text" },
-  specialNotes: { label: "Special Notes", value: "", position: 5, type: "text" },
-};
-
-const [customEntries, setCustomEntries] = useState<any>(() => {
-  try {
-    const saved = localStorage.getItem("dashboardCustomEntries");
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return defaultCustomEntries;
-});
-const [customTotalTraining, setCustomTotalTraining] = useState<string>('');
-
-// --- Monthly snapshot states ---
-const today = new Date();
-const [displayMonth, setDisplayMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
-const [snapshot, setSnapshot] = useState<{ system_stats: any; custom_entries: any } | null>(null);
-const [savingSnapshot, setSavingSnapshot] = useState(false);
-
-// Helper: determine if displayMonth is current month
-const isCurrentMonth = React.useMemo(() => {
-  const now = new Date();
-  return displayMonth.getFullYear() === now.getFullYear() && displayMonth.getMonth() === now.getMonth();
-}, [displayMonth]);
-
-const [isEditingCustom, setIsEditingCustom] = useState(false);
+  const defaultCustomEntries = {
+    trainingDelivered: { label: "Training Delivered", values: { GSE: "", "Com-LSE": "", "Com-Nexus": "", "Com-Connect": "", LSE: "", Connect: "", Nexus: "" } as Record<string, string>, position: 1, type: "multi-number" },
+    totalTraining: { label: "Total training", value: "", position: 2, type: "number" },
+    ir: { label: "IR", value: "", position: 3, type: "number" },
+    otherProjects: { label: "Other Projects", value: "", position: 4, type: "text" },
+    specialNotes: { label: "Special Notes", value: "", position: 5, type: "text" },
+  };
+  const [customEntries, setCustomEntries] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem("dashboardCustomEntries");
+      if (saved) return JSON.parse(saved);
+    } catch { }
+    return defaultCustomEntries;
+  });
+  const [customTotalTraining, setCustomTotalTraining] = useState<string>('');
+  // --- Monthly snapshot states ---
+  const today = new Date();
+  const [displayMonth, setDisplayMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const [snapshot, setSnapshot] = useState<{ system_stats: any; custom_entries: any } | null>(null);
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
+  // Helper: determine if displayMonth is current month
+  const isCurrentMonth = React.useMemo(() => {
+    const now = new Date();
+    return displayMonth.getFullYear() === now.getFullYear() && displayMonth.getMonth() === now.getMonth();
+  }, [displayMonth]);
+  const [isEditingCustom, setIsEditingCustom] = useState(false);
   const [teachersAll, setTeachersAll] = useState<any[]>([]);
   const [searchText, setSearchText] = useState("");
   const [recentMergePanel, setRecentMergePanel] =
-   useState<RecentMergePanel>(null);
-
-   const [loading, setLoading] = useState(true); // 🟢 Tracks initial cache load
-
-// 🟢 NEW: State for the Sync Action Dashboard
-// --- DashboardShell.tsx (Approx Line 420) ---
-const [isActionDashboardOpen, setIsActionDashboardOpen] = useState(false);
+    useState<RecentMergePanel>(null);
+  const [loading, setLoading] = useState(true); // 🟢 Tracks initial cache load
+  // 🟢 NEW: State for the Sync Action Dashboard
+  // --- DashboardShell.tsx (Approx Line 420) ---
+  const [isActionDashboardOpen, setIsActionDashboardOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
-const [isPulseLoading, setIsPulseLoading] = useState(false); // 🆕 Track background loading
-const [lastPulseTime, setLastPulseTime] = useState<number | null>(null); // 🆕 Session gate
-const [syncPulseResults, setSyncPulseResults] = useState<{
-  newCampuses: any[];
-  disabledCampuses: any[];
-  classlessClasses: any[];
-  nameMismatches: any[];
-  newTeachers: any[];
-  teacherTagIssues: any[];
-  disconnectedCampuses: any[];
-}>(() => {
-  // 🟢 PERSISTENT INITIALIZER
-  // This runs exactly once when the component first loads
-  const cached = localStorage.getItem("syncPulseResults");
-  if (cached) {
+  const [isPulseLoading, setIsPulseLoading] = useState(false); // 🆕 Track background loading
+  const [lastPulseTime, setLastPulseTime] = useState<number | null>(null); // 🆕 Session gate
+  const [syncPulseResults, setSyncPulseResults] = useState<{
+    newCampuses: any[];
+    disabledCampuses: any[];
+    classlessClasses: any[];
+    nameMismatches: any[];
+    newTeachers: any[];
+    teacherTagIssues: any[];
+    disconnectedCampuses: any[];
+  }>(() => {
+    // 🟢 PERSISTENT INITIALIZER
+    // This runs exactly once when the component first loads
+    const cached = localStorage.getItem("syncPulseResults");
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        console.error("Failed to parse cached sync pulse results:", e);
+      }
+    }
+    // Fallback to empty arrays if no cache exists
+    return {
+      newCampuses: [],
+      disabledCampuses: [],
+      classlessClasses: [],
+      nameMismatches: [],
+      newTeachers: [],
+      teacherTagIssues: [],
+      disconnectedCampuses: []
+    };
+  });
+  const lastHighlightedRef = useRef<string | null>(null);
+  const [pendingObservation, setPendingObservation] = useState<DashboardObservationRow | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  // ✅ FULL UPDATE: Unified Resolution Logic with Data Cloning & UI Cleanup
+  const handleResolveConflict = async (type: string, data: any) => {
     try {
-      return JSON.parse(cached);
-    } catch (e) {
-      console.error("Failed to parse cached sync pulse results:", e);
-    }
-  }
-
-  // Fallback to empty arrays if no cache exists
-  return {
-    newCampuses: [],
-    disabledCampuses: [],
-    classlessClasses: [],
-    nameMismatches: [],
-    newTeachers: [],
-    teacherTagIssues: [],
-    disconnectedCampuses: []
-  };
-});
-
-const lastHighlightedRef = useRef<string | null>(null);
-
-const [pendingObservation, setPendingObservation] = useState<DashboardObservationRow | null>(null);
-const [showLoginModal, setShowLoginModal] = useState(false);
-
-
-// ✅ FULL UPDATE: Unified Resolution Logic with Data Cloning & UI Cleanup
-const handleResolveConflict = async (type: string, data: any) => {
-  try {
-    if (!user?.id) return;
-
-    // --- 1. DATABASE UPDATES ---
-    
-    if (type === 'newCampus') {
-      console.log("🛠 Cloning data for New Campus:", data.name);
-      
-      // FETCH TEMPLATE: Get parent school details from DB to clone AM/Workbook info
-      const { data: templateRows } = await supabase
-        .from("schools")
-        .select("am_name, am_email, admin_workbook_url, admin_workbook_view_url")
-        .eq("school_name", data.parent_school_name)
-        .eq("trainer_id", user.id)
-        .limit(1);
-
-      // Destructure with defaults (Ensures no 'undefined' properties hit Supabase)
-      const { 
-        am_name = null, 
-        am_email = null, 
-        admin_workbook_url = null, 
-        admin_workbook_view_url = null 
-      } = (templateRows?.[0] || {}) as any;
-
-      const { error } = await supabase.from("schools").insert({
-        school_name: data.parent_school_name,
-        campus_name: data.name,
-        campus_id: data.id,
-        official_code: data.official_code,
-        trainer_id: user.id,
-        disabled: false,
-        // ✅ SOURCE: CLONED FROM DB
-        am_name,
-        am_email,
-        admin_workbook_url,
-        admin_workbook_view_url,
-        // ✅ SOURCE: MAPPED FROM API
-        address: data.fullAddress || null,
-        admin_phone: data.phone || null
-      }).select('id');
-
-      if (error) throw error;
-      alert(`✨ Successfully added ${data.name} to ${data.parent_school_name}`);
-    } 
-    
-else if (type === 'nameMismatch') {
-  // 🟢 ENHANCED LOGIC: Check if we also need to "Heal" the ID
-  const updatePayload: any = { campus_name: data.api_name };
-  
-  if (data.needs_id) {
-    updatePayload.campus_id = data.needs_id;
-  }
-
-  const { error } = await supabase.from("schools")
-    .update(updatePayload)
-    .eq("id", data.db_record.id).select('id');
-
-  if (error) throw error;
-  
-  const msg = data.needs_id 
-    ? `✅ Repaired Legacy Record! Name updated to ${data.api_name} and ID stamped.`
-    : `✅ Updated name to: ${data.api_name}`;
-    
-  alert(msg);
-}
-
-    else if (type === 'deactivateCampus') {
-       const { error } = await supabase.from("schools")
-         .update({ disabled: true })
-         .eq("id", data.id);
-       
-       if (error) throw error;
-       alert("🛑 Campus deactivated.");
-    }
-
-   else if (type === 'linkCampus') {
-  console.log("🔗 Attempting to Link Legacy Record...");
-
-  // 1. Try the update first
-  const { error } = await supabase.from("schools")
-    .update({ 
-      campus_id: data.api_item.id,
-      campus_name: data.api_item.name, 
-      address: data.api_item.fullAddress || null, 
-      admin_phone: data.api_item.phone || null,
-      disabled: false                      
-    })
-    .eq("id", data.db_id);
-
-  if (error) {
-    // 2. Handle Unique Constraint Conflict (Test 1)
-    if (error.code === '23505') {
-      const confirmDelete = window.confirm(
-        `A campus named "${data.api_item.name}" already exists.\n\n` +
-        `To link this record, the existing duplicate must be removed. ` +
-        `Would you like to DELETE the old record and proceed?`
-      );
-
-      if (confirmDelete) {
-        // User said YES: Delete the duplicate and try again
-        await supabase.from("schools")
-          .delete()
-          .eq("trainer_id", user.id) // 👈 Changed from userId to user.id
-          .eq("campus_name", data.api_item.name);
-
-        // Retry the update now that the path is clear
-        await supabase.from("schools")
-          .update({ 
+      if (!user?.id) return;
+      // --- 1. DATABASE UPDATES ---
+      if (type === 'newCampus') {
+        console.log("🛠 Cloning data for New Campus:", data.name);
+        // FETCH TEMPLATE: Get parent school details from DB to clone AM/Workbook info
+        const { data: templateRows } = await supabase
+          .from("schools")
+          .select("am_name, am_email, admin_workbook_url, admin_workbook_view_url")
+          .eq("school_name", data.parent_school_name)
+          .eq("trainer_id", user.id)
+          .limit(1);
+        // Destructure with defaults (Ensures no 'undefined' properties hit Supabase)
+        const {
+          am_name = null,
+          am_email = null,
+          admin_workbook_url = null,
+          admin_workbook_view_url = null
+        } = (templateRows?.[0] || {}) as any;
+        const { error } = await supabase.from("schools").insert({
+          school_name: data.parent_school_name,
+          campus_name: data.name,
+          campus_id: data.id,
+          official_code: data.official_code,
+          trainer_id: user.id,
+          disabled: false,
+          // ✅ SOURCE: CLONED FROM DB
+          am_name,
+          am_email,
+          admin_workbook_url,
+          admin_workbook_view_url,
+          // ✅ SOURCE: MAPPED FROM API
+          address: data.fullAddress || null,
+          admin_phone: data.phone || null
+        }).select('id');
+        if (error) throw error;
+        alert(`✨ Successfully added ${data.name} to ${data.parent_school_name}`);
+      }
+      else if (type === 'nameMismatch') {
+        // 🟢 ENHANCED LOGIC: Check if we also need to "Heal" the ID
+        const updatePayload: any = { campus_name: data.api_name };
+        if (data.needs_id) {
+          updatePayload.campus_id = data.needs_id;
+        }
+        const { error } = await supabase.from("schools")
+          .update(updatePayload)
+          .eq("id", data.db_record.id).select('id');
+        if (error) throw error;
+        const msg = data.needs_id
+          ? `✅ Repaired Legacy Record! Name updated to ${data.api_name} and ID stamped.`
+          : `✅ Updated name to: ${data.api_name}`;
+        alert(msg);
+      }
+      else if (type === 'deactivateCampus') {
+        const { error } = await supabase.from("schools")
+          .update({ disabled: true })
+          .eq("id", data.id);
+        if (error) throw error;
+        alert("🛑 Campus deactivated.");
+      }
+      else if (type === 'linkCampus') {
+        console.log("🔗 Attempting to Link Legacy Record...");
+        // 1. Try the update first
+        const { error } = await supabase.from("schools")
+          .update({
             campus_id: data.api_item.id,
             campus_name: data.api_item.name,
-            disabled: false 
+            address: data.api_item.fullAddress || null,
+            admin_phone: data.api_item.phone || null,
+            disabled: false
           })
           .eq("id", data.db_id);
-
-        alert("✅ Duplicate removed and record linked successfully!");
-      } else {
-        return; // User said NO: Exit safely
+        if (error) {
+          // 2. Handle Unique Constraint Conflict (Test 1)
+          if (error.code === '23505') {
+            const confirmDelete = window.confirm(
+              `A campus named "${data.api_item.name}" already exists.\n\n` +
+              `To link this record, the existing duplicate must be removed. ` +
+              `Would you like to DELETE the old record and proceed?`
+            );
+            if (confirmDelete) {
+              // User said YES: Delete the duplicate and try again
+              await supabase.from("schools")
+                .delete()
+                .eq("trainer_id", user.id) // 👈 Changed from userId to user.id
+                .eq("campus_name", data.api_item.name);
+              // Retry the update now that the path is clear
+              await supabase.from("schools")
+                .update({
+                  campus_id: data.api_item.id,
+                  campus_name: data.api_item.name,
+                  disabled: false
+                })
+                .eq("id", data.db_id);
+              alert("✅ Duplicate removed and record linked successfully!");
+            } else {
+              return; // User said NO: Exit safely
+            }
+          } else {
+            throw error;
+          }
+        } else {
+          alert(`🔗 Linked successfully! Record updated to ${data.api_item.name}`);
+        }
       }
-    } else {
-      throw error;
-    }
-  } else {
-    alert(`🔗 Linked successfully! Record updated to ${data.api_item.name}`);
-  }
-}
-
-else if (type === 'deactivateCampus') {
-  console.log("🗑️ Deactivating Ghost Campus...");
-  
-  // We simply set disabled to true in the DB
-  const { error } = await supabase
-    .from("schools")
-    .update({ disabled: true })
-    .eq("id", data.id);
-
-  if (error) throw error;
-  alert(`🗑️ "${data.campus_name}" has been deactivated.`);
-}
-
-// --- DashboardShell.tsx (Inside handleResolveConflict) ---
-
-// --- DashboardShell.tsx (Approx Line 520) ---
-else if (type === 'newTeacher') {
-  console.log("👤 Surgically Syncing Teacher:", data.name);
-  
-  const response = await fetch(`${MERGE_SERVER_BASE}/api/sync-surgical`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      userId: user.id, 
-      teacherData: data
-      // 🆕 Token is no longer passed from here!
-    })
-  });
-
-  if (!response.ok) throw new Error("Surgical Sync failed");
-  alert(`👤 ${data.name} has been added to the database!`);
-}
-
-// Inside handleResolveConflict...
-else if (type === 'teacherTagIssue') {
-  console.log("🏷️ Fixing tags for:", data.name);
-  const response = await fetch(`${MERGE_SERVER_BASE}/api/sync-surgical`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      userId: user.id, 
-      teacherData: {
-        grapeseed_id: data.gseed_id, // Ensure server sends gseed_id
-        name: data.name,
-        school_id: data.school_id, // Needed for surgical sync
-        // ... include other necessary fields
+      else if (type === 'deactivateCampus') {
+        console.log("🗑️ Deactivating Ghost Campus...");
+        // We simply set disabled to true in the DB
+        const { error } = await supabase
+          .from("schools")
+          .update({ disabled: true })
+          .eq("id", data.id);
+        if (error) throw error;
+        alert(`🗑️ "${data.campus_name}" has been deactivated.`);
       }
-    })
-  });
-  if (!response.ok) throw new Error("Tag Re-Sync failed");
-  alert(`🏷️ Tags for ${data.name} have been updated!`);
-}
-
-
-    // --- 2. UI CLEANUP SECTION ---
-    
-    setSyncPulseResults(prev => {
-      // Map the resolve type to the correct array in our state
-    const listKey = 
-    type === 'newCampus' ? 'newCampuses' : 
-    type === 'deactivateCampus' ? 'disabledCampuses' : 
-    type === 'linkCampus' ? 'disconnectedCampuses' : 
-    type === 'newTeacher' ? 'newTeachers' : 
-    type === 'teacherTagIssue' ? 'teacherTagIssues' : // 🆕 Added
-    'nameMismatches';
-
-      return {
-        ...prev,
-        [listKey]: (prev as any)[listKey].filter((item: any) => {
-          /* 🛑 CRITICAL FIX FOR ISSUE #1:
-             Name mismatches and Disconnected items nest the ID differently.
-             New Campuses and Deactivations have the ID at the top level.
-          */
-          let itemId, resolvedId;
-          
-        if (type === 'nameMismatch') {
+      // --- DashboardShell.tsx (Inside handleResolveConflict) ---
+      // --- DashboardShell.tsx (Approx Line 520) ---
+      else if (type === 'newTeacher') {
+        console.log("👤 Surgically Syncing Teacher:", data.name);
+        const response = await fetch(`${MERGE_SERVER_BASE}/api/sync-surgical`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            teacherData: data
+            // 🆕 Token is no longer passed from here!
+          })
+        });
+        if (!response.ok) throw new Error("Surgical Sync failed");
+        alert(`👤 ${data.name} has been added to the database!`);
+      }
+      // Inside handleResolveConflict...
+      else if (type === 'teacherTagIssue') {
+        console.log("🏷️ Fixing tags for:", data.name);
+        const response = await fetch(`${MERGE_SERVER_BASE}/api/sync-surgical`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            teacherData: {
+              grapeseed_id: data.gseed_id, // Ensure server sends gseed_id
+              name: data.name,
+              school_id: data.school_id, // Needed for surgical sync
+              // ... include other necessary fields
+            }
+          })
+        });
+        if (!response.ok) throw new Error("Tag Re-Sync failed");
+        alert(`🏷️ Tags for ${data.name} have been updated!`);
+      }
+      // --- 2. UI CLEANUP SECTION ---
+      setSyncPulseResults(prev => {
+        // Map the resolve type to the correct array in our state
+        const listKey =
+          type === 'newCampus' ? 'newCampuses' :
+            type === 'deactivateCampus' ? 'disabledCampuses' :
+              type === 'linkCampus' ? 'disconnectedCampuses' :
+                type === 'newTeacher' ? 'newTeachers' :
+                  type === 'teacherTagIssue' ? 'teacherTagIssues' : // 🆕 Added
+                    'nameMismatches';
+        return {
+          ...prev,
+          [listKey]: (prev as any)[listKey].filter((item: any) => {
+            /* 🛑 CRITICAL FIX FOR ISSUE #1:
+               Name mismatches and Disconnected items nest the ID differently.
+               New Campuses and Deactivations have the ID at the top level.
+            */
+            let itemId, resolvedId;
+            if (type === 'nameMismatch') {
               itemId = item.db_record.id;
               resolvedId = data.db_record.id;
             } else if (type === 'linkCampus') {
@@ -903,49 +792,40 @@ else if (type === 'teacherTagIssue') {
               itemId = item.id;
               resolvedId = data.id;
             }
-          
-          return itemId !== resolvedId;
-        })
-      };
-    });
-
-  } catch (err) {
-    console.error("Resolution Error:", err);
-    alert("Resolution failed: " + (err as any).message);
-  }
-};
-
-// ✅ BRIDGE: Calls your existing server-side Pulse Engine
-const runSyncPulse = async () => {
-  if (!user?.id) return;
-
-  try {
-    // 1. Show the user something is happening
-    console.log("📡 Calling /api/pulse-audit...");
-    
-    // 2. Call the endpoint you ALREADY HAVE in your server file
-    const response = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user.id }),
-    });
-
-    if (!response.ok) throw new Error("Audit failed");
-
-    // 3. Get the results (newCampuses, nameMismatches, etc.)
-    const auditData = await response.json();
-    // 4. Load the gun (State) and pull the trigger (Modal)
-    setSyncPulseResults(auditData);
-    setIsActionDashboardOpen(true);
-    // 🟢 NEW: Manual trigger also updates the cache
-  localStorage.setItem("syncPulseResults", JSON.stringify(auditData));
-
-  } catch (err) {
-    console.error("Pulse Check Failed:", err);
-    alert("Could not run Pulse Audit. Check console.");
-  }
-};
-
+            return itemId !== resolvedId;
+          })
+        };
+      });
+    } catch (err) {
+      console.error("Resolution Error:", err);
+      alert("Resolution failed: " + (err as any).message);
+    }
+  };
+  // ✅ BRIDGE: Calls your existing server-side Pulse Engine
+  const runSyncPulse = async () => {
+    if (!user?.id) return;
+    try {
+      // 1. Show the user something is happening
+      console.log("📡 Calling /api/pulse-audit...");
+      // 2. Call the endpoint you ALREADY HAVE in your server file
+      const response = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      if (!response.ok) throw new Error("Audit failed");
+      // 3. Get the results (newCampuses, nameMismatches, etc.)
+      const auditData = await response.json();
+      // 4. Load the gun (State) and pull the trigger (Modal)
+      setSyncPulseResults(auditData);
+      setIsActionDashboardOpen(true);
+      // 🟢 NEW: Manual trigger also updates the cache
+      localStorage.setItem("syncPulseResults", JSON.stringify(auditData));
+    } catch (err) {
+      console.error("Pulse Check Failed:", err);
+      alert("Could not run Pulse Audit. Check console.");
+    }
+  };
   // Save current snapshot to Supabase + localStorage
   const saveSnapshot = async () => {
     if (!user?.id) return;
@@ -953,7 +833,6 @@ const runSyncPulse = async () => {
     try {
       const y = displayMonth.getFullYear();
       const m = displayMonth.getMonth() + 1;
-
       const payload = {
         trainer_id: user.id,
         year: y,
@@ -965,12 +844,10 @@ const runSyncPulse = async () => {
         },
         updated_at: new Date(),
       };
-
       // Save to Supabase (upsert)
       const { error } = await supabase
         .from("monthly_stats")
         .upsert(payload, { onConflict: "trainer_id, year, month" });
-
       if (error) {
         console.error("Failed to save snapshot", error);
         alert("Failed to save snapshot. Check console.");
@@ -986,7 +863,6 @@ const runSyncPulse = async () => {
       setSavingSnapshot(false);
     }
   };
-
   const fetchLatest = async () => {
     // Re‑compute live stats by forcing a reload of schools and teachers from DB
     if (!user?.id) return;
@@ -996,7 +872,6 @@ const runSyncPulse = async () => {
         .select("school_name, campus_name, disabled, exclusive, visit_count")
         .eq("trainer_id", user.id);
       if (sData) setSchoolsAll(sData);
-
       const { data: tData } = await supabase
         .from("teachers")
         .select("name, school_name, campus, tags, needs_review, latest_performance, grapeseed_id")
@@ -1007,80 +882,64 @@ const runSyncPulse = async () => {
       alert("Failed to fetch latest stats.");
     }
   };
-
-const handleCheckPulseSilent = useCallback(async () => {
-  const storedPulse = localStorage.getItem("lastPulseTime");
-  const lastPulseTs = storedPulse ? parseInt(storedPulse) : 0;
-  const timeSinceLastPulse = Date.now() - lastPulseTs;
-  const pulseInterval = 3600000; // 60 minutes
-  
-  const isFresh = timeSinceLastPulse < pulseInterval;
-
-  if (!user?.id || !navigator.onLine || isFresh || isPulseLoading) {
-    if (isFresh && !isPulseLoading) {
+  const handleCheckPulseSilent = useCallback(async () => {
+    const storedPulse = localStorage.getItem("lastPulseTime");
+    const lastPulseTs = storedPulse ? parseInt(storedPulse) : 0;
+    const timeSinceLastPulse = Date.now() - lastPulseTs;
+    const pulseInterval = 3600000; // 60 minutes
+    const isFresh = timeSinceLastPulse < pulseInterval;
+    if (!user?.id || !navigator.onLine || isFresh || isPulseLoading) {
+      if (isFresh && !isPulseLoading) {
         // 🟢 DEBUG LOG: Tells you exactly why it's NOT running
         const minsRemaining = Math.ceil((pulseInterval - timeSinceLastPulse) / 60000);
         console.log(`🕵️ Watchman: Audit is fresh. Next background check in ~${minsRemaining} mins. Skipping fetch.`);
+      }
+      return;
     }
-    return;
-  }
-
-  setIsPulseLoading(true);
-  console.log("🕵️ Background Watchman: Persistent gate open. Starting scheduled audit...");
-
-  try {
-    const response = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: user.id })
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      const now = Date.now();
-
-      setSyncPulseResults(data);
-      setLastPulseTime(now); 
-
-    // 🟢 NEW: Save BOTH the time and the results
-      localStorage.setItem("lastPulseTime", now.toString()); 
-      localStorage.setItem("syncPulseResults", JSON.stringify(data));
-      
-      console.log("🕵️ Background Watchman: Audit complete. Persistence locked for 60 mins.");
+    setIsPulseLoading(true);
+    console.log("🕵️ Background Watchman: Persistent gate open. Starting scheduled audit...");
+    try {
+      const response = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const now = Date.now();
+        setSyncPulseResults(data);
+        setLastPulseTime(now);
+        // 🟢 NEW: Save BOTH the time and the results
+        localStorage.setItem("lastPulseTime", now.toString());
+        localStorage.setItem("syncPulseResults", JSON.stringify(data));
+        console.log("🕵️ Background Watchman: Audit complete. Persistence locked for 60 mins.");
+      }
+    } catch (err) {
+      console.warn("Silent Pulse failed:", err);
+    } finally {
+      setIsPulseLoading(false);
     }
-  } catch (err) {
-    console.warn("Silent Pulse failed:", err);
-  } finally {
-    setIsPulseLoading(false);
-  }
-}, [user?.id, isPulseLoading]);
-// The Auto-Trigger
-
+  }, [user?.id, isPulseLoading]);
+  // The Auto-Trigger
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setImporting(true);
     try {
       const text = await file.text();
       const importedData = JSON.parse(text);
-
       // Handle both single observation and array
       const observationsToImport = Array.isArray(importedData) ? importedData : [importedData];
-
       for (const obs of observationsToImport) {
         if (!obs.id) continue;
-
         // Check if already exists (optional prompt)
         const existing = await get(`${STORAGE_PREFIX}${obs.id}`);
         if (existing) {
           if (!confirm(`Observation ${obs.id} already exists. Overwrite?`)) continue;
         }
-
         // Save to IndexedDB
         await set(`${STORAGE_PREFIX}${obs.id}`, obs);
       }
-
       alert(`Imported ${observationsToImport.length} observation(s). Refreshing...`);
       window.location.reload(); // simple refresh to show new data
     } catch (err) {
@@ -1092,32 +951,28 @@ const handleCheckPulseSilent = useCallback(async () => {
       e.target.value = '';
     }
   };
-
-React.useEffect(() => {
-  handleCheckPulseSilent();
-}, [handleCheckPulseSilent]);
-
-// Fetch schools & teachers for stats sidebar
-React.useEffect(() => {
-  if (!user?.id) return;
-  const loadResources = async () => {
-    // Schools
-          const { data: sData } = await supabase
+  React.useEffect(() => {
+    handleCheckPulseSilent();
+  }, [handleCheckPulseSilent]);
+  // Fetch schools & teachers for stats sidebar
+  React.useEffect(() => {
+    if (!user?.id) return;
+    const loadResources = async () => {
+      // Schools
+      const { data: sData } = await supabase
         .from("schools")
         .select("school_name, campus_name, disabled, exclusive, visit_count")
         .eq("trainer_id", user.id);
-    if (sData) setSchoolsAll(sData);
-
-    // Teachers
-    const { data: tData } = await supabase
-      .from("teachers")
-      .select("name, school_name, campus, tags, needs_review, latest_performance, grapeseed_id")
-      .eq("trainer_id", user.id);
-    if (tData) setTeachersAll(tData);
-  };
-  loadResources();
-}, [user?.id]);
-
+      if (sData) setSchoolsAll(sData);
+      // Teachers
+      const { data: tData } = await supabase
+        .from("teachers")
+        .select("name, school_name, campus, tags, needs_review, latest_performance, grapeseed_id")
+        .eq("trainer_id", user.id);
+      if (tData) setTeachersAll(tData);
+    };
+    loadResources();
+  }, [user?.id]);
   // When a snapshot is loaded, populate custom entries from it
   useEffect(() => {
     if (snapshot && snapshot.custom_entries) {
@@ -1135,56 +990,49 @@ React.useEffect(() => {
       }
     }
   }, [snapshot]);
-
   // Persist custom entries to localStorage (only for current month)
   useEffect(() => {
     if (isCurrentMonth) {
       localStorage.setItem("dashboardCustomEntries", JSON.stringify(customEntries));
     }
   }, [customEntries, isCurrentMonth]);
-useEffect(() => {
-  if (!user?.id) return;
-
-  const loadSnapshot = async () => {
-    const y = displayMonth.getFullYear();
-    const m = displayMonth.getMonth() + 1;
-
-    // 1. Try Supabase
-    const { data, error } = await supabase
-      .from("monthly_stats")
-      .select("system_stats, custom_entries")
-      .eq("trainer_id", user.id)
-      .eq("year", y)
-      .eq("month", m)
-      .maybeSingle();
-
-    if (!error && data) {
-      setSnapshot(data);
-      // Update offline cache
-      localStorage.setItem(`monthlySnapshot-${y}-${m}`, JSON.stringify(data));
-    } else {
-      // 2. Fallback to localStorage
-      const cached = localStorage.getItem(`monthlySnapshot-${y}-${m}`);
-      if (cached) {
-        try {
-          setSnapshot(JSON.parse(cached));
-        } catch {
+  useEffect(() => {
+    if (!user?.id) return;
+    const loadSnapshot = async () => {
+      const y = displayMonth.getFullYear();
+      const m = displayMonth.getMonth() + 1;
+      // 1. Try Supabase
+      const { data, error } = await supabase
+        .from("monthly_stats")
+        .select("system_stats, custom_entries")
+        .eq("trainer_id", user.id)
+        .eq("year", y)
+        .eq("month", m)
+        .maybeSingle();
+      if (!error && data) {
+        setSnapshot(data);
+        // Update offline cache
+        localStorage.setItem(`monthlySnapshot-${y}-${m}`, JSON.stringify(data));
+      } else {
+        // 2. Fallback to localStorage
+        const cached = localStorage.getItem(`monthlySnapshot-${y}-${m}`);
+        if (cached) {
+          try {
+            setSnapshot(JSON.parse(cached));
+          } catch {
+            setSnapshot(null);
+          }
+        } else {
           setSnapshot(null);
         }
-      } else {
-        setSnapshot(null);
       }
-    }
-  };
-
-  loadSnapshot();
-}, [user?.id, displayMonth, isCurrentMonth]);
-
-const [trainerSettings, setTrainerSettings] = React.useState<{
+    };
+    loadSnapshot();
+  }, [user?.id, displayMonth, isCurrentMonth]);
+  const [trainerSettings, setTrainerSettings] = React.useState<{
     booking_url?: string;
     phone_number?: string;
   } | null>(null);
-
   // Fetch settings when user logs in
   React.useEffect(() => {
     if (!user?.id) return; // ✅ Safety check on ID
@@ -1198,21 +1046,18 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
     };
     fetchSettings();
   }, [user?.id]); // ✅ FIXED: Changed [user] to [user?.id]
-
-// 🟢 START: Cache Teachers & Schools for Offline Mode 🟢
+  // 🟢 START: Cache Teachers & Schools for Offline Mode 🟢
   // This runs automatically in the background when the user is online.
   React.useEffect(() => {
     // 1. Exit if offline or no user
     if (!user?.id || !navigator.onLine) return;
-
     const cacheOfflineResources = async () => {
       // 🟢 OPTIMIZATION: Check if we already have data to prevent iPad lag on reload
       const existingSchools = await get("offline_schools");
       if (existingSchools && existingSchools.length > 0) {
         console.log("📱 Cache exists. Skipping background sync to save resources.");
-        return; 
+        return;
       }
-
       try {
         // 2. Fetch Schools (Strictly Filtered by Trainer ID)
         // Note: If RLS is enabled on Supabase, this will return [] unless a policy exists!
@@ -1221,137 +1066,110 @@ const [trainerSettings, setTrainerSettings] = React.useState<{
           .select("id, school_name, campus_name, admin_workbook_url, admin_workbook_view_url, trainer_id")
           .eq("trainer_id", user.id)
           .order("school_name");
-
         if (sError) throw sError;
-
         const safeSchools = schools || [];
         console.log(`🔥 Fetched ${safeSchools.length} schools from database.`);
-
         // 3. Save to Offline Cache (Overwrites old data)
         await set("offline_schools", safeSchools);
-
         // 4. Fetch Teachers (Only if we have schools)
         // This prevents leaking teachers (and thus schools) from the Owner
         if (safeSchools.length > 0) {
-            const mySchoolNames = safeSchools.map(s => s.school_name);
-            
-            const { data: teachers, error: tError } = await supabase
-              .from("teachers")
-              .select("id, grapeseed_id, name, school_name, campus, email, worksheet_url")
-              .in("school_name", mySchoolNames) // 🟢 Only fetch teachers for MY schools
-              .order("name");
-            
-            if (!tError) {
-              await set("offline_teachers", teachers || []); 
-              console.log(`🔥 Fetched ${teachers?.length || 0} teachers.`);
-            }
+          const mySchoolNames = safeSchools.map(s => s.school_name);
+          const { data: teachers, error: tError } = await supabase
+            .from("teachers")
+            .select("id, grapeseed_id, name, school_name, campus, email, worksheet_url")
+            .in("school_name", mySchoolNames) // 🟢 Only fetch teachers for MY schools
+            .order("name");
+          if (!tError) {
+            await set("offline_teachers", teachers || []);
+            console.log(`🔥 Fetched ${teachers?.length || 0} teachers.`);
+          }
         } else {
-            // If I have no schools, I should have no teachers in the cache
-            console.warn("⚠️ No schools found for this user. Offline list may revert to default/owner list.");
-            await set("offline_teachers", []);
+          // If I have no schools, I should have no teachers in the cache
+          console.warn("⚠️ No schools found for this user. Offline list may revert to default/owner list.");
+          await set("offline_teachers", []);
         }
-
         console.log("✅ Offline resources updated successfully.");
       } catch (err) {
         console.warn("⚠️ Failed to cache offline resources:", err);
       }
     };
-
     cacheOfflineResources();
-  }, [user?.id]); 
+  }, [user?.id]);
   // 🟢 END BLOCK 🟢
-
-  
-// NEW: State for tracking Merge process status (Add these two lines)
-const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
-const [showPerformanceModal, setShowPerformanceModal] = useState(false);
-const [pendingSyncObs, setPendingSyncObs] = useState<DashboardObservationRow | null>(null);
-const [recentlyDeletedIds, setRecentlyDeletedIds] = useState<Set<string>>(new Set());
-const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
-const [syncingObservationId, setSyncingObservationId] = useState<string | null>(null);
-
-const [isConflictModalOpen, setIsConflictModalOpen] = React.useState(false);
-const [conflictLocalData, setConflictLocalData] = React.useState<any>(null);
-const [conflictServerData, setConflictServerData] = React.useState<any>(null);
-
+  // NEW: State for tracking Merge process status (Add these two lines)
+  const [mergingTeacherId, setMergingTeacherId] = useState<string | null>(null);
+  const [showPerformanceModal, setShowPerformanceModal] = useState(false);
+  const [pendingSyncObs, setPendingSyncObs] = useState<DashboardObservationRow | null>(null);
+  const [recentlyDeletedIds, setRecentlyDeletedIds] = useState<Set<string>>(new Set());
+  const [mergingAdminId, setMergingAdminId] = useState<string | null>(null);
+  const [syncingObservationId, setSyncingObservationId] = useState<string | null>(null);
+  const [isConflictModalOpen, setIsConflictModalOpen] = React.useState(false);
+  const [conflictLocalData, setConflictLocalData] = React.useState<any>(null);
+  const [conflictServerData, setConflictServerData] = React.useState<any>(null);
   // NEW: State for Edit Observation Modal
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingObservation, setEditingObservation] = useState<DashboardObservationRow | null>(null);
-
   // NEW: central modal state for Teacher/Admin actions
   const [actionModal, setActionModal] = useState<{
     obsId: string;
     role: "teacher" | "admin";
   } | null>(null);
-
   // NEW: which groups are expanded (key = group.key)
   const [expandedGroups, setExpandedGroups] = useState<
     Record<string, boolean>
   >({});
-
   // AM summary UI state
   const [showAmSummary, setShowAmSummary] = useState(false);
-// Bulk admin modal state
+  // Bulk admin modal state
   const [showBulkAdminModal, setShowBulkAdminModal] = useState(false);
   const [bulkSchool, setBulkSchool] = useState<string>("");
   const [bulkMonth, setBulkMonth] = useState<string>("");
   const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set());
   const [bulkMerging, setBulkMerging] = useState(false);
   const [bulkMergeProgress, setBulkMergeProgress] = useState<{ current: number; total: number; currentTeacher?: string }>({ current: 0, total: 0 });
-
   const [summaryMonth, setSummaryMonth] = useState<string>("");
   const [summaryAmKey, setSummaryAmKey] = useState<string>("");
   const [summaryRows, setSummaryRows] = useState<AmSummaryRow[]>([]);
   const [amSummarySentMap, setAmSummarySentMap] =
     useState<AmSummarySentMap>({});
-
-  
-    
- // Helper to merge Server Cache + Local Offline Files
-async function getMergedDashboardData(userId: string) {
-  // 1. Get the last known list from the server (The "Catalog")
-  const serverCache = (await get('dashboard-cache')) || [];
-
-  // 2. Scan for ALL local files we created/edited (The "Books on the shelf")
-  const allKeys = await keys();
-  const observationKeys = allKeys.filter(
-    (k) => typeof k === 'string' && k.startsWith('obs-v1-')
-  );
-
-  // 3. Load the actual data for these local files
-  const localFiles = await Promise.all(observationKeys.map((k) => get(k)));
-
-  // 4. Format local files to look like database rows
-  const formattedLocalRows = localFiles.map((obs: any) => ({
-    id: obs.id,
-    teacher_name: obs.meta.teacherName,
-    school_name: obs.meta.schoolName,
-    campus: obs.meta.campus,
-    unit: obs.meta.unit,
-    lesson: obs.meta.lesson,
-    support_type: obs.meta.supportType,
-    observation_date: obs.meta.date,
-    status: obs.status,
-    updated_at: new Date(obs.updatedAt).toISOString(),
-    created_at: new Date(obs.updatedAt).toISOString(), // Fallback
-    is_offline_copy: true, // 🟢 Flag so we can show an icon
-  }));
-
-  // 5. Merge! (Local files overwrite Server files if IDs match)
-  const combinedMap = new Map();
-  
-  // Add server items first
-  serverCache.forEach((item: any) => combinedMap.set(item.id, item));
-  
-  // Overwrite/Add local items
-  formattedLocalRows.forEach((item: any) => combinedMap.set(item.id, item));
-
-  // Convert back to array and sort by date
-  return Array.from(combinedMap.values()).sort(
-    (a: any, b: any) => new Date(b.observation_date).getTime() - new Date(a.observation_date).getTime()
-  );
-}   
-
+  // Helper to merge Server Cache + Local Offline Files
+  async function getMergedDashboardData(userId: string) {
+    // 1. Get the last known list from the server (The "Catalog")
+    const serverCache = (await get('dashboard-cache')) || [];
+    // 2. Scan for ALL local files we created/edited (The "Books on the shelf")
+    const allKeys = await keys();
+    const observationKeys = allKeys.filter(
+      (k) => typeof k === 'string' && k.startsWith('obs-v1-')
+    );
+    // 3. Load the actual data for these local files
+    const localFiles = await Promise.all(observationKeys.map((k) => get(k)));
+    // 4. Format local files to look like database rows
+    const formattedLocalRows = localFiles.map((obs: any) => ({
+      id: obs.id,
+      teacher_name: obs.meta.teacherName,
+      school_name: obs.meta.schoolName,
+      campus: obs.meta.campus,
+      unit: obs.meta.unit,
+      lesson: obs.meta.lesson,
+      support_type: obs.meta.supportType,
+      observation_date: obs.meta.date,
+      status: obs.status,
+      updated_at: new Date(obs.updatedAt).toISOString(),
+      created_at: new Date(obs.updatedAt).toISOString(), // Fallback
+      is_offline_copy: true, // 🟢 Flag so we can show an icon
+    }));
+    // 5. Merge! (Local files overwrite Server files if IDs match)
+    const combinedMap = new Map();
+    // Add server items first
+    serverCache.forEach((item: any) => combinedMap.set(item.id, item));
+    // Overwrite/Add local items
+    formattedLocalRows.forEach((item: any) => combinedMap.set(item.id, item));
+    // Convert back to array and sort by date
+    return Array.from(combinedMap.values()).sort(
+      (a: any, b: any) => new Date(b.observation_date).getTime() - new Date(a.observation_date).getTime()
+    );
+  }
   // --- EMAIL MODAL STATE ---
   const [emailModalState, setEmailModalState] = useState<{
     isOpen: boolean;
@@ -1374,7 +1192,7 @@ async function getMergedDashboardData(userId: string) {
     subject: "",
   });
   // Fetch helpers for email
-const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
+  const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
     // .trim() removes spaces from start/end; .ilike makes it case-insensitive
     const { data } = await supabase
       .from("teachers")
@@ -1384,80 +1202,68 @@ const fetchTeacherEmail = async (teacherName: string, schoolName: string) => {
       .limit(1);
     return data?.[0]?.email || "";
   };
-
-const fetchSchoolEmails = async (schoolName: string, campus: string) => {
+  const fetchSchoolEmails = async (schoolName: string, campus: string) => {
     const { data } = await supabase
       .from("schools")
       .select("admin_email, am_email")
       .eq("school_name", schoolName)
       .eq("campus_name", campus)
       .limit(1);
-   return { 
-    adminEmail: data?.[0]?.admin_email || "",
-    amEmail: data?.[0]?.am_email || "" 
+    return {
+      adminEmail: data?.[0]?.admin_email || "",
+      amEmail: data?.[0]?.am_email || ""
+    };
   };
-  };
-
-const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
+  const handlePush = async (id: string, overrideData?: any, force: boolean = false) => {
     try {
       console.log(`☁️ Attempting Smart Sync for: ${id} (Force: ${force})`);
-            setSyncingObservationId(id);
-      
+      setSyncingObservationId(id);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         alert("You must be logged in to sync.");
         return;
       }
-
       // 1. LOAD DATA
       let localData = overrideData;
       if (!localData) {
-         const storageKey = `${STORAGE_PREFIX}${id}`;
-         localData = await get(storageKey);
+        const storageKey = `${STORAGE_PREFIX}${id}`;
+        localData = await get(storageKey);
       }
-      
       if (!localData) {
         console.log("No local changes found. Fetching latest from server to verify...");
-        window.location.reload(); 
+        window.location.reload();
         return;
       }
-
-            // 🟢 GUARDRAIL: PERFORMANCE RATING – show modal instead of redirecting
+      // 🟢 GUARDRAIL: PERFORMANCE RATING – show modal instead of redirecting
       if (!localData.performance_rating) {
         const obsRow = observations.find(o => o.id === id);
         setPendingSyncObs(obsRow || null);
         setShowPerformanceModal(true);
         return;
       }
-
       // 2. CHECK FOR CONFLICTS (Unless Forced)
       if (!force) {
         const { data: serverRows } = await supabase
           .from("observations")
-          .select("updated_at, teacher_name, school_name, indicators") 
+          .select("updated_at, teacher_name, school_name, indicators")
           .eq("id", id);
-
         const serverRow = serverRows?.[0];
-        
         if (serverRow) {
           const serverTime = new Date(serverRow.updated_at).getTime();
           const localLastSync = localData.lastSync || 0;
-
           if (serverTime > localLastSync) {
-             console.log("⚔️ Conflict Detected! Server is newer.");
-             setConflictLocalData(localData);
-             setConflictServerData(serverRow);
-             setIsConflictModalOpen(true);
-             return; 
+            console.log("⚔️ Conflict Detected! Server is newer.");
+            setConflictLocalData(localData);
+            setConflictServerData(serverRow);
+            setIsConflictModalOpen(true);
+            return;
           }
         }
       } else {
         console.log("🛡️ Force Push enabled. Skipping server conflict check.");
       }
-
       // 3. PUSH TO SERVER
       console.log("🚀 No conflict. Pushing data...");
-      
       const safeMeta = localData.meta || {
         teacherName: localData.teacherName || "",
         schoolName: localData.schoolName || "",
@@ -1467,33 +1273,27 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         supportType: localData.supportType || "Visit",
         date: localData.date || new Date().toISOString()
       };
-
       // 🟢 FIX 1: Robust Teacher ID Extraction
       // Checks: Root -> Meta -> Legacy camelCase
-      const finalTeacherId = 
-        localData.teacher_id || 
-        safeMeta.teacher_id || 
-        localData.teacherId || 
+      const finalTeacherId =
+        localData.teacher_id ||
+        safeMeta.teacher_id ||
+        localData.teacherId ||
         null;
-
       if (!finalTeacherId) {
         console.warn("⚠️ Warning: Syncing observation without a valid teacher_id");
       }
-
       // 🟢 FIX 2: Grapeseed ID Extraction
-      const finalGsId = 
-        localData.grapeseed_id || 
-        safeMeta.grapeseed_id || 
+      const finalGsId =
+        localData.grapeseed_id ||
+        safeMeta.grapeseed_id ||
         null;
-      
       const payload = {
         id: localData.id,
-        trainer_id: user.id, 
-        
+        trainer_id: user.id,
         // 🟢 MAPPED CORRECTLY
         teacher_id: finalTeacherId,
         grapeseed_id: finalGsId, // Saves to the new column
-
         teacher_name: safeMeta.teacherName,
         school_name: safeMeta.schoolName,
         campus: safeMeta.campus,
@@ -1501,32 +1301,26 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         lesson: safeMeta.lesson,
         support_type: safeMeta.supportType,
         observation_date: safeMeta.date,
-
-        meta: { 
-            ...safeMeta, 
-            teacher_id: finalTeacherId, // Ensure meta stays in sync
-            grapeseed_id: finalGsId 
+        meta: {
+          ...safeMeta,
+          teacher_id: finalTeacherId, // Ensure meta stays in sync
+          grapeseed_id: finalGsId
         },
-
         indicators: localData.indicators,
         status: localData.status,
         updated_at: new Date(localData.updatedAt || Date.now()).toISOString(),
         admin_summary_vn: localData.adminSummaryVN,
         performance_rating: localData.performance_rating || null,
       };
-
       const { error } = await supabase.from("observations").upsert(payload).select('id');
-      
       if (error) {
         console.error("Supabase Error Details:", error);
         throw error;
       }
-
       // 🟢 NEW: CRM BROADCAST
       const flaggedIndicators = (localData.indicators || [])
         .filter((ind: any) => ind.includeInTrainerSummary)
         .map((ind: any) => ind.title);
-
       if (finalGsId) {
         const { error: rpcError } = await supabase.rpc('sync_teacher_crm_metadata', {
           target_grapeseed_id: finalGsId,
@@ -1535,44 +1329,38 @@ const handlePush = async (id: string, overrideData?: any, force: boolean = false
         });
         if (rpcError) console.error("CRM Broadcast failed:", rpcError);
       }
-
-// 4. FETCH THE SERVER’S UPDATED_AT (source of truth)
-// 4. FETCH THE SERVER’S UPDATED_AT (source of truth)
-const { data: updatedRow, error: fetchError } = await supabase
-  .from("observations")
-  .select("updated_at")
-  .eq("id", localData.id)
-  .single();
-
-const serverUpdatedAt = fetchError ? Date.now() : new Date(updatedRow.updated_at).getTime();
-
-// 5. STAMP RECEIPT USING SERVER TIME
-const storageKey = `${STORAGE_PREFIX}${localData.id}`;
-const finalPayload = {
-  ...localData,
-  teacher_id: finalTeacherId,
-  grapeseed_id: finalGsId,
-  meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
-  lastSync: serverUpdatedAt,
-  updatedAt: serverUpdatedAt   // both equal, no drift
-};
-await set(storageKey, finalPayload);
-
-// 6. Refresh the whole dashboard to ensure UI matches the fresh IndexedDB data
-await refreshDashboard();
-// Force correct rawDate for this observation from meta.date
-const obsRow = observations.find(o => o.id === id);
-if (obsRow && obsRow.isoDate) {
-  const correctTs = new Date(obsRow.isoDate).getTime();
-  if (!isNaN(correctTs)) {
-    setObservations(prev => prev.map(o => 
-      o.id === id ? { ...o, rawDate: correctTs, dateLabel: new Date(correctTs).toLocaleDateString() } : o
-    ));
-  }
-}
-
-console.log("✅ Sync Complete and dashboard refreshed!");
-
+      // 4. FETCH THE SERVER’S UPDATED_AT (source of truth)
+      // 4. FETCH THE SERVER’S UPDATED_AT (source of truth)
+      const { data: updatedRow, error: fetchError } = await supabase
+        .from("observations")
+        .select("updated_at")
+        .eq("id", localData.id)
+        .single();
+      const serverUpdatedAt = fetchError ? Date.now() : new Date(updatedRow.updated_at).getTime();
+      // 5. STAMP RECEIPT USING SERVER TIME
+      const storageKey = `${STORAGE_PREFIX}${localData.id}`;
+      const finalPayload = {
+        ...localData,
+        teacher_id: finalTeacherId,
+        grapeseed_id: finalGsId,
+        meta: { ...localData.meta, teacher_id: finalTeacherId, grapeseed_id: finalGsId },
+        lastSync: serverUpdatedAt,
+        updatedAt: serverUpdatedAt   // both equal, no drift
+      };
+      await set(storageKey, finalPayload);
+      // 6. Refresh the whole dashboard to ensure UI matches the fresh IndexedDB data
+      await refreshDashboard();
+      // Force correct rawDate for this observation from meta.date
+      const obsRow = observations.find(o => o.id === id);
+      if (obsRow && obsRow.isoDate) {
+        const correctTs = new Date(obsRow.isoDate).getTime();
+        if (!isNaN(correctTs)) {
+          setObservations(prev => prev.map(o =>
+            o.id === id ? { ...o, rawDate: correctTs, dateLabel: new Date(correctTs).toLocaleDateString() } : o
+          ));
+        }
+      }
+      console.log("✅ Sync Complete and dashboard refreshed!");
     } catch (err: any) {
       console.error("Sync failed:", err);
       alert("Sync failed: " + err.message);
@@ -1580,59 +1368,47 @@ console.log("✅ Sync Complete and dashboard refreshed!");
       setSyncingObservationId(null);
     }
   };
-
-
-const handleConflictResolved = async (mergedData: any) => {
+  const handleConflictResolved = async (mergedData: any) => {
     try {
       console.log("💾 Saving resolved data & Force Pushing...", mergedData);
-      
       // 1. Save to Disk
       // 🟢 FIX: Ensure we write to the correct key
       const storageKey = `${STORAGE_PREFIX}${mergedData.id}`;
       await set(storageKey, mergedData);
-      
       // 2. Close Modal
       setIsConflictModalOpen(false);
-
       // 3. 🟢 FORCE PUSH
       // Pass 'true' as the 3rd argument to skip the conflict check
       // because we JUST resolved the conflict!
       await handlePush(mergedData.id, mergedData, true);
-      
     } catch (err) {
       console.error("❌ Failed to save resolved conflict:", err);
       alert("Error saving your changes. Please try again.");
     }
   };
-
-
-// 🟢 CORE LOGIC: CACHE-FIRST LOADING + GHOST MERGE
+  // 🟢 CORE LOGIC: CACHE-FIRST LOADING + GHOST MERGE
   React.useEffect(() => {
     if (!user?.id) { setObservations([]); return; }
-
     const load = async () => {
       const processAndDisplay = async (sourceData: any[], isNetworkSource: boolean) => {
         const rows: DashboardObservationRow[] = [];
         const processedIds = new Set<string>();
         const pendingDeletes = (await get<string[]>("pending_deletes")) || [];
-
         // --- PHASE A: PROCESS SERVER/CACHE ROWS ---
         for (const dbRow of sourceData) {
           if (pendingDeletes.includes(dbRow.id)) continue;
           if (recentlyDeletedIds.has(dbRow.id)) continue;
           processedIds.add(dbRow.id);
-
           const storageKey = `${STORAGE_PREFIX}${dbRow.id}`;
           let parsed: any = null;
           try {
             const localDraft = await get<any>(storageKey);
             if (localDraft) parsed = localDraft;
             else {
-               const rawLocal = localStorage.getItem(storageKey);
-               if (rawLocal) parsed = JSON.parse(rawLocal);
+              const rawLocal = localStorage.getItem(storageKey);
+              if (rawLocal) parsed = JSON.parse(rawLocal);
             }
           } catch (err) { console.error("Error parsing local data", err); }
-
           if (!parsed) {
             const dbTime = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : Date.now();
             parsed = {
@@ -1641,20 +1417,16 @@ const handleConflictResolved = async (mergedData: any) => {
               indicators: dbRow.indicators ?? [],
               status: dbRow.status ?? "draft",
               updatedAt: dbTime,
-              lastSync: dbTime, 
+              lastSync: dbTime,
             };
           }
-
-        // 🟢 FIX 3 (Edit Zombie): "Trust The Receipt"
+          // 🟢 FIX 3 (Edit Zombie): "Trust The Receipt"
           const localUpdatedAt = parsed.updatedAt || 0;
           const lastSync = parsed.lastSync || 0;
           const dbUpdatedAt = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
-          
           // Increased to 10s to absorb Windows PC system clock drift
-          const BUFFER = 10000; 
-          
+          const BUFFER = 10000;
           let syncStatus: 'synced' | 'local-changes' | 'server-newer';
-           
           if (localUpdatedAt > lastSync) {
             // Local changes always win
             syncStatus = 'local-changes';
@@ -1664,7 +1436,6 @@ const handleConflictResolved = async (mergedData: any) => {
           } else {
             syncStatus = 'synced';
           }
-
           // Stats
           const indicatorsArray = Array.isArray(parsed.indicators) ? parsed.indicators : [];
           const total = indicatorsArray.length;
@@ -1675,15 +1446,13 @@ const handleConflictResolved = async (mergedData: any) => {
             if (ind.growth) growth++;
           });
           let statusColor: StatusColor = (growth > 0 && good === 0) ? "growth" : (good > 0 && growth === 0) ? "good" : "mixed";
-
           // Date
           let rawDate = parsed.updatedAt || Date.now();
           let displayDate = new Date(rawDate).toLocaleDateString();
           if (parsed.meta?.date) {
-             const ts = safeParseTimestamp(parsed.meta.date);
-             if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
+            const ts = safeParseTimestamp(parsed.meta.date);
+            if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
           }
-
           rows.push({
             id: parsed.id,
             teacherName: parsed.meta.teacherName || "Unknown",
@@ -1709,70 +1478,57 @@ const handleConflictResolved = async (mergedData: any) => {
             updatedAt: parsed.updatedAt || 0,
           });
         }
-
-      // --- PHASE B: SCAN LOCAL FILES (GHOSTS) ---
+        // --- PHASE B: SCAN LOCAL FILES (GHOSTS) ---
         try {
           const allKeys = await keys();
           const sourceIdSet = new Set(sourceData.map((d) => d.id));
-          const ghostsFound: string[] = []; 
-
+          const ghostsFound: string[] = [];
           const keysToFetch = allKeys.filter((k) => {
             if (typeof k !== "string" || !k.startsWith(STORAGE_PREFIX)) return false;
             const id = k.replace(STORAGE_PREFIX, "");
-            if (processedIds.has(id)) return false; 
-            if (pendingDeletes.includes(id)) return false; 
+            if (processedIds.has(id)) return false;
+            if (pendingDeletes.includes(id)) return false;
             return true;
           });
-
           const offlineFiles = await Promise.all(keysToFetch.map((key) => get<any>(key)));
-
           for (const localData of offlineFiles) {
             if (!localData) continue;
-
             const isMissingFromSource = !sourceIdSet.has(localData.id);
-            
             // 🟢 FIX: Immediate Ghost Detection (No Buffer)
             if (isMissingFromSource) {
-               const lastSync = localData.lastSync || 0;
-               const updatedAt = localData.updatedAt || 0;
-               
-               // 1. Check for unsaved changes (Dirty)
-               const isDirty = updatedAt > lastSync;
-
-               // 🟢 THE CONDITION:
-               // Trigger immediately if:
-               // - Loading from Network
-               // - WAS synced before (lastSync > 0)
-               // - NO new local edits (!isDirty)
-               // *Buffer removed per request*
-               if (isNetworkSource && lastSync > 0 && !isDirty) {
-                   ghostsFound.push(localData.id);
-                   continue; // Skip adding to dashboard rows
-               }
+              const lastSync = localData.lastSync || 0;
+              const updatedAt = localData.updatedAt || 0;
+              // 1. Check for unsaved changes (Dirty)
+              const isDirty = updatedAt > lastSync;
+              // 🟢 THE CONDITION:
+              // Trigger immediately if:
+              // - Loading from Network
+              // - WAS synced before (lastSync > 0)
+              // - NO new local edits (!isDirty)
+              // *Buffer removed per request*
+              if (isNetworkSource && lastSync > 0 && !isDirty) {
+                ghostsFound.push(localData.id);
+                continue; // Skip adding to dashboard rows
+              }
             }
-
             // Stats
             const indicatorsArray = Array.isArray(localData.indicators) ? localData.indicators : [];
             const stats = indicatorsArray.reduce((acc: any, ind: any) => {
-               if (ind.good || ind.growth || ind.commentText?.trim()) acc.progress++;
-               if (ind.good) acc.good++;
-               if (ind.growth) acc.growth++;
-               return acc;
-             }, { good: 0, growth: 0, progress: 0 });
-
+              if (ind.good || ind.growth || ind.commentText?.trim()) acc.progress++;
+              if (ind.good) acc.good++;
+              if (ind.growth) acc.growth++;
+              return acc;
+            }, { good: 0, growth: 0, progress: 0 });
             let statusColor: StatusColor = (stats.growth > 0 && stats.good === 0) ? "growth" : (stats.good > 0 && stats.growth === 0) ? "good" : "mixed";
-
             let rawDate = localData.updatedAt || Date.now();
             let displayDate = new Date(rawDate).toLocaleDateString();
             if (localData.meta?.date) {
               const ts = safeParseTimestamp(localData.meta.date);
               if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
             }
-
             // 🟢 FIX 4 (Resurrection Zombie): Trust Receipt for Ghosts too
             // If we just synced it (lastSync >= updatedAt), show Green immediately.
             const isLocalSynced = (localData.lastSync || 0) >= (localData.updatedAt || 0);
-
             rows.push({
               id: localData.id,
               teacherName: localData.meta?.teacherName || "Unknown",
@@ -1798,214 +1554,191 @@ const handleConflictResolved = async (mergedData: any) => {
               updatedAt: localData.updatedAt || 0,
             });
           }
-
           // Warning UI
           if (isNetworkSource && ghostsFound.length > 0 && navigator.onLine) {
-             setTimeout(async () => {
-               const confirmDelete = window.confirm(
-                  `We found ${ghostsFound.length} observation(s) that were deleted from the server.\n\n` + 
-                  `Since you haven't edited them, do you want to remove them from this device?`
-               );
-               
-               if (confirmDelete) {
-                  const currentPending = (await get<string[]>("pending_deletes")) || [];
-                  await set("pending_deletes", [...new Set([...currentPending, ...ghostsFound])]);
-                  await Promise.all(ghostsFound.map(id => del(`${STORAGE_PREFIX}${id}`)));
-                  setObservations(prev => prev.filter(o => !ghostsFound.includes(o.id)));
-               } else {
-                  // 🟢 FIX 1 (Infinite Loop): Reset lastSync to 0.
-                  await Promise.all(ghostsFound.map(async (id) => {
-                     const key = `${STORAGE_PREFIX}${id}`;
-                     const data = await get<any>(key);
-                     if(data) { 
-                         data.updatedAt = Date.now(); 
-                         data.lastSync = 0; 
-                         await set(key, data); 
-                     }
-                  }));
-                  window.location.reload();
-               }
-             }, 500);
+            setTimeout(async () => {
+              const confirmDelete = window.confirm(
+                `We found ${ghostsFound.length} observation(s) that were deleted from the server.\n\n` +
+                `Since you haven't edited them, do you want to remove them from this device?`
+              );
+              if (confirmDelete) {
+                const currentPending = (await get<string[]>("pending_deletes")) || [];
+                await set("pending_deletes", [...new Set([...currentPending, ...ghostsFound])]);
+                await Promise.all(ghostsFound.map(id => del(`${STORAGE_PREFIX}${id}`)));
+                setObservations(prev => prev.filter(o => !ghostsFound.includes(o.id)));
+              } else {
+                // 🟢 FIX 1 (Infinite Loop): Reset lastSync to 0.
+                await Promise.all(ghostsFound.map(async (id) => {
+                  const key = `${STORAGE_PREFIX}${id}`;
+                  const data = await get<any>(key);
+                  if (data) {
+                    data.updatedAt = Date.now();
+                    data.lastSync = 0;
+                    await set(key, data);
+                  }
+                }));
+                window.location.reload();
+              }
+            }, 500);
           }
         } catch (err) { console.error("Error processing local/ghost files", err); }
-
         // --- PHASE C: ENRICH & SET ---
         let finalRows = rows;
         try {
-           finalRows = await enrichObservationsWithDefaults(rows);
-        } catch (e) {}
-        
+          finalRows = await enrichObservationsWithDefaults(rows);
+        } catch (e) { }
         finalRows.sort((a, b) => (b.rawDate || 0) - (a.rawDate || 0));
         setObservations(finalRows);
         setLoading(false);
       };
-
       // 1. Instant Load
       try {
         const backup = await get<any[]>("dashboard_backup_list");
         if (backup && backup.length > 0) await processAndDisplay(backup, false);
       } catch (e) { }
-
       // 2. Background Sync
       try {
         let pendingDeletes = (await get<string[]>("pending_deletes")) || [];
         if (navigator.onLine && pendingDeletes.length > 0) {
-           const { data: deletedRows, error } = await supabase
-             .from("observations")
-             .delete()
-             .in("id", pendingDeletes)
-             .select("id");
-           if (!error && deletedRows && deletedRows.length > 0) {
-             // Successfully deleted at least some
-             const remaining = pendingDeletes.filter(id => !deletedRows.some((row: any) => row.id === id));
-             if (remaining.length === 0) {
-               await del("pending_deletes");
-             } else {
-               // Keep only the ones that didn't delete (maybe due to permissions)
-               await set("pending_deletes", remaining);
-             }
-             // Also remove local files for those deleted
-             await Promise.all(deletedRows.map((row: any) => del(`${STORAGE_PREFIX}${row.id}`)));
-           } else if (error) {
-             console.warn("Batch delete failed", error);
-           }
+          const { data: deletedRows, error } = await supabase
+            .from("observations")
+            .delete()
+            .in("id", pendingDeletes)
+            .select("id");
+          if (!error && deletedRows && deletedRows.length > 0) {
+            // Successfully deleted at least some
+            const remaining = pendingDeletes.filter(id => !deletedRows.some((row: any) => row.id === id));
+            if (remaining.length === 0) {
+              await del("pending_deletes");
+            } else {
+              // Keep only the ones that didn't delete (maybe due to permissions)
+              await set("pending_deletes", remaining);
+            }
+            // Also remove local files for those deleted
+            await Promise.all(deletedRows.map((row: any) => del(`${STORAGE_PREFIX}${row.id}`)));
+          } else if (error) {
+            console.warn("Batch delete failed", error);
+          }
         }
-
         const { data, error } = await supabase
           .from("observations")
           .select("id, status, meta, indicators, created_at, updated_at, observation_date, admin_summary_vn")
           .eq("trainer_id", user.id)
           .order("observation_date", { ascending: false })
           .order("created_at", { ascending: false });
-
         if (!error && data) {
-           await set("dashboard_backup_list", data);
-           await processAndDisplay(data, true);
+          await set("dashboard_backup_list", data);
+          await processAndDisplay(data, true);
         }
-      } catch (err) { console.error("Background sync failed", err); } 
+      } catch (err) { console.error("Background sync failed", err); }
       finally { setLoading(false); }
-
       try {
         const raw = localStorage.getItem(SUMMARY_STATE_KEY);
         if (raw) setAmSummarySentMap(JSON.parse(raw));
-      } catch {}
+      } catch { }
     };
-
     load();
   }, [user?.id]);
-
   // 🟢 HELPER: Process & Merge Logic (Extracting this makes the useEffect cleaner)
-async function processRows(dbRows: any[], pendingDeletes: string[]) {
+  async function processRows(dbRows: any[], pendingDeletes: string[]) {
     const processedIds = new Set<string>();
     const rows: DashboardObservationRow[] = [];
-
     // Step A: Process Server Rows
     for (const row of dbRows) {
-        if (pendingDeletes.includes(row.id)) continue;
-        if (recentlyDeletedIds.has(row.id)) continue;
-        processedIds.add(row.id);
-
-        const storageKey = `${STORAGE_PREFIX}${row.id}`;
-        let localData = await get<any>(storageKey);
-        
-        // Fallback to localStorage if IDB fails
-        if (!localData) {
-            try { const raw = localStorage.getItem(storageKey); if (raw) localData = JSON.parse(raw); } catch {}
-        }
-
-        // Merge: Local wins if exists
-        const finalData = localData || {
-           id: row.id,
-           meta: row.meta || {},
-           indicators: row.indicators || [],
-           status: row.status || "draft",
-           updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
-           lastSync: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
-        };
-
-        // Calc Sync Status (Standardized with processAndDisplay)
-        const localTime = finalData.updatedAt || 0;
-        const lastSync = finalData.lastSync || 0;
-        const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-        const BUFFER = 10000; // 10s buffer for Windows clock drift
-        
-        let syncStatus = 'synced';
-        if (localTime > lastSync) {
-          syncStatus = 'local-changes';
-        } else if (serverTime > (lastSync + BUFFER)) {
-          syncStatus = 'server-newer';
-        }
-
-        // Stats Calculation
-        const inds = Array.isArray(finalData.indicators) ? finalData.indicators : [];
-        let good = 0, growth = 0, progress = 0;
-        inds.forEach((i: any) => {
-           if (i.good) good++;
-           if (i.growth) growth++;
-           if (i.good || i.growth || i.commentText) progress++;
-        });
-        const statusColor = (growth > 0 && good === 0) ? "growth" : (good > 0 && growth === 0) ? "good" : "mixed";
-
-        rows.push({
-           id: finalData.id,
-           teacherName: finalData.meta.teacherName || "Unknown",
-           schoolName: finalData.meta.schoolName || "Unknown",
-           campus: finalData.meta.campus || "",
-           unit: finalData.meta.unit || "",
-           lesson: finalData.meta.lesson || "",
-           supportType: finalData.meta.supportType || "Visit",
-           dateLabel: new Date(finalData.updatedAt).toLocaleDateString(),
-           isoDate: finalData.meta.date,
-           rawDate: finalData.updatedAt,
-           status: finalData.status,
-           progress, 
-           totalIndicators: inds.length,
-           statusColor: statusColor as StatusColor,
-           teacherWorkbookUrl: finalData.meta.teacherWorkbookUrl,
-           adminWorkbookUrl: finalData.meta.adminWorkbookUrl,
-           adminViewOnlyUrl: finalData.meta.adminViewOnlyUrl,
-           admin_summary_vn: row.admin_summary_vn,
-           meta: finalData.meta,
-           lastSync: finalData.lastSync,
-           updatedAt: finalData.updatedAt,
-           syncStatus
-        });
+      if (pendingDeletes.includes(row.id)) continue;
+      if (recentlyDeletedIds.has(row.id)) continue;
+      processedIds.add(row.id);
+      const storageKey = `${STORAGE_PREFIX}${row.id}`;
+      let localData = await get<any>(storageKey);
+      // Fallback to localStorage if IDB fails
+      if (!localData) {
+        try { const raw = localStorage.getItem(storageKey); if (raw) localData = JSON.parse(raw); } catch { }
+      }
+      // Merge: Local wins if exists
+      const finalData = localData || {
+        id: row.id,
+        meta: row.meta || {},
+        indicators: row.indicators || [],
+        status: row.status || "draft",
+        updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+        lastSync: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+      };
+      // Calc Sync Status (Standardized with processAndDisplay)
+      const localTime = finalData.updatedAt || 0;
+      const lastSync = finalData.lastSync || 0;
+      const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+      const BUFFER = 10000; // 10s buffer for Windows clock drift
+      let syncStatus = 'synced';
+      if (localTime > lastSync) {
+        syncStatus = 'local-changes';
+      } else if (serverTime > (lastSync + BUFFER)) {
+        syncStatus = 'server-newer';
+      }
+      // Stats Calculation
+      const inds = Array.isArray(finalData.indicators) ? finalData.indicators : [];
+      let good = 0, growth = 0, progress = 0;
+      inds.forEach((i: any) => {
+        if (i.good) good++;
+        if (i.growth) growth++;
+        if (i.good || i.growth || i.commentText) progress++;
+      });
+      const statusColor = (growth > 0 && good === 0) ? "growth" : (good > 0 && growth === 0) ? "good" : "mixed";
+      rows.push({
+        id: finalData.id,
+        teacherName: finalData.meta.teacherName || "Unknown",
+        schoolName: finalData.meta.schoolName || "Unknown",
+        campus: finalData.meta.campus || "",
+        unit: finalData.meta.unit || "",
+        lesson: finalData.meta.lesson || "",
+        supportType: finalData.meta.supportType || "Visit",
+        dateLabel: new Date(finalData.updatedAt).toLocaleDateString(),
+        isoDate: finalData.meta.date,
+        rawDate: finalData.updatedAt,
+        status: finalData.status,
+        progress,
+        totalIndicators: inds.length,
+        statusColor: statusColor as StatusColor,
+        teacherWorkbookUrl: finalData.meta.teacherWorkbookUrl,
+        adminWorkbookUrl: finalData.meta.adminWorkbookUrl,
+        adminViewOnlyUrl: finalData.meta.adminViewOnlyUrl,
+        admin_summary_vn: row.admin_summary_vn,
+        meta: finalData.meta,
+        lastSync: finalData.lastSync,
+        updatedAt: finalData.updatedAt,
+        syncStatus
+      });
     }
-
     // Step B: Ghost Loop (Find Local-Only items)
     try {
-        const allKeys = await keys();
-        const obsKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(STORAGE_PREFIX));
-        for (const k of obsKeys) {
-            const id = (k as string).replace(STORAGE_PREFIX, "");
-            // If server didn't send it, and we didn't delete it -> It's a Ghost
-            if (processedIds.has(id) || pendingDeletes.includes(id)) continue;
-            
-            const local = await get<any>(k);
-            if (!local) continue;
-
-            rows.push({
-               id: local.id,
-               teacherName: local.meta.teacherName || "Unknown",
-               schoolName: local.meta.schoolName || "Unknown",
-               campus: local.meta.campus || "",
-               unit: local.meta.unit, lesson: local.meta.lesson,
-               supportType: local.meta.supportType,
-               dateLabel: new Date(local.updatedAt).toLocaleDateString(),
-               isoDate: local.meta.date,
-               rawDate: local.updatedAt,
-               status: local.status || "draft",
-               progress: 0, totalIndicators: 0, statusColor: "mixed",
-               teacherWorkbookUrl: local.meta.teacherWorkbookUrl,
-               adminWorkbookUrl: local.meta.adminWorkbookUrl,
-               adminViewOnlyUrl: null, admin_summary_vn: null,
-               meta: local.meta,
-               lastSync: 0, updatedAt: local.updatedAt, 
-               syncStatus: 'local-changes' // Force Blue Cloud
-            });
-        }
-    } catch(e) {}
-
+      const allKeys = await keys();
+      const obsKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith(STORAGE_PREFIX));
+      for (const k of obsKeys) {
+        const id = (k as string).replace(STORAGE_PREFIX, "");
+        // If server didn't send it, and we didn't delete it -> It's a Ghost
+        if (processedIds.has(id) || pendingDeletes.includes(id)) continue;
+        const local = await get<any>(k);
+        if (!local) continue;
+        rows.push({
+          id: local.id,
+          teacherName: local.meta.teacherName || "Unknown",
+          schoolName: local.meta.schoolName || "Unknown",
+          campus: local.meta.campus || "",
+          unit: local.meta.unit, lesson: local.meta.lesson,
+          supportType: local.meta.supportType,
+          dateLabel: new Date(local.updatedAt).toLocaleDateString(),
+          isoDate: local.meta.date,
+          rawDate: local.updatedAt,
+          status: local.status || "draft",
+          progress: 0, totalIndicators: 0, statusColor: "mixed",
+          teacherWorkbookUrl: local.meta.teacherWorkbookUrl,
+          adminWorkbookUrl: local.meta.adminWorkbookUrl,
+          adminViewOnlyUrl: null, admin_summary_vn: null,
+          meta: local.meta,
+          lastSync: 0, updatedAt: local.updatedAt,
+          syncStatus: 'local-changes' // Force Blue Cloud
+        });
+      }
+    } catch (e) { }
     // Enrich with School Data
     return await enrichObservationsWithDefaults(rows);
   }
@@ -2020,7 +1753,6 @@ async function processRows(dbRows: any[], pendingDeletes: string[]) {
         .eq("trainer_id", user.id)
         .order("observation_date", { ascending: false })
         .order("created_at", { ascending: false });
-
       if (!error && data) {
         await set("dashboard_backup_list", data);
         const rows = await processRows(data, pendingDeletes);
@@ -2030,106 +1762,94 @@ async function processRows(dbRows: any[], pendingDeletes: string[]) {
       console.warn("Dashboard refresh failed", err);
     }
   }, [user?.id]);
-
   /* ------------------------------
       FILTER + SORT + GROUP
   --------------------------------- */
-const stats = React.useMemo(() => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth(); // 0‑based
-  const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
-
-  // --- Schools breakdown ---
-  const exclusiveSchools = new Set<string>();
-  const sharedSchools = new Set<string>();
-  (schoolsAll as Array<{ school_name: string; campus_name: string; disabled: boolean; exclusive: string | null }>).forEach(s => {
-    if (!s.disabled) {
-      if (s.exclusive === 'exclusive') exclusiveSchools.add(s.school_name);
-      else if (s.exclusive === 'shared') sharedSchools.add(s.school_name);
-    }
-  });
-
-  // --- Teachers (active + mutual) ---
-  type TeacherStatsRow = { name: string; school_name: string; campus: string; tags: string[] | null; needs_review: boolean; latest_performance: string | null; grapeseed_id: string | null };
-
-  const campusExclusive = new Map<string, string | null>();
-  (schoolsAll as Array<{ school_name: string; campus_name: string; exclusive: string | null }>).forEach(s => {
-    const key = `${s.school_name}||${s.campus_name}`;
-    campusExclusive.set(key, s.exclusive);
-  });
-
-  let activeTeachersCount = 0;
-  let mutualTeachersCount = 0;
-  let thriving = 0, functioning = 0, developing = 0;
-    (teachersAll as TeacherStatsRow[]).forEach(t => {
-    const tags: string[] = Array.isArray(t.tags) ? t.tags : [];
-    const isInactive = tags.some((tag: string) => tag.toLowerCase() === 'inactive');
-    if (isInactive || t.needs_review) return;
-
-    const key = `${t.school_name}||${t.campus}`;
-    const exclusive = campusExclusive.get(key);
-    if (exclusive === 'exclusive' || exclusive === 'shared') {
-      // Mutual check (same logic as TeachersScreen)
-      const otherTags = tags.filter((tag: string) => tag !== 'No tag' && tag.toLowerCase() !== 'inactive');
-      if (otherTags.length > 0) {
-        mutualTeachersCount++;
-      } else {
-        // Only increment active count for non-mutual, solo teachers
-        activeTeachersCount++;
+  const stats = React.useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0‑based
+    const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+    // --- Schools breakdown ---
+    const exclusiveSchools = new Set<string>();
+    const sharedSchools = new Set<string>();
+    (schoolsAll as Array<{ school_name: string; campus_name: string; disabled: boolean; exclusive: string | null }>).forEach(s => {
+      if (!s.disabled) {
+        if (s.exclusive === 'exclusive') exclusiveSchools.add(s.school_name);
+        else if (s.exclusive === 'shared') sharedSchools.add(s.school_name);
       }
-
-      // Performance (count for all active, including mutual)
-      if (t.latest_performance === 'Thriving') thriving++;
-      else if (t.latest_performance === 'Functioning') functioning++;
-      else if (t.latest_performance === 'Developing') developing++;
-    }
-  });
-
-  const totalForPerf = thriving + functioning + developing;
-  const perfPct = (val: number) => totalForPerf > 0 ? Math.round((val / totalForPerf) * 100) : 0;
-
-  // --- Observations this month ---
-  const visitedSchools = new Set<string>();
-  const visitedTeachers = new Set<string>();
-  let lvaCount = 0;
-
-  observations.forEach(o => {
-    const iso = o.isoDate;
-    if (!iso || !iso.startsWith(monthStr)) return;
-    if (o.supportType === 'Visit') {
-      visitedSchools.add(o.schoolName);
-      visitedTeachers.add(o.teacherName);
-    } else if (o.supportType === 'LVA') {
-      lvaCount++;
-    }
-  });
-
-  // Sum visit_count for active exclusive & shared schools
-  let totalVisitCount = 0;
-  (schoolsAll as Array<{ disabled: boolean; exclusive: string | null; visit_count: number | null }>).forEach(s => {
-    if (!s.disabled && (s.exclusive === 'exclusive' || s.exclusive === 'shared')) {
-      totalVisitCount += Number(s.visit_count) || 0;
-    }
-  });
-
-  return {
-    year,
-    month: now.toLocaleString('default', { month: 'long' }),
-    exclusiveSchools: exclusiveSchools.size,
-    sharedSchools: sharedSchools.size,
-    activeTeachers: activeTeachersCount,
-    mutualTeachers: mutualTeachersCount,
-    totalVisitCount,
-    visitedSchools: visitedSchools.size,
-    visitedTeachers: visitedTeachers.size,
-    lvaCount,
-    thriving: { count: thriving, pct: perfPct(thriving) },
-    functioning: { count: functioning, pct: perfPct(functioning) },
-    developing: { count: developing, pct: perfPct(developing) },
-  };
-}, [schoolsAll, teachersAll, observations]);
-const filteredAndSorted = React.useMemo(() => {
+    });
+    // --- Teachers (active + mutual) ---
+    type TeacherStatsRow = { name: string; school_name: string; campus: string; tags: string[] | null; needs_review: boolean; latest_performance: string | null; grapeseed_id: string | null };
+    const campusExclusive = new Map<string, string | null>();
+    (schoolsAll as Array<{ school_name: string; campus_name: string; exclusive: string | null }>).forEach(s => {
+      const key = `${s.school_name}||${s.campus_name}`;
+      campusExclusive.set(key, s.exclusive);
+    });
+    let activeTeachersCount = 0;
+    let mutualTeachersCount = 0;
+    let thriving = 0, functioning = 0, developing = 0;
+    (teachersAll as TeacherStatsRow[]).forEach(t => {
+      const tags: string[] = Array.isArray(t.tags) ? t.tags : [];
+      const isInactive = tags.some((tag: string) => tag.toLowerCase() === 'inactive');
+      if (isInactive || t.needs_review) return;
+      const key = `${t.school_name}||${t.campus}`;
+      const exclusive = campusExclusive.get(key);
+      if (exclusive === 'exclusive' || exclusive === 'shared') {
+        // Mutual check (same logic as TeachersScreen)
+        const otherTags = tags.filter((tag: string) => tag !== 'No tag' && tag.toLowerCase() !== 'inactive');
+        if (otherTags.length > 0) {
+          mutualTeachersCount++;
+        } else {
+          // Only increment active count for non-mutual, solo teachers
+          activeTeachersCount++;
+        }
+        // Performance (count for all active, including mutual)
+        if (t.latest_performance === 'Thriving') thriving++;
+        else if (t.latest_performance === 'Functioning') functioning++;
+        else if (t.latest_performance === 'Developing') developing++;
+      }
+    });
+    const totalForPerf = thriving + functioning + developing;
+    const perfPct = (val: number) => totalForPerf > 0 ? Math.round((val / totalForPerf) * 100) : 0;
+    // --- Observations this month ---
+    const visitedSchools = new Set<string>();
+    const visitedTeachers = new Set<string>();
+    let lvaCount = 0;
+    observations.forEach(o => {
+      const iso = o.isoDate;
+      if (!iso || !iso.startsWith(monthStr)) return;
+      if (o.supportType === 'Visit') {
+        visitedSchools.add(o.schoolName);
+        visitedTeachers.add(o.teacherName);
+      } else if (o.supportType === 'LVA') {
+        lvaCount++;
+      }
+    });
+    // Sum visit_count for active exclusive & shared schools
+    let totalVisitCount = 0;
+    (schoolsAll as Array<{ disabled: boolean; exclusive: string | null; visit_count: number | null }>).forEach(s => {
+      if (!s.disabled && (s.exclusive === 'exclusive' || s.exclusive === 'shared')) {
+        totalVisitCount += Number(s.visit_count) || 0;
+      }
+    });
+    return {
+      year,
+      month: now.toLocaleString('default', { month: 'long' }),
+      exclusiveSchools: exclusiveSchools.size,
+      sharedSchools: sharedSchools.size,
+      activeTeachers: activeTeachersCount,
+      mutualTeachers: mutualTeachersCount,
+      totalVisitCount,
+      visitedSchools: visitedSchools.size,
+      visitedTeachers: visitedTeachers.size,
+      lvaCount,
+      thriving: { count: thriving, pct: perfPct(thriving) },
+      functioning: { count: functioning, pct: perfPct(functioning) },
+      developing: { count: developing, pct: perfPct(developing) },
+    };
+  }, [schoolsAll, teachersAll, observations]);
+  const filteredAndSorted = React.useMemo(() => {
     const flattenText = (text: string | null | undefined): string => {
       if (!text) return "";
       return text
@@ -2139,9 +1859,7 @@ const filteredAndSorted = React.useMemo(() => {
         .replace(/đ/g, "d")
         .trim();
     };
-
     let list = [...observations];
-
     // Search logic
     const q = searchText.trim().toLowerCase();
     if (q) {
@@ -2155,145 +1873,128 @@ const filteredAndSorted = React.useMemo(() => {
         return searchWords.every(word => combinedTarget.includes(word));
       });
     }
-
     // Always sort by newest (rawDate descending)
     list.sort((a, b) => (b.rawDate ?? 0) - (a.rawDate ?? 0));
-
     return list;
   }, [observations, searchText]);
   // Assuming 'observations' and 'setObservations' are managed via useState in DashboardShell
-// const [observations, setObservations] = useState<DashboardObservationRow[]>([]);
-
-const handleSummarySaved = React.useCallback(
+  // const [observations, setObservations] = useState<DashboardObservationRow[]>([]);
+  const handleSummarySaved = React.useCallback(
     (obsId: string, vnSummary: string | null) => {
-        // This function is the KEY FIX. It updates the parent's state directly, 
-        // forcing the AM Summary useEffect to re-run with the fresh data.
-        setObservations(prev =>
-            prev.map(o => 
-                o.id === obsId 
-                    ? { 
-                        ...o, 
-                        // Update the specific field on the observation object
-                        admin_summary_vn: vnSummary 
-                      }
-                    : o
-            )
-        );
+      // This function is the KEY FIX. It updates the parent's state directly, 
+      // forcing the AM Summary useEffect to re-run with the fresh data.
+      setObservations(prev =>
+        prev.map(o =>
+          o.id === obsId
+            ? {
+              ...o,
+              // Update the specific field on the observation object
+              admin_summary_vn: vnSummary
+            }
+            : o
+        )
+      );
     },
     [setObservations]
-);
-
-// Handler for saving edited metadata (No Auto-Sync, just marks as 'Push Needed')
-const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: Partial<DashboardObservationRow['meta']>) => {
-  const storageKey = `${STORAGE_PREFIX}${id}`;
-  
-  // 1. Try to get the Current Full Data from IDB (The "Local File")
-  let currentData = await get<any>(storageKey);
-
-  // 2. FALLBACK: If not in IDB, try to find it in the "Backup List" (Server Cache)
-  // This fixes the "Error: Could not find observation" when editing a fresh server item
-  if (!currentData) {
-    try {
-      const backupList = (await get<any[]>("dashboard_backup_list")) || [];
-      const backupItem = backupList.find((item) => item.id === id);
-      
-      if (backupItem) {
-        currentData = {
-          id: backupItem.id,
-          meta: backupItem.meta || {},
-          indicators: backupItem.indicators || [], // Critical: Don't lose indicators!
-          status: backupItem.status || "draft",
-          updatedAt: backupItem.updated_at ? new Date(backupItem.updated_at).getTime() : Date.now(),
-          lastSync: backupItem.updated_at ? new Date(backupItem.updated_at).getTime() : 0,
-        };
-      }
-    } catch (e) {
-      console.warn("Failed to check backup list", e);
-    }
-  }
-
-  // 3. FALLBACK: If still missing and Online, fetch specific row from Supabase
-  if (!currentData && navigator.onLine) {
-    try {
-       const { data, error } = await supabase.from("observations").select("*").eq("id", id).single();
-       if (data && !error) {
+  );
+  // Handler for saving edited metadata (No Auto-Sync, just marks as 'Push Needed')
+  const handleSaveEditedObservation = useCallback(async (id: string, updatedMeta: Partial<DashboardObservationRow['meta']>) => {
+    const storageKey = `${STORAGE_PREFIX}${id}`;
+    // 1. Try to get the Current Full Data from IDB (The "Local File")
+    let currentData = await get<any>(storageKey);
+    // 2. FALLBACK: If not in IDB, try to find it in the "Backup List" (Server Cache)
+    // This fixes the "Error: Could not find observation" when editing a fresh server item
+    if (!currentData) {
+      try {
+        const backupList = (await get<any[]>("dashboard_backup_list")) || [];
+        const backupItem = backupList.find((item) => item.id === id);
+        if (backupItem) {
           currentData = {
-             ...data,
-             updatedAt: new Date(data.updated_at).getTime(),
-             lastSync: new Date(data.updated_at).getTime(),
+            id: backupItem.id,
+            meta: backupItem.meta || {},
+            indicators: backupItem.indicators || [], // Critical: Don't lose indicators!
+            status: backupItem.status || "draft",
+            updatedAt: backupItem.updated_at ? new Date(backupItem.updated_at).getTime() : Date.now(),
+            lastSync: backupItem.updated_at ? new Date(backupItem.updated_at).getTime() : 0,
           };
-       }
-    } catch (e) {}
-  }
-
-  // 4. Safety Abort
-  if (!currentData) {
-     alert("Error: Could not find the full observation data to save.\n\nTry refreshing the page.");
-     return;
-  }
-
-  // 5. Prepare the Update (Mark as Dirty)
-  // 🟢 FIX: Ensure 'now' is strictly greater than lastSync, even if the Windows PC clock 
-  // is lagging behind the server time pulled during the fallbacks above.
-  const rawNow = Date.now();
-  const safeLastSync = currentData.lastSync || 0;
-  const now = Math.max(rawNow, safeLastSync + 1000); 
-
-  const updatedData = {
-     ...currentData,
-     meta: {
+        }
+      } catch (e) {
+        console.warn("Failed to check backup list", e);
+      }
+    }
+    // 3. FALLBACK: If still missing and Online, fetch specific row from Supabase
+    if (!currentData && navigator.onLine) {
+      try {
+        const { data, error } = await supabase.from("observations").select("*").eq("id", id).single();
+        if (data && !error) {
+          currentData = {
+            ...data,
+            updatedAt: new Date(data.updated_at).getTime(),
+            lastSync: new Date(data.updated_at).getTime(),
+          };
+        }
+      } catch (e) { }
+    }
+    // 4. Safety Abort
+    if (!currentData) {
+      alert("Error: Could not find the full observation data to save.\n\nTry refreshing the page.");
+      return;
+    }
+    // 5. Prepare the Update (Mark as Dirty)
+    // 🟢 FIX: Ensure 'now' is strictly greater than lastSync, even if the Windows PC clock 
+    // is lagging behind the server time pulled during the fallbacks above.
+    const rawNow = Date.now();
+    const safeLastSync = currentData.lastSync || 0;
+    const now = Math.max(rawNow, safeLastSync + 1000);
+    const updatedData = {
+      ...currentData,
+      meta: {
         ...currentData.meta,
         ...updatedMeta
-     },
-     // Update top-level fields for sorting/searching
-     teacherName: updatedMeta.teacherName ?? currentData.teacherName ?? currentData.meta.teacherName,
-     schoolName: updatedMeta.schoolName ?? currentData.schoolName ?? currentData.meta.schoolName,
-     campus: updatedMeta.campus ?? currentData.campus ?? currentData.meta.campus,
-     unit: updatedMeta.unit ?? currentData.unit ?? currentData.meta.unit,
-     lesson: updatedMeta.lesson ?? currentData.lesson ?? currentData.meta.lesson,
-     supportType: updatedMeta.supportType ?? currentData.supportType ?? currentData.meta.supportType,
-     
-     // 🟢 CRITICAL: This triggers the "Sync Now" button
-     updatedAt: now, 
-     // Do NOT update lastSync yet! (lastSync < updatedAt = Blue Button)
-     syncStatus: 'local-changes' 
-  };
-
-  // 6. Save to IndexedDB (Creates the physical "Local File" so Phase 3 sees it)
-  await set(storageKey, updatedData);
-
-  // 7. Update UI Instantly (Turn button blue immediately)
-  setObservations(prev =>
-    prev.map(obs =>
-      obs.id === id
-        ? { 
-            ...obs, 
-            ...updatedData, 
+      },
+      // Update top-level fields for sorting/searching
+      teacherName: updatedMeta.teacherName ?? currentData.teacherName ?? currentData.meta.teacherName,
+      schoolName: updatedMeta.schoolName ?? currentData.schoolName ?? currentData.meta.schoolName,
+      campus: updatedMeta.campus ?? currentData.campus ?? currentData.meta.campus,
+      unit: updatedMeta.unit ?? currentData.unit ?? currentData.meta.unit,
+      lesson: updatedMeta.lesson ?? currentData.lesson ?? currentData.meta.lesson,
+      supportType: updatedMeta.supportType ?? currentData.supportType ?? currentData.meta.supportType,
+      // 🟢 CRITICAL: This triggers the "Sync Now" button
+      updatedAt: now,
+      // Do NOT update lastSync yet! (lastSync < updatedAt = Blue Button)
+      syncStatus: 'local-changes'
+    };
+    // 6. Save to IndexedDB (Creates the physical "Local File" so Phase 3 sees it)
+    await set(storageKey, updatedData);
+    // 7. Update UI Instantly (Turn button blue immediately)
+    setObservations(prev =>
+      prev.map(obs =>
+        obs.id === id
+          ? {
+            ...obs,
+            ...updatedData,
             dateLabel: new Date(updatedData.updatedAt).toLocaleDateString(),
             syncStatus: 'local-changes', // Force UI refresh
             updatedAt: now // Ensure sort logic sees the new time
           }
-        : obs
-    )
-  );
-
-  // 8. Close Modal (No Auto-Sync)
-  console.log("✅ Metadata saved locally. Sync button should appear.");
-  setEditingObservation(null);
-  setShowEditModal(false);
-}, [setObservations]);
-
-const grouped = React.useMemo(() => {
-  // Always group by month
-  return groupBy(filteredAndSorted, (o) => {
-    const mk = monthKeyFromTs(o.rawDate);
-    return mk ?? "Unknown date";
-  });
-}, [filteredAndSorted]);
+          : obs
+      )
+    );
+    // 8. Close Modal (No Auto-Sync)
+    console.log("✅ Metadata saved locally. Sync button should appear.");
+    setEditingObservation(null);
+    setShowEditModal(false);
+  }, [setObservations]);
+  const grouped = React.useMemo(() => {
+    // Always group by month
+    return groupBy(filteredAndSorted, (o) => {
+      const mk = monthKeyFromTs(o.rawDate);
+      return mk ?? "Unknown date";
+    });
+  }, [filteredAndSorted]);
   /* ------------------------------
       AM SUMMARY HELPERS
   --------------------------------- */
-
   // All distinct month keys that actually have data, sorted newest→oldest
   const availableMonths = React.useMemo(() => {
     const set = new Set<string>();
@@ -2309,30 +2010,26 @@ const grouped = React.useMemo(() => {
       return m2 - m1;
     });
   }, [observations]);
-const availableSchools = React.useMemo(() => {
-  return [...new Set(observations.map(o => o.schoolName).filter(Boolean))];
-}, [observations]);
-
-const availableMonthsForBulk = React.useMemo(() => {
-  return [...new Set(
-    observations
-      .map(o => monthKeyFromTs(o.rawDate))
-      .filter((m): m is string => m !== null)
-  )];
-}, [observations]);
-
-const filteredObservationsForBulk = React.useMemo(() => {
-  if (!bulkSchool || !bulkMonth) return [];
-  return observations.filter(o => 
-    o.schoolName === bulkSchool && 
-    monthKeyFromTs(o.rawDate) === bulkMonth
-  );
-}, [observations, bulkSchool, bulkMonth]);
-
+  const availableSchools = React.useMemo(() => {
+    return [...new Set(observations.map(o => o.schoolName).filter(Boolean))];
+  }, [observations]);
+  const availableMonthsForBulk = React.useMemo(() => {
+    return [...new Set(
+      observations
+        .map(o => monthKeyFromTs(o.rawDate))
+        .filter((m): m is string => m !== null)
+    )];
+  }, [observations]);
+  const filteredObservationsForBulk = React.useMemo(() => {
+    if (!bulkSchool || !bulkMonth) return [];
+    return observations.filter(o =>
+      o.schoolName === bulkSchool &&
+      monthKeyFromTs(o.rawDate) === bulkMonth
+    );
+  }, [observations, bulkSchool, bulkMonth]);
   // All AMs that appear in *any* observation (we filter by month later)
   const allAms = React.useMemo(() => {
     const map = new Map<string, { name: string; email: string }>();
-
     observations.forEach((o) => {
       const info = findSchoolInfo(o.schoolName, o.campus);
       if (!info) return;
@@ -2341,24 +2038,19 @@ const filteredObservationsForBulk = React.useMemo(() => {
         map.set(key, { name: info.amName, email: info.amEmail });
       }
     });
-
     return Array.from(map.entries()).map(([key, v]) => ({
       key,
       name: v.name,
       email: v.email,
     }));
   }, [observations]);
-
   // AMs that actually have schools supported in the chosen month
   const amsForSelectedMonth = React.useMemo(() => {
     if (!summaryMonth) return [];
-
     const seen = new Map<string, { name: string; email: string }>();
-
     observations.forEach((o) => {
       const mk = monthKeyFromTs(o.rawDate);
       if (mk !== summaryMonth) return;
-
       const info = findSchoolInfo(o.schoolName, o.campus);
       if (!info) return;
       const key = amKeyFromSchool(info);
@@ -2366,40 +2058,33 @@ const filteredObservationsForBulk = React.useMemo(() => {
         seen.set(key, { name: info.amName, email: info.amEmail });
       }
     });
-
     return Array.from(seen.entries()).map(([key, v]) => ({
       key,
       name: v.name,
       email: v.email,
     }));
   }, [observations, summaryMonth]);
-
   // Build summary rows when both month + AM are chosen
-// Build summary rows when both month + AM are chosen
+  // Build summary rows when both month + AM are chosen
   React.useEffect(() => {
     if (!summaryMonth || !summaryAmKey) {
       setSummaryRows([]);
       return;
     }
-
     // 1. Use the MAIN interface defined at the top of your file.
     const rowMap = new Map<string, AmSummaryRow>();
-
     observations.forEach((o) => {
       // Basic filtering
       const mk = monthKeyFromTs(o.rawDate);
       if (mk !== summaryMonth) return;
-
       const info = findSchoolInfo(o.schoolName, o.campus);
       if (!info) return;
       const amKey = amKeyFromSchool(info);
       if (amKey !== summaryAmKey) return;
-
       // -----------------------------------------------------------------
       // Logic: Determine "Best Available" Summary Text
       // -----------------------------------------------------------------
       let collected = "";
-
       // A. Priority: Database translated summary (requires the load fix above!)
       if (o.admin_summary_vn) {
         collected = o.admin_summary_vn;
@@ -2411,9 +2096,7 @@ const filteredObservationsForBulk = React.useMemo(() => {
           const raw = localStorage.getItem(storageKey);
           if (raw) details = JSON.parse(raw);
         } catch (err) { /* ignore */ }
-
         const obsLabel = o.dateLabel || mk;
-
         if (details && Array.isArray(details.indicators)) {
           (details.indicators as any[]).forEach((ind) => {
             const comment = (ind.commentText ?? "").toString().trim();
@@ -2424,40 +2107,33 @@ const filteredObservationsForBulk = React.useMemo(() => {
               ind.includeInTrainerSummary === undefined &&
               !!ind.growth &&
               hasComment;
-
             if (!explicitlyFlagged && !legacyFlagged) return;
-
             const number = ind.number ?? "";
             const line = `- [${obsLabel}] ${number}: ${comment}`;
             collected += (collected ? "\n" : "") + line;
           });
         }
       }
-
       // -----------------------------------------------------------------
       // Aggregate into Map
       // -----------------------------------------------------------------
       const key = `${o.teacherName}|${o.schoolName}|${o.campus}`;
-
       if (!rowMap.has(key)) {
         rowMap.set(key, {
           schoolName: o.schoolName,
           campus: o.campus,
           teacherName: o.teacherName,
           // 🛑 FIX: Cast specifically to 'any' or the specific union type to allow "none"
-          status: "none" as any, 
-          
+          status: "none" as any,
           // Initial values
           nextSteps: collected,
           adminSummaryVn: collected,
         });
       } else {
         const existing = rowMap.get(key)!;
-
         // Helper to append text safely
         const appendText = (current: string, newText: string) =>
           newText ? [current, newText].filter(Boolean).join("\n") : current;
-
         rowMap.set(key, {
           ...existing,
           nextSteps: appendText(existing.nextSteps, collected),
@@ -2466,25 +2142,19 @@ const filteredObservationsForBulk = React.useMemo(() => {
         });
       }
     });
-
     // Sort by teacher name
     const rows = Array.from(rowMap.values()).sort((a, b) =>
       a.teacherName.localeCompare(b.teacherName)
     );
-
     setSummaryRows(rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryMonth, summaryAmKey, observations]);
-
-  
   // Build email body from current table state
   const emailBody = React.useMemo(() => {
     if (!summaryMonth || !summaryAmKey || summaryRows.length === 0) {
       return "";
     }
-
     const { name: amName } = parseAmKey(summaryAmKey);
-
     const headerLines = [
       `Dear ${amName},`,
       "",
@@ -2493,42 +2163,35 @@ const filteredObservationsForBulk = React.useMemo(() => {
       "School | Campus | Teacher | Status | Next steps",
       "------ | ------ | ------- | ------ | ----------",
     ];
-
     const rowLines = summaryRows.map((r) => {
       const statusLabel =
         r.status === "green"
           ? "Green"
           : r.status === "red"
-          ? "Red"
-          : "-";
-
+            ? "Red"
+            : "-";
       const oneLineNext =
         r.nextSteps?.replace(/\s+/g, " ").slice(0, 180) || "";
       return `${r.schoolName} | ${r.campus} | ${r.teacherName} | ${statusLabel} | ${oneLineNext}`;
     });
-
     const footerLines = [
       "",
       "If you have any questions or would like to discuss specific next steps, please let me know.",
       "",
       "Best regards,",
-     trainerName,
+      trainerName,
     ];
-
     return [...headerLines, ...rowLines, ...footerLines].join("\n");
   }, [summaryRows, summaryMonth, summaryAmKey]);
-
   // Mark email as "sent" for (AM, month)
   const markSummarySent = () => {
     if (!summaryMonth || !summaryAmKey) return;
-
     const key = `${summaryAmKey}::${summaryMonth}`;
     const now = Date.now();
     const updated: AmSummarySentMap = {
       ...amSummarySentMap,
       [key]: now,
     };
-
     setAmSummarySentMap(updated);
     try {
       localStorage.setItem(SUMMARY_STATE_KEY, JSON.stringify(updated));
@@ -2536,7 +2199,6 @@ const filteredObservationsForBulk = React.useMemo(() => {
       console.error("Failed to persist AM summary state", err);
     }
   };
-
   const sentInfo = React.useMemo(() => {
     if (!summaryMonth || !summaryAmKey) return null;
     const key = `${summaryAmKey}::${summaryMonth}`;
@@ -2544,20 +2206,16 @@ const filteredObservationsForBulk = React.useMemo(() => {
     if (!ts) return null;
     return new Date(ts).toLocaleString();
   }, [amSummarySentMap, summaryAmKey, summaryMonth]);
-
   // Observation currently targeted by the Teacher/Admin action modal
   const modalObservation = React.useMemo(() => {
     if (!actionModal) return null;
     return observations.find((o) => o.id === actionModal.obsId) ?? null;
   }, [actionModal, observations]);
-
   /* ------------------------------
       HANDLERS
   --------------------------------- */
-
-const handlePreCallEmail = async (obs: DashboardObservationRow) => {
+  const handlePreCallEmail = async (obs: DashboardObservationRow) => {
     const teacherEmail = await fetchTeacherEmail(obs.teacherName, obs.schoolName);
-    
     // Build HTML (Simple Link Version)
     const html = buildTeacherPreCallHtml({
       teacherName: obs.teacherName,
@@ -2567,20 +2225,18 @@ const handlePreCallEmail = async (obs: DashboardObservationRow) => {
       bookingUrl: trainerSettings?.booking_url,
       teacherWorkbookUrl: obs.teacherWorkbookUrl,
     });
-
     setEmailModalState({
       isOpen: true,
       mode: "simple",
-       emailType: "pre", // <--- 1. Set Type
-       obsId: obs.id, // <--- ✅ PASS THE ID HERE
+      emailType: "pre", // <--- 1. Set Type
+      obsId: obs.id, // <--- ✅ PASS THE ID HERE
       to: teacherEmail ? [teacherEmail] : [],
       subject: `GrapeSEED Support Pre-call: ${obs.teacherName}`,
       cc: [],
       bodyHtml: html,
     });
   };
-
-const handlePostCallEmail = async (obs: DashboardObservationRow) => {
+  const handlePostCallEmail = async (obs: DashboardObservationRow) => {
     // 🟢 1. CHECK TOKEN VALIDITY USING YOUR NEW HELPER
     if (!isGrapeSeedTokenValid()) {
       console.warn("⚠️ GrapeSEED Token Missing or Expired. Opening login...");
@@ -2588,12 +2244,10 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
       setShowLoginModal(true);    // Pop the gate
       return;                     // Stop execution here
     }
-
     const gsToken = localStorage.getItem('grapeseed_token');
     const teacherEmail = await fetchTeacherEmail(obs.teacherName, obs.schoolName);
     let visitationId = null;
     let schoolId = null;   // <-- new variable for official code
-
     // 🟢 2. PROCEED WITH LINK FETCHING
     try {
       const { data: schoolData } = await supabase
@@ -2602,13 +2256,11 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
         .eq('school_name', obs.schoolName)
         .eq('campus_name', obs.campus || '')
         .maybeSingle();
-
       if (schoolData?.official_code) {
         schoolId = schoolData.official_code;   // <-- store the official code
         const dateObj = new Date((obs as any).createdAt || (obs as any).created_at || new Date());
         const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
         const apiType = obs.supportType === 'LVA' ? 'LVA' : 'Visit';
-
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
         const matchResponse = await fetch(`${API_BASE_URL}/api/match-visitation`, {
           method: 'POST',
@@ -2621,7 +2273,6 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
             campusId: schoolData.campus_id
           })
         });
-
         if (matchResponse.ok) {
           const matchData = await matchResponse.json();
           if (matchData.match?.linkId) {
@@ -2638,54 +2289,46 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
     } catch (err) {
       console.error("Failed to silently fetch visitation ID:", err);
     }
-
     // 🟢 3. BUILD HTML AND OPEN MODAL
     const html = buildTeacherPostCallHtml({
       teacherName: obs.teacherName,
       schoolName: obs.schoolName,
       campus: obs.campus,
-      trainerName: trainerName, 
+      trainerName: trainerName,
       teacherWorkbookUrl: obs.teacherWorkbookUrl,
       visitationId: visitationId,
       schoolId: schoolId   // <-- add the official code
     });
-
     setEmailModalState({
       isOpen: true,
       mode: "simple",
-      emailType: "post", 
-      obsId: obs.id, 
+      emailType: "post",
+      obsId: obs.id,
       to: teacherEmail ? [teacherEmail] : [],
       cc: [],
       subject: `GrapeSEED Support Summary: ${obs.teacherName}`,
       bodyHtml: html,
     });
   };
-
   const handleAdminUpdateEmail = async (obs: DashboardObservationRow) => {
     // 1. Fetch Admin Email
     const { adminEmail, amEmail } = await fetchSchoolEmails(obs.schoolName, obs.campus);
-
     // 2. Identify the Target Month (YYYY-MM) from the clicked observation
     // obs.date is expected to be "YYYY-MM-DD"
     const targetMonthPrefix = obs.isoDate ? obs.isoDate.slice(0, 7) : ""; // "2025-12"
-
     // 3. Find Matches: Same School + Same Month
     const matches = observations.filter((o) => {
       if (o.schoolName !== obs.schoolName) return false;
       if (!o.isoDate) return false;
       return o.isoDate.startsWith(targetMonthPrefix);
     });
-
     // 4. Prepare Data
     let html = "";
     const isBulk = matches.length > 1;
-
     // Helper to format month name (e.g. "12/2025")
-    const monthLabel = targetMonthPrefix 
+    const monthLabel = targetMonthPrefix
       ? `${targetMonthPrefix.split("-")[1]}/${targetMonthPrefix.split("-")[0]}`
       : "Unknown Date";
-
     if (isBulk) {
       // BULK MODE
       html = buildAdminUpdateBulkHtml({
@@ -2716,7 +2359,6 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
         viewOnlyUrl: obs.adminViewOnlyUrl
       });
     }
-
     // 5. Open Modal
     setEmailModalState({
       isOpen: true,
@@ -2726,133 +2368,118 @@ const handlePostCallEmail = async (obs: DashboardObservationRow) => {
       obsIds: matches.map(m => m.id), // <--- Track ALL IDs for badging
       to: adminEmail ? [adminEmail] : [],
       cc: amEmail ? [amEmail] : [],
-      subject: isBulk 
+      subject: isBulk
         ? `GrapeSEED Support Update: ${obs.schoolName} (${monthLabel})`
         : `GrapeSEED Support Update: ${obs.schoolName}`,
       bodyHtml: html,
     });
   };
-
-// Bulk merge admin workbooks (sequential)
-const handleBulkAdminMerge = async () => {
-  if (bulkSelectedIds.size === 0) {
-    alert("Please select at least one teacher.");
-    return;
-  }
-  setBulkMerging(true);
-  let successCount = 0;
-  let failCount = 0;
-  const selectedObs = observations.filter(o => bulkSelectedIds.has(o.id));
-  try {
-    for (let i = 0; i < selectedObs.length; i++) {
-      const obs = selectedObs[i];
-      setBulkMergeProgress({
-        current: i + 1,
-        total: selectedObs.length,
-        currentTeacher: obs.teacherName,
-      });
-      try {
-        await handleMergeAdminWorkbook(obs, true);
-        successCount++;
-      } catch (err) {
-        console.error(`Merge failed for ${obs.teacherName}:`, err);
-        failCount++;
-      }
+  // Bulk merge admin workbooks (sequential)
+  const handleBulkAdminMerge = async () => {
+    if (bulkSelectedIds.size === 0) {
+      alert("Please select at least one teacher.");
+      return;
     }
-  } finally {
-    setBulkMerging(false);
-    setBulkMergeProgress({ current: 0, total: 0 });
-  }
-  alert(`Merge complete: ${successCount} succeeded, ${failCount} failed.`);
-  setShowBulkAdminModal(false);
-};
-
-// Bulk admin update email
-const handleBulkAdminEmail = async () => {
-  if (bulkSelectedIds.size === 0) {
-    alert("Please select at least one teacher.");
-    return;
-  }
-  const selectedObs = observations.filter(o => bulkSelectedIds.has(o.id));
-  // Collect unique admin emails (per campus) and unique AM emails
-  const adminEmailSet = new Set<string>();
-  const amEmailSet = new Set<string>();
-  const teachersForTable: TeacherEntry[] = [];
-
-  for (const obs of selectedObs) {
-    const { adminEmail, amEmail } = await fetchSchoolEmails(obs.schoolName, obs.campus);
-    if (adminEmail) adminEmailSet.add(adminEmail);
-    if (amEmail) amEmailSet.add(amEmail);
-    teachersForTable.push({
-      campus: obs.campus,
-      teacherName: obs.teacherName,
-      unit: obs.unit,
-      lesson: obs.lesson,
-      dateStr: obs.isoDate ? obs.isoDate.slice(5) : "", // "MM-DD"
+    setBulkMerging(true);
+    let successCount = 0;
+    let failCount = 0;
+    const selectedObs = observations.filter(o => bulkSelectedIds.has(o.id));
+    try {
+      for (let i = 0; i < selectedObs.length; i++) {
+        const obs = selectedObs[i];
+        setBulkMergeProgress({
+          current: i + 1,
+          total: selectedObs.length,
+          currentTeacher: obs.teacherName,
+        });
+        try {
+          await handleMergeAdminWorkbook(obs, true);
+          successCount++;
+        } catch (err) {
+          console.error(`Merge failed for ${obs.teacherName}:`, err);
+          failCount++;
+        }
+      }
+    } finally {
+      setBulkMerging(false);
+      setBulkMergeProgress({ current: 0, total: 0 });
+    }
+    alert(`Merge complete: ${successCount} succeeded, ${failCount} failed.`);
+    setShowBulkAdminModal(false);
+  };
+  // Bulk admin update email
+  const handleBulkAdminEmail = async () => {
+    if (bulkSelectedIds.size === 0) {
+      alert("Please select at least one teacher.");
+      return;
+    }
+    const selectedObs = observations.filter(o => bulkSelectedIds.has(o.id));
+    // Collect unique admin emails (per campus) and unique AM emails
+    const adminEmailSet = new Set<string>();
+    const amEmailSet = new Set<string>();
+    const teachersForTable: TeacherEntry[] = [];
+    for (const obs of selectedObs) {
+      const { adminEmail, amEmail } = await fetchSchoolEmails(obs.schoolName, obs.campus);
+      if (adminEmail) adminEmailSet.add(adminEmail);
+      if (amEmail) amEmailSet.add(amEmail);
+      teachersForTable.push({
+        campus: obs.campus,
+        teacherName: obs.teacherName,
+        unit: obs.unit,
+        lesson: obs.lesson,
+        dateStr: obs.isoDate ? obs.isoDate.slice(5) : "", // "MM-DD"
+      });
+    }
+    const toEmails = Array.from(adminEmailSet);
+    const ccEmails = Array.from(amEmailSet);
+    if (toEmails.length === 0 && ccEmails.length === 0) {
+      alert("No admin or AM email addresses found for the selected teachers.");
+      return;
+    }
+    // Use the first selected observation's admin workbook URL (same for all if same school)
+    const firstObs = selectedObs[0];
+    const adminWorkbookUrl = firstObs.adminWorkbookUrl;
+    const viewOnlyUrl = firstObs.adminViewOnlyUrl;
+    const monthLabel = bulkMonth.replace(".", "/"); // e.g. "12.2025" -> "12/2025"
+    const html = buildAdminUpdateBulkHtml({
+      adminName: "School Admin", // generic, but we'll address to first admin? Or just generic
+      schoolName: bulkSchool,
+      reportMonth: monthLabel,
+      trainerName: trainerName,
+      adminWorkbookUrl: adminWorkbookUrl,
+      viewOnlyUrl: viewOnlyUrl,
+      teachers: teachersForTable,
     });
-  }
-
-  const toEmails = Array.from(adminEmailSet);
-  const ccEmails = Array.from(amEmailSet);
-  if (toEmails.length === 0 && ccEmails.length === 0) {
-    alert("No admin or AM email addresses found for the selected teachers.");
-    return;
-  }
-
-  // Use the first selected observation's admin workbook URL (same for all if same school)
-  const firstObs = selectedObs[0];
-  const adminWorkbookUrl = firstObs.adminWorkbookUrl;
-  const viewOnlyUrl = firstObs.adminViewOnlyUrl;
-
-  const monthLabel = bulkMonth.replace(".", "/"); // e.g. "12.2025" -> "12/2025"
-
-  const html = buildAdminUpdateBulkHtml({
-    adminName: "School Admin", // generic, but we'll address to first admin? Or just generic
-    schoolName: bulkSchool,
-    reportMonth: monthLabel,
-    trainerName: trainerName,
-    adminWorkbookUrl: adminWorkbookUrl,
-    viewOnlyUrl: viewOnlyUrl,
-    teachers: teachersForTable,
-  });
-
-  setEmailModalState({
-    isOpen: true,
-    mode: "simple",
-    emailType: "admin",
-    obsId: undefined,
-    obsIds: selectedObs.map(o => o.id),
-    to: toEmails,
-    cc: ccEmails,
-    subject: `GrapeSEED Support Update: ${bulkSchool} (${monthLabel})`,
-    bodyHtml: html,
-  });
-  setShowBulkAdminModal(false);
-};
-
-const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
+    setEmailModalState({
+      isOpen: true,
+      mode: "simple",
+      emailType: "admin",
+      obsId: undefined,
+      obsIds: selectedObs.map(o => o.id),
+      to: toEmails,
+      cc: ccEmails,
+      subject: `GrapeSEED Support Update: ${bulkSchool} (${monthLabel})`,
+      bodyHtml: html,
+    });
+    setShowBulkAdminModal(false);
+  };
+  const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     setMergingTeacherId(obs.id);
     setActionModal(null);
-
     // 1. Basic Validation
     // 🔴 REPLACED: const full = loadFullObservation(obs.id);
     // 🟢 FIXED: Fetch asynchronously from IndexedDB
     const full = await get(`${STORAGE_PREFIX}${obs.id}`);
-
     if (!full) { alert("Missing data (Check IndexedDB)"); setMergingTeacherId(null); return; }
-    
     const workbookUrl = obs.teacherWorkbookUrl;
     if (!workbookUrl) { alert("No Workbook URL"); setMergingTeacherId(null); return; }
-
     try {
       // 2. Get Token
       const graphToken = await getGraphAccessToken();
-
       // 3. Prepare Data
       const exportMeta = toMetaForExport(full, obs);
       const exportIndicators = toIndicatorsForExport(full);
       const teacherModel = buildTeacherExportModel(exportMeta, exportIndicators, trainerName);
-
       // 🚀 4. RUN CLIENT MERGE (No Server!)
       const result = await clientMergeTeacherSheet({
         token: graphToken,
@@ -2860,21 +2487,17 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
         sheetName: buildTeacherSheetName(obs),
         model: teacherModel
       });
-
       // 5. Success: Update Database
       const mergedAt = new Date().toISOString();
       const patch = {
         mergedTeacher: { url: result.sheetUrl, sheetName: result.sheetName, mergedAt },
         teacherWorkbookUrl: workbookUrl,
       };
-
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
-
       // Update UI
       setObservations((prev) =>
         prev.map((o) => (o.id === obs.id ? { ...o, meta: nextMeta } : o))
       );
-
       setRecentMergePanel({
         obsId: obs.id,
         kind: "teacher",
@@ -2882,9 +2505,7 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
         sheetName: result.sheetName,
         mergedAt,
       });
-
       alert("Teacher merge succeeded!");
-
     } catch (err: any) {
       console.error("Client merge error:", err);
       alert(`Merge failed: ${err.message}`);
@@ -2892,109 +2513,90 @@ const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
       setMergingTeacherId(null);
     }
   };
-
   // ✅ CLIENT-SIDE MERGE ADMIN HANDLER (With Translation Fix)
-const handleMergeAdminWorkbook = async (obs: DashboardObservationRow, silent: boolean = false) => {
+  const handleMergeAdminWorkbook = async (obs: DashboardObservationRow, silent: boolean = false) => {
     setMergingAdminId(obs.id);
     setActionModal(null);
-
     // 1. Try to get from IndexedDB first
     let full = await get(`${STORAGE_PREFIX}${obs.id}`);
-
     // 2. If missing, try to fetch from Supabase (online only)
     if (!full) {
-        if (!navigator.onLine) {
-            alert(`Cannot merge admin workbook for ${obs.teacherName}: observation data not available offline. Please go online or open the observation first.`);
-            setMergingAdminId(null);
-            return;
-        }
-        
-        console.log(`📡 Fetching full observation ${obs.id} from server...`);
-        try {
-            const { data, error } = await supabase
-                .from("observations")
-                .select("*")
-                .eq("id", obs.id)
-                .single();
-            
-            if (error || !data) throw new Error("Observation not found on server");
-            
-            // Build a full local object from server data
-            full = {
-                id: data.id,
-                meta: data.meta || {},
-                indicators: data.indicators || [],
-                status: data.status || "draft",
-                updatedAt: new Date(data.updated_at).getTime(),
-                lastSync: new Date(data.updated_at).getTime(),
-                adminSummaryVN: data.admin_summary_vn,
-                performance_rating: data.performance_rating,
-            };
-            
-            // Save to IndexedDB for future use
-            await set(`${STORAGE_PREFIX}${obs.id}`, full);
-            console.log(`✅ Saved observation ${obs.id} to IndexedDB`);
-        } catch (err) {
-            console.error("Failed to fetch observation from server:", err);
-            alert(`Could not load observation data for ${obs.teacherName}. Please open the observation once to sync it locally, then try again.`);
-            setMergingAdminId(null);
-            return;
-        }
+      if (!navigator.onLine) {
+        alert(`Cannot merge admin workbook for ${obs.teacherName}: observation data not available offline. Please go online or open the observation first.`);
+        setMergingAdminId(null);
+        return;
+      }
+      console.log(`📡 Fetching full observation ${obs.id} from server...`);
+      try {
+        const { data, error } = await supabase
+          .from("observations")
+          .select("*")
+          .eq("id", obs.id)
+          .single();
+        if (error || !data) throw new Error("Observation not found on server");
+        // Build a full local object from server data
+        full = {
+          id: data.id,
+          meta: data.meta || {},
+          indicators: data.indicators || [],
+          status: data.status || "draft",
+          updatedAt: new Date(data.updated_at).getTime(),
+          lastSync: new Date(data.updated_at).getTime(),
+          adminSummaryVN: data.admin_summary_vn,
+          performance_rating: data.performance_rating,
+        };
+        // Save to IndexedDB for future use
+        await set(`${STORAGE_PREFIX}${obs.id}`, full);
+        console.log(`✅ Saved observation ${obs.id} to IndexedDB`);
+      } catch (err) {
+        console.error("Failed to fetch observation from server:", err);
+        alert(`Could not load observation data for ${obs.teacherName}. Please open the observation once to sync it locally, then try again.`);
+        setMergingAdminId(null);
+        return;
+      }
     }
-
     // 3. Continue with the existing merge logic (the rest of the function stays the same)
     const adminWorkbookUrl = obs.adminWorkbookUrl;
     if (!adminWorkbookUrl) { alert("Admin workbook URL not found."); setMergingAdminId(null); return; }
-
     // Resolve School ID logic...
     let schoolId = (obs as any).schoolId || (obs as any).meta?.schoolId || null;
     if (!schoolId) {
-       try {
-         const { data } = await supabase.from("schools").select("id").eq("school_name", obs.schoolName).eq("campus_name", obs.campus).limit(1);
-         if (data?.[0]) schoolId = data[0].id;
-       } catch {}
+      try {
+        const { data } = await supabase.from("schools").select("id").eq("school_name", obs.schoolName).eq("campus_name", obs.campus).limit(1);
+        if (data?.[0]) schoolId = data[0].id;
+      } catch { }
     }
-
     try {
       const graphToken = await getGraphAccessToken();
-
       const exportMeta = toMetaForExport(full, obs);
       const exportIndicators = toIndicatorsForExport(full);
       const adminModel = buildAdminExportModel(exportMeta, exportIndicators, trainerName);
-
       if (obs.admin_summary_vn) {
         adminModel.trainerSummary = obs.admin_summary_vn;
       }
-      
       const sheetName = buildAdminSheetName(obs);
-
       const result = await clientMergeAdminSheet({
         token: graphToken,
         workbookUrl: adminWorkbookUrl,
         sheetName,
         model: adminModel
       });
-
       const mergedAt = new Date().toISOString();
-      const newViewUrl = obs.adminViewOnlyUrl || result.viewUrl; 
-
+      const newViewUrl = obs.adminViewOnlyUrl || result.viewUrl;
       const patch = {
         mergedAdmin: { url: result.sheetUrl, sheetName: result.sheetName, mergedAt },
         adminWorkbookUrl,
-        adminWorkbookViewUrl: newViewUrl, 
+        adminWorkbookViewUrl: newViewUrl,
         schoolId,
       };
-
       const nextMeta = await persistMergedLinkToObservationMeta(obs.id, patch);
-
       setObservations((prev) =>
-        prev.map((o) => 
-          o.id === obs.id 
-            ? { ...o, meta: nextMeta, adminWorkbookUrl, adminViewOnlyUrl: newViewUrl } 
+        prev.map((o) =>
+          o.id === obs.id
+            ? { ...o, meta: nextMeta, adminWorkbookUrl, adminViewOnlyUrl: newViewUrl }
             : o
         )
       );
-
       setRecentMergePanel({
         obsId: obs.id,
         kind: "admin",
@@ -3002,26 +2604,21 @@ const handleMergeAdminWorkbook = async (obs: DashboardObservationRow, silent: bo
         sheetName: result.sheetName,
         mergedAt,
       });
-
-if (!silent) {
-  alert("Admin merge succeeded!");
-}
-
+      if (!silent) {
+        alert("Admin merge succeeded!");
+      }
     } catch (err: any) {
       console.error("Client admin merge error:", err);
       alert(`Admin merge failed: ${err.message}`);
     } finally {
       setMergingAdminId(null);
     }
-};
-
-
+  };
   const handleDeleteObservation = async (obs: DashboardObservationRow) => {
     const confirmed = window.confirm(
       `Are you sure you want to DELETE the observation for:\n${obs.teacherName}?\n\n⚠️ This action cannot be undone.`
     );
     if (!confirmed) return;
-
     // Immediately add to pending deletes to hide from UI and future syncs
     const pendingDeletes = (await get<string[]>("pending_deletes")) || [];
     if (!pendingDeletes.includes(obs.id)) {
@@ -3029,7 +2626,6 @@ if (!silent) {
     }
     // Remove from UI optimistically
     setObservations((prev) => prev.filter((o) => o.id !== obs.id));
-
     // If online, try to delete from server now
     if (navigator.onLine) {
       try {
@@ -3038,9 +2634,7 @@ if (!silent) {
           .delete()
           .eq("id", obs.id)
           .select("id");
-
         if (error) throw error;
-
         if (!deletedRows || deletedRows.length === 0) {
           // Delete failed on server – revert by removing from pending deletes
           const updatedPending = (await get<string[]>("pending_deletes")) || [];
@@ -3054,13 +2648,11 @@ if (!silent) {
           await refreshDashboard();
           return;
         }
-
         // Delete succeeded – also clean local files
-        await del(`${STORAGE_PREFIX}${obs.id}`).catch(() => {});
+        await del(`${STORAGE_PREFIX}${obs.id}`).catch(() => { });
         const backup = (await get<any[]>("dashboard_backup_list")) || [];
         await set("dashboard_backup_list", backup.filter((item) => item.id !== obs.id));
         console.log("✅ Deleted from server and local.");
-
       } catch (err) {
         console.error("Online delete error:", err);
         // Keep ID in pending_deletes so it will be retried on next sync or reload
@@ -3073,7 +2665,6 @@ if (!silent) {
       alert("You are offline. The observation will be deleted from the server when you reconnect.");
     }
   };
-
   // NEW: toggle group expanded/collapsed
   const toggleGroupExpanded = (key: string) => {
     setExpandedGroups((prev) => ({
@@ -3081,27 +2672,20 @@ if (!silent) {
       [key]: !prev[key],
     }));
   };
-
-
   // ✅ NEW: Callback when email is sent successfully
   const handleEmailSuccess = async () => {
     // 1. Determine targets (Bulk IDs or Single ID)
     const targetIds = emailModalState.obsIds && emailModalState.obsIds.length > 0
       ? emailModalState.obsIds
       : (emailModalState.obsId ? [emailModalState.obsId] : []);
-
     const type = emailModalState.emailType;
-
     if (targetIds.length === 0 || !type || type === "am") return;
-
     const timestamp = new Date().toISOString();
     let metaKey = "";
     if (type === "pre") metaKey = "emailSentPre";
     if (type === "post") metaKey = "emailSentPost";
     if (type === "admin") metaKey = "emailSentAdmin";
-
     if (!metaKey) return;
-
     // 2. Update UI (Optimistic Loop)
     setObservations((prev) =>
       prev.map((o) => {
@@ -3114,7 +2698,6 @@ if (!silent) {
         return o;
       })
     );
-
     // 3. Save to DB (Parallel Loop)
     // We reuse the robust persist function we fixed earlier
     await Promise.all(
@@ -3122,19 +2705,15 @@ if (!silent) {
         persistMergedLinkToObservationMeta(id, { [metaKey]: timestamp })
       )
     );
-     await refreshDashboard();
+    await refreshDashboard();
   };
-
-
   /* ------------------------------
       CARD RENDERER
   --------------------------------- */
-
   const renderRow = (
     obs: DashboardObservationRow,
     options?: { disableClick?: boolean; hideMergeLinks?: boolean }
   ) => {
-
     const handleOpenWorkspace = () => {
       if (options?.disableClick) return; // used by stack preview
       onOpenObservation({
@@ -3148,43 +2727,35 @@ if (!silent) {
         date: obs.isoDate || "",
       });
     };
-
-  const metaAny: any = getStableMetaForRow(obs);
-
+    const metaAny: any = getStableMetaForRow(obs);
     // No-argument version — clean and safe
     const openTeacherModal = () => {
       setActionModal({ obsId: obs.id, role: "teacher" });
     };
-
     const openAdminModal = () => {
       setActionModal({ obsId: obs.id, role: "admin" });
     };
-
     // ---- links derived from meta (persisted) or row (enriched defaults) ----
     const teacherWorkbookUrl = obs.teacherWorkbookUrl;
     const adminWorkbookUrl = obs.adminWorkbookUrl;
     const adminViewOnlyUrl = obs.adminViewOnlyUrl;
-
     const showLinks =
       !!teacherWorkbookUrl || !!adminViewOnlyUrl || !!adminWorkbookUrl;
-
     // -------------------------------------------------------------------------
     // 🟢 NEW: SMART SYNC UI LOGIC (with loading state)
     // -------------------------------------------------------------------------
     const isSynced = obs.syncStatus === 'synced';
     const lastSync = obs.lastSync || 0; // keep for tooltip display only
- 
     let actionButton;
-
     if (syncingObservationId === obs.id) {
       // 🟢 SYNCING STATE (Spinner)
       actionButton = (
-        <div 
+        <div
           style={{
             display: "flex", alignItems: "center", gap: "6px",
-            fontSize: "11px", fontWeight: "bold", 
+            fontSize: "11px", fontWeight: "bold",
             color: "#4f46e5",
-            background: "rgba(79, 70, 229, 0.1)", 
+            background: "rgba(79, 70, 229, 0.1)",
             border: "1px solid rgba(79, 70, 229, 0.3)",
             padding: "2px 8px", borderRadius: "4px"
           }}
@@ -3199,14 +2770,14 @@ if (!silent) {
     } else if (isSynced) {
       // ✅ CASE A: Synced (Green Badge)
       actionButton = (
-        <div 
+        <div
           onClick={(e) => e.stopPropagation()}
           title={`Last Sync: ${new Date(lastSync).toLocaleTimeString()}`}
           style={{
             display: "flex", alignItems: "center", gap: "4px",
-            fontSize: "11px", fontWeight: "bold", 
+            fontSize: "11px", fontWeight: "bold",
             color: "#10b981",
-            background: "rgba(16, 185, 129, 0.1)", 
+            background: "rgba(16, 185, 129, 0.1)",
             border: "1px solid rgba(16, 185, 129, 0.3)",
             padding: "2px 8px", borderRadius: "4px", cursor: "default"
           }}
@@ -3229,7 +2800,7 @@ if (!silent) {
             color: "white",
             background: "#4f46e5",
             border: "none",
-            padding: "4px 10px", borderRadius: "4px", 
+            padding: "4px 10px", borderRadius: "4px",
             cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
           }}
         >
@@ -3239,70 +2810,65 @@ if (!silent) {
     }
     // -------------------------------------------------------------------------
     return (
-<div
-  key={obs.id}
-  id={`obs-row-${obs.id}`}
-  role="button"
-  tabIndex={0}
-  className="obs-row"
-  onClick={handleOpenWorkspace}
-  onKeyDown={(e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      handleOpenWorkspace();
-    }
-  }}
->
+      <div
+        key={obs.id}
+        id={`obs-row-${obs.id}`}
+        role="button"
+        tabIndex={0}
+        className="obs-row"
+        onClick={handleOpenWorkspace}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleOpenWorkspace();
+          }
+        }}
+      >
         <div
-          className={`obs-status-strip ${
-            obs.statusColor === "good"
-              ? "obs-status-good"
-              : obs.statusColor === "growth"
+          className={`obs-status-strip ${obs.statusColor === "good"
+            ? "obs-status-good"
+            : obs.statusColor === "growth"
               ? "obs-status-growth"
               : "obs-status-mixed"
-          }`}
+            }`}
         />
-
         <div className="obs-row-left" style={{ width: '100%' }}>
-          <div className="obs-row-header"style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center', 
-              width: '100%',
-              marginBottom: '4px' 
-            }}>
-            <div className="obs-teacher">{obs.teacherName}</div>  
-            {actionButton}            
+          <div className="obs-row-header" style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%',
+            marginBottom: '4px'
+          }}>
+            <div className="obs-teacher">{obs.teacherName}</div>
+            {actionButton}
           </div>
-
           <div className="obs-meta">
             {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
             {obs.lesson} • {obs.supportType}
-            
             {/* 👇 NEW: Email Status Badges 👇 */}
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               {metaAny.emailSentPre && (
-                <span title={`Pre-call sent: ${new Date(metaAny.emailSentPre).toLocaleDateString()}`} 
-                      style={{fontSize:10, padding:"2px 6px", borderRadius:4, background:"#dbeafe", color:"#1e40af", border:"1px solid #bfdbfe", display: "inline-flex", alignItems: "center", gap: 3}}>
+                <span title={`Pre-call sent: ${new Date(metaAny.emailSentPre).toLocaleDateString()}`}
+                  style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#dbeafe", color: "#1e40af", border: "1px solid #bfdbfe", display: "inline-flex", alignItems: "center", gap: 3 }}>
                   <span>✉️</span> Pre
                 </span>
               )}
               {metaAny.emailSentPost && (
-                <span title={`Post-call sent: ${new Date(metaAny.emailSentPost).toLocaleDateString()}`} 
-                      style={{fontSize:10, padding:"2px 6px", borderRadius:4, background:"#dcfce7", color:"#166534", border:"1px solid #bbf7d0", display: "inline-flex", alignItems: "center", gap: 3}}>
+                <span title={`Post-call sent: ${new Date(metaAny.emailSentPost).toLocaleDateString()}`}
+                  style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0", display: "inline-flex", alignItems: "center", gap: 3 }}>
                   <span>✉️</span> Post
                 </span>
               )}
               {metaAny.emailSentAdmin && (
-                <span title={`Admin update sent: ${new Date(metaAny.emailSentAdmin).toLocaleDateString()}`} 
-                      style={{fontSize:10, padding:"2px 6px", borderRadius:4, background:"#f3e8ff", color:"#6b21a8", border:"1px solid #e9d5ff", display: "inline-flex", alignItems: "center", gap: 3}}>
+                <span title={`Admin update sent: ${new Date(metaAny.emailSentAdmin).toLocaleDateString()}`}
+                  style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#f3e8ff", color: "#6b21a8", border: "1px solid #e9d5ff", display: "inline-flex", alignItems: "center", gap: 3 }}>
                   <span>✉️</span> Admin
                 </span>
               )}
             </div>
-             {/* 👆 END BADGES 👆 */}
-        </div>
-
+            {/* 👆 END BADGES 👆 */}
+          </div>
           {/* tags row + Teacher/Admin pills under it */}
           <div className="obs-tags-row">
             <div className="obs-tags">
@@ -3319,7 +2885,6 @@ if (!silent) {
                 {obs.progress} / {obs.totalIndicators} indicators
               </span>
             </div>
-
             <div className="obs-pill-row">
               <button
                 type="button"
@@ -3346,7 +2911,7 @@ if (!silent) {
                 type="button"
                 className="obs-pill-button"
                 // We only override color/border to signal "Danger"
-                style={{ 
+                style={{
                   marginLeft: '8px',
                   color: '#d32f2f',       // Standard Danger Red
                   borderColor: '#d32f2f', // Red border to match text
@@ -3386,9 +2951,8 @@ if (!silent) {
               {/* 🟢 END NEW BUTTON */}
             </div>
           </div>
-
-        {/* ✅ ONLY 3 STRIPS (persistent workbook links) */}
-        {!options?.hideMergeLinks && showLinks && (
+          {/* ✅ ONLY 3 STRIPS (persistent workbook links) */}
+          {!options?.hideMergeLinks && showLinks && (
             <div className="obs-merge-links" onClick={(e) => e.stopPropagation()}>
               {/* Teacher workbook */}
               {teacherWorkbookUrl && (
@@ -3422,7 +2986,6 @@ if (!silent) {
                   </div>
                 </div>
               )}
-
               {/* Admin workbook (view-only) */}
               {adminViewOnlyUrl && (
                 <div className="obs-merge-row">
@@ -3451,7 +3014,6 @@ if (!silent) {
                   </div>
                 </div>
               )}
-
               {/* Admin workbook (edit) */}
               {adminWorkbookUrl && (
                 <div className="obs-merge-row">
@@ -3482,52 +3044,44 @@ if (!silent) {
               )}
             </div>
           )}
-
-       {/* 🟢 START: INSERT THIS PROGRESS BAR BLOCK HERE 🟢 */}
+          {/* 🟢 START: INSERT THIS PROGRESS BAR BLOCK HERE 🟢 */}
           {(mergingTeacherId === obs.id || mergingAdminId === obs.id) && (
             <div style={{ marginTop: '12px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
-              
               {/* Status Label */}
               <div style={{ fontSize: '12px', color: '#007bff', marginBottom: '4px', fontWeight: 'bold' }}>
                 {mergingTeacherId === obs.id ? (
-                    <>
-                      <i className="fa fa-spinner fa-spin" style={{marginRight: '6px'}}></i>
-                      Merging Teacher Workbook...
-                    </>
+                  <>
+                    <i className="fa fa-spinner fa-spin" style={{ marginRight: '6px' }}></i>
+                    Merging Teacher Workbook...
+                  </>
                 ) : (
-                    <>
-                      <i className="fa fa-spinner fa-spin" style={{marginRight: '6px'}}></i>
-                      Merging Admin Workbook...
-                    </>
+                  <>
+                    <i className="fa fa-spinner fa-spin" style={{ marginRight: '6px' }}></i>
+                    Merging Admin Workbook...
+                  </>
                 )}
               </div>
-
               {/* Native HTML5 Indeterminate Progress Bar */}
-              <progress 
-                max="100" 
-                style={{ 
-                  width: '100%', 
+              <progress
+                max="100"
+                style={{
+                  width: '100%',
                   height: '3px', /* 🟢 CHANGED: 6px -> 3px for a sleeker look */
                   borderRadius: '2px',
                   accentColor: '#007bff' /* Makes the bar blue */
-                }} 
+                }}
               />
-              
               <div style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}>
                 Communicating with Microsoft Graph...
               </div>
             </div>
           )}
           {/* 🟢 END: PROGRESS BAR BLOCK 🟢 */}
-
-
         </div>
-
         <div className="obs-date">{obs.dateLabel}</div>
       </div>
     );
   };
-
   // grouped renderer with collapsed stack
   const renderGroup = (group: {
     key: string;
@@ -3555,7 +3109,6 @@ if (!silent) {
             {isExpanded ? "▾" : "▸"}
           </div>
         </button>
-
         {/* Expanded: show full list */}
         {isExpanded ? (
           <div className="obs-group-body">
@@ -3568,14 +3121,12 @@ if (!silent) {
           >
             <div className="obs-group-stack-layer obs-group-stack-layer--behind" />
             <div className="obs-group-stack-layer obs-group-stack-layer--middle" />
-
             <div className="obs-group-stack-main">
               {/* latest card, but no click + no merge links */}
               {renderRow(group.items[0], {
                 disableClick: true,
                 hideMergeLinks: true,
               })}
-
               {group.items.length > 1 && (
                 <div className="obs-stack-count-overlay">
                   +{group.items.length - 1} more
@@ -3587,39 +3138,35 @@ if (!silent) {
       </div>
     );
   };
-
-// Auto‑scroll to highlighted observation when coming back from workspace
-useEffect(() => {
-  if (!highlightObservationId || !onHighlightComplete) return;
-  if (lastHighlightedRef.current === highlightObservationId) return;
-
-  const targetObs = observations.find(o => o.id === highlightObservationId);
-  if (!targetObs) return;
-
-  // Always expand the group containing this observation (grouping is always by month)
-  const monthKey = monthKeyFromTs(targetObs.rawDate);
-  if (monthKey) {
-    setExpandedGroups(prev => ({
-      ...prev,
-      [monthKey]: true,
-    }));
-  }
-
-  // Allow time for the DOM to update after group expansion
-  setTimeout(() => {
-    const element = document.getElementById(`obs-row-${highlightObservationId}`);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Temporary highlight (remove after 2 seconds)
-      element.classList.add('obs-row-highlight');
-      setTimeout(() => {
-        element.classList.remove('obs-row-highlight');
-      }, 2000);
+  // Auto‑scroll to highlighted observation when coming back from workspace
+  useEffect(() => {
+    if (!highlightObservationId || !onHighlightComplete) return;
+    if (lastHighlightedRef.current === highlightObservationId) return;
+    const targetObs = observations.find(o => o.id === highlightObservationId);
+    if (!targetObs) return;
+    // Always expand the group containing this observation (grouping is always by month)
+    const monthKey = monthKeyFromTs(targetObs.rawDate);
+    if (monthKey) {
+      setExpandedGroups(prev => ({
+        ...prev,
+        [monthKey]: true,
+      }));
     }
-    lastHighlightedRef.current = highlightObservationId;
-    onHighlightComplete();
-  }, 100);
-}, [highlightObservationId, observations, onHighlightComplete]);
+    // Allow time for the DOM to update after group expansion
+    setTimeout(() => {
+      const element = document.getElementById(`obs-row-${highlightObservationId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Temporary highlight (remove after 2 seconds)
+        element.classList.add('obs-row-highlight');
+        setTimeout(() => {
+          element.classList.remove('obs-row-highlight');
+        }, 2000);
+      }
+      lastHighlightedRef.current = highlightObservationId;
+      onHighlightComplete();
+    }, 100);
+  }, [highlightObservationId, observations, onHighlightComplete]);
   return (
     <>
       <div className="card">
@@ -3630,7 +3177,6 @@ useEffect(() => {
               Tap an observation to continue, or create a new one.
             </div>
           </div>
-
           <div className="toolbar">
             <div className="toolbar-group">
               <span>Search</span>
@@ -3658,28 +3204,26 @@ useEffect(() => {
               </button>
             </div>
             <div className="toolbar-group">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                const schools = [...new Set(observations.map(o => o.schoolName).filter(Boolean))];
-                const months = [...new Set(
-                  observations
-                    .map(o => monthKeyFromTs(o.rawDate))
-                    .filter((m): m is string => m !== null)
-                )];
-                setBulkSchool(schools[0] || "");
-                setBulkMonth(months[0] || "");
-                setBulkSelectedIds(new Set());
-                setShowBulkAdminModal(true);
-              }}
-              disabled={observations.length === 0}
-            >
-              Bulk Admin…
-            </button>
-          </div>     
-
-
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  const schools = [...new Set(observations.map(o => o.schoolName).filter(Boolean))];
+                  const months = [...new Set(
+                    observations
+                      .map(o => monthKeyFromTs(o.rawDate))
+                      .filter((m): m is string => m !== null)
+                  )];
+                  setBulkSchool(schools[0] || "");
+                  setBulkMonth(months[0] || "");
+                  setBulkSelectedIds(new Set());
+                  setShowBulkAdminModal(true);
+                }}
+                disabled={observations.length === 0}
+              >
+                Bulk Admin…
+              </button>
+            </div>
             {/* 🆕 Import button */}
             <div className="toolbar-group">
               <button
@@ -3700,55 +3244,51 @@ useEffect(() => {
                 style={{ display: 'none' }}
               />
             </div>
-
             {/* --- Bell Icon with Red Dot next to Online Badge --- */}
-                {/* 🔔 LUCIDE NOTIFICATION BELL */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginLeft: '8px' }}>
-                  <div 
-                    style={{ position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center' }} 
-                    onClick={() => setIsActionDashboardOpen(true)}
-                  >
-                    <Bell size={20} color={Object.values(syncPulseResults).some(arr => arr.length > 0) ? "#dc2626" : "#64748b"} />
-                    
-                    {/* Red Dot Logic */}
-                    {Object.values(syncPulseResults).some(arr => arr.length > 0) && (
-                      <span style={{
-                        position: 'absolute',
-                        top: '-2px',
-                        right: '-2px',
-                        height: '8px',
-                        width: '8px',
-                        backgroundColor: '#dc2626',
-                        borderRadius: '50%',
-                        border: '1px solid white'
-                      }} />
-                    )}
-                  </div>
-                </div>
-
-              {/* ⚡️ MINIMALIST PULSE TRIGGER */}
-              <div className="toolbar-group" style={{ marginLeft: '4px' }}>
-                <button
-                  type="button"
-                  title="Force Sync Pulse"
-                  style={{ 
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    color: '#0d9488'
-                  }}
-                  onClick={runSyncPulse}
-                >
-                  <Activity size={20} />
-                </button>
+            {/* 🔔 LUCIDE NOTIFICATION BELL */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginLeft: '8px' }}>
+              <div
+                style={{ position: 'relative', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                onClick={() => setIsActionDashboardOpen(true)}
+              >
+                <Bell size={20} color={Object.values(syncPulseResults).some(arr => arr.length > 0) ? "#dc2626" : "#64748b"} />
+                {/* Red Dot Logic */}
+                {Object.values(syncPulseResults).some(arr => arr.length > 0) && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-2px',
+                    right: '-2px',
+                    height: '8px',
+                    width: '8px',
+                    backgroundColor: '#dc2626',
+                    borderRadius: '50%',
+                    border: '1px solid white'
+                  }} />
+                )}
               </div>
+            </div>
+            {/* ⚡️ MINIMALIST PULSE TRIGGER */}
+            <div className="toolbar-group" style={{ marginLeft: '4px' }}>
+              <button
+                type="button"
+                title="Force Sync Pulse"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: '#0d9488'
+                }}
+                onClick={runSyncPulse}
+              >
+                <Activity size={20} />
+              </button>
+            </div>
           </div>
         </div>
-
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
           <div className="obs-list" style={{ flex: 1 }}>
             {/* existing obs-list content remains exactly the same */}
             {loading && observations.length === 0 ? (
@@ -3770,9 +3310,8 @@ useEffect(() => {
               </>
             )}
           </div>
-
           {/* 🟢 NEW: Stats Sidebar */}
-                    {/* 🟢 UPDATED: Merged System + Custom Stats Sidebar */}
+          {/* 🟢 UPDATED: Merged System + Custom Stats Sidebar */}
           <div style={{
             width: '260px',
             paddingTop: '48px',
@@ -3826,7 +3365,7 @@ useEffect(() => {
                   ▶
                 </button>
               </div>
-                         <div style={{ display: 'flex', gap: '4px' }}>
+              <div style={{ display: 'flex', gap: '4px' }}>
                 {isCurrentMonth && (
                   <>
                     <button
@@ -3865,64 +3404,59 @@ useEffect(() => {
                   className="btn btn-ghost"
                   style={{ padding: '2px 6px', fontSize: '18px', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }}
                   onClick={() => {
-  const trainingValues = (customEntries as any).trainingDelivered?.values || {};
-  const trainingNames = Object.entries(trainingValues)
-    .filter(([_, val]: any) => val !== '')
-    .map(([name]) => name)
-    .join('; ') || '—';
-  const nums: number[] = Object.values(trainingValues).map((v: any) => Number(v) || 0);
-  const sum = nums.reduce((a: number, b: number) => a + b, 0);
-  const totalTraining = customTotalTraining !== '' ? customTotalTraining : (sum > 0 ? String(sum) : '—');
-  const perf = [
-    `  ${stats.thriving.count} (${stats.thriving.pct}%) Thriving`,
-    `  ${stats.functioning.count} (${stats.functioning.pct}%) Functioning`,
-    `  ${stats.developing.count} (${stats.developing.pct}%) Developing`,
-  ].join('\n');
-
-  const sourceStats = (!isCurrentMonth && snapshot && snapshot.system_stats) ? snapshot.system_stats : stats;
-  const text = [
-    `Year: ${sourceStats.year}`,
-    `Month: ${sourceStats.month}`,
-    `Active Schools: ${sourceStats.exclusiveSchools}`,
-    `  Shared: ${sourceStats.sharedSchools}`,
-    `Active Teachers: ${sourceStats.activeTeachers}`,
-    `  Mutual: ${sourceStats.mutualTeachers}`,
-    `Visit per Year: ${sourceStats.totalVisitCount || '—'}`,
-    `Training Delivered: ${trainingNames}`,
-    `Total Training: ${totalTraining}`,
-    `Visits Done: ${sourceStats.visitedSchools}`,
-    `Teachers Visited: ${sourceStats.visitedTeachers}`,
-    `IR: ${(customEntries as any).ir?.value || '—'}`,
-    `Teacher Performance:\n${perf}`,
-    `Other Project: ${(customEntries as any).otherProjects?.value || '—'}`,
-    `Special Notes: ${(customEntries as any).specialNotes?.value || '—'}`,
-  ].join('\n');
-
-  navigator.clipboard.writeText(text).then(() => {
-    alert('Stats copied to clipboard!');
-  }).catch(() => {
-    alert('Failed to copy stats.');
-  });
-}}
+                    const trainingValues = (customEntries as any).trainingDelivered?.values || {};
+                    const trainingNames = Object.entries(trainingValues)
+                      .filter(([_, val]: any) => val !== '')
+                      .map(([name]) => name)
+                      .join('; ') || '—';
+                    const nums: number[] = Object.values(trainingValues).map((v: any) => Number(v) || 0);
+                    const sum = nums.reduce((a: number, b: number) => a + b, 0);
+                    const totalTraining = customTotalTraining !== '' ? customTotalTraining : (sum > 0 ? String(sum) : '—');
+                    const perf = [
+                      `  ${stats.thriving.count} (${stats.thriving.pct}%) Thriving`,
+                      `  ${stats.functioning.count} (${stats.functioning.pct}%) Functioning`,
+                      `  ${stats.developing.count} (${stats.developing.pct}%) Developing`,
+                    ].join('\n');
+                    const sourceStats = (!isCurrentMonth && snapshot && snapshot.system_stats) ? snapshot.system_stats : stats;
+                    const text = [
+                      `Year: ${sourceStats.year}`,
+                      `Month: ${sourceStats.month}`,
+                      `Active Schools: ${sourceStats.exclusiveSchools}`,
+                      `  Shared: ${sourceStats.sharedSchools}`,
+                      `Active Teachers: ${sourceStats.activeTeachers}`,
+                      `  Mutual: ${sourceStats.mutualTeachers}`,
+                      `Visit per Year: ${sourceStats.totalVisitCount || '—'}`,
+                      `Training Delivered: ${trainingNames}`,
+                      `Total Training: ${totalTraining}`,
+                      `Visits Done: ${sourceStats.visitedSchools}`,
+                      `Teachers Visited: ${sourceStats.visitedTeachers}`,
+                      `IR: ${(customEntries as any).ir?.value || '—'}`,
+                      `Teacher Performance:\n${perf}`,
+                      `Other Project: ${(customEntries as any).otherProjects?.value || '—'}`,
+                      `Special Notes: ${(customEntries as any).specialNotes?.value || '—'}`,
+                    ].join('\n');
+                    navigator.clipboard.writeText(text).then(() => {
+                      alert('Stats copied to clipboard!');
+                    }).catch(() => {
+                      alert('Failed to copy stats.');
+                    });
+                  }}
                   title="Copy stats"
                 >
                   📋
                 </button>
-                            </div>
+              </div>
             </div>
-
             {/* No snapshot message for past months */}
             {!isCurrentMonth && !snapshot && (
               <div style={{ fontSize: '11px', color: '#94a3b8', textAlign: 'center', padding: '8px 0' }}>
                 No snapshot saved for this month.
               </div>
             )}
-
             {/* Edit panel */}
-                        {isEditingCustom && (
+            {isEditingCustom && (
               <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '8px' }}>Edit Custom Entries</div>
-
                 {/* 1. Paste block for training + IR */}
                 <div style={{ marginBottom: '10px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>Training & IR (paste all)</div>
@@ -3945,7 +3479,6 @@ useEffect(() => {
                       const newValues: Record<string, string> = { ...(customEntries as any).trainingDelivered.values };
                       let irVal = (customEntries as any).ir?.value || '';
                       let totalOverride = '';
-
                       for (const line of lines) {
                         const match = line.match(/^(.+?):\s*(\d+)\s*$/i);
                         if (match) {
@@ -3961,13 +3494,11 @@ useEffect(() => {
                           }
                         }
                       }
-
                       if (totalOverride !== '') {
                         setCustomTotalTraining(totalOverride);
                       } else {
                         setCustomTotalTraining('');
                       }
-
                       setCustomEntries((prev: any) => ({
                         ...prev,
                         trainingDelivered: { ...prev.trainingDelivered, values: newValues },
@@ -3978,7 +3509,6 @@ useEffect(() => {
                     Parse & Fill
                   </button>
                 </div>
-
                 {/* 2. Other Projects */}
                 <div style={{ marginBottom: '10px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>Other Projects</div>
@@ -3994,7 +3524,6 @@ useEffect(() => {
                     rows={3}
                   />
                 </div>
-
                 {/* 3. Special Notes */}
                 <div style={{ marginBottom: '10px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 600, marginBottom: '4px' }}>Special Notes</div>
@@ -4010,7 +3539,6 @@ useEffect(() => {
                     rows={3}
                   />
                 </div>
-
                 <button
                   type="button"
                   className="btn"
@@ -4021,11 +3549,10 @@ useEffect(() => {
                 </button>
               </div>
             )}
-
             {/* Merged stat blocks */}
             {(() => {
               // Define system blocks with position index
-                           // Use snapshot data if viewing a past month, otherwise live stats
+              // Use snapshot data if viewing a past month, otherwise live stats
               const sourceStats = (snapshot && snapshot.system_stats) ? snapshot.system_stats : stats;
               const blocks: { key: string; label: string; value: React.ReactNode; position: number }[] = [
                 { key: 'activeSchools', label: '🏫 Active Schools', value: <><span style={{ fontSize: '24px', fontWeight: 700 }}>{sourceStats.exclusiveSchools}</span><div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Shared: {sourceStats.sharedSchools}</div></>, position: 0 },
@@ -4041,10 +3568,9 @@ useEffect(() => {
                 { key: 'otherProjects', label: 'Other Projects', value: null, position: 4.5 },
                 { key: 'specialNotes', label: 'Special Notes', value: null, position: 5 },
               ];
-
               // Replace custom placeholders with actual values (only if non-empty)
               const customMap = customEntries as any;
-                            const renderBlockValue = (block: any) => {
+              const renderBlockValue = (block: any) => {
                 if (block.key === 'trainingDelivered') {
                   const training = (customEntries as any).trainingDelivered?.values || {};
                   const names = Object.entries(training)
@@ -4081,7 +3607,6 @@ useEffect(() => {
                 }
                 return block.value; // system value
               };
-
               return blocks
                 .filter(block => {
                   // Only show if it has content
@@ -4110,7 +3635,6 @@ useEffect(() => {
           </div>
         </div>
       </div>
-
       {/* ---------- TEACHER / ADMIN ACTION MODAL ---------- */}
       {actionModal && modalObservation && (
         <div
@@ -4129,7 +3653,6 @@ useEffect(() => {
                 {modalObservation.campus}
               </div>
             </div>
-
             <div className="obs-action-modal-body">
               {actionModal.role === "teacher" ? (
                 <>
@@ -4213,7 +3736,6 @@ useEffect(() => {
                 </>
               )}
             </div>
-
             <div className="obs-action-modal-footer">
               <button
                 type="button"
@@ -4226,7 +3748,6 @@ useEffect(() => {
           </div>
         </div>
       )}
-
       {/* ---------- AM SUMMARY MODAL ---------- */}
       {showAmSummary && (
         <div className="am-summary-backdrop">
@@ -4247,7 +3768,6 @@ useEffect(() => {
                 Close
               </button>
             </div>
-
             <div className="am-summary-controls">
               <div className="toolbar-group">
                 <span>Month</span>
@@ -4267,7 +3787,6 @@ useEffect(() => {
                   ))}
                 </select>
               </div>
-
               <div className="toolbar-group">
                 <span>Account Manager</span>
                 <select
@@ -4286,12 +3805,10 @@ useEffect(() => {
                   ))}
                 </select>
               </div>
-
               {sentInfo && (
                 <div className="am-summary-sent">Marked as sent on {sentInfo}</div>
               )}
             </div>
-
             {summaryRows.length > 0 && (
               <>
                 <div className="am-summary-table-wrapper">
@@ -4307,120 +3824,117 @@ useEffect(() => {
                       </tr>
                     </thead>
                     <tbody>
-                          {summaryRows.map((row, idx) => (
-      <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
-        <td>{row.schoolName}</td>
-        <td>{row.campus}</td>
-        <td>{row.teacherName}</td>
-        <td>
-          <select
-            className="select select-compact"
-            value={row.status}
-            onChange={(e) => {
-              const value = e.target.value as any;
-              setSummaryRows((prev) =>
-                prev.map((r, i) =>
-                  i === idx ? { ...r, status: value } : r
-                )
-              );
-            }}
-          >
-            <option value="none">–</option>
-            <option value="green">Green</option>
-            <option value="red">Red</option>
-          </select>
-        </td>
-        <td>
-          {/* 🟢 LOGIC UPDATE: Only show Blue Box if text DIFFERS from current edit */}
-          {(row as any).adminSummaryVn &&
-            (row as any).adminSummaryVn.trim() !== row.nextSteps.trim() && (
-              <div
-                style={{
-                  marginBottom: 8,
-                  padding: 8,
-                  background: "rgba(56, 189, 248, 0.1)",
-                  borderRadius: 6,
-                  border: "1px solid rgba(56, 189, 248, 0.3)",
-                  fontSize: 11,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 4,
-                  }}
-                >
-                  <strong style={{ color: "#0ea5e9" }}>
-                    Original (VN):
-                  </strong>
-                  <button
-                    type="button"
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "#0ea5e9",
-                      fontSize: 10,
-                      textDecoration: "underline",
-                    }}
-                    onClick={() => {
-                      // Reset: overwrite textarea with original VN text
-                      // (This will hide this blue box immediately)
-                      setSummaryRows((prev) =>
-                        prev.map((r, i) =>
-                          i === idx
-                            ? {
-                                ...r,
-                                nextSteps: (row as any).adminSummaryVn,
-                              }
-                            : r
-                        )
-                      );
-                    }}
-                  >
-                    Reset to Original ↓
-                  </button>
-                </div>
-                <div
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  {(row as any).adminSummaryVn}
-                </div>
-              </div>
-            )}
-
-          <textarea
-            className="input"
-            style={{ width: "100%", fontSize: 12 }}
-            placeholder="Add notes for AM..."
-            value={row.nextSteps}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSummaryRows((prev) =>
-                prev.map((r, i) =>
-                  i === idx ? { ...r, nextSteps: value } : r
-                )
-              );
-            }}
-            rows={3}
-          />
-        </td>
-      </tr>
-    ))}
+                      {summaryRows.map((row, idx) => (
+                        <tr key={`${row.schoolName}-${row.teacherName}-${idx}`}>
+                          <td>{row.schoolName}</td>
+                          <td>{row.campus}</td>
+                          <td>{row.teacherName}</td>
+                          <td>
+                            <select
+                              className="select select-compact"
+                              value={row.status}
+                              onChange={(e) => {
+                                const value = e.target.value as any;
+                                setSummaryRows((prev) =>
+                                  prev.map((r, i) =>
+                                    i === idx ? { ...r, status: value } : r
+                                  )
+                                );
+                              }}
+                            >
+                              <option value="none">–</option>
+                              <option value="green">Green</option>
+                              <option value="red">Red</option>
+                            </select>
+                          </td>
+                          <td>
+                            {/* 🟢 LOGIC UPDATE: Only show Blue Box if text DIFFERS from current edit */}
+                            {(row as any).adminSummaryVn &&
+                              (row as any).adminSummaryVn.trim() !== row.nextSteps.trim() && (
+                                <div
+                                  style={{
+                                    marginBottom: 8,
+                                    padding: 8,
+                                    background: "rgba(56, 189, 248, 0.1)",
+                                    borderRadius: 6,
+                                    border: "1px solid rgba(56, 189, 248, 0.3)",
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      marginBottom: 4,
+                                    }}
+                                  >
+                                    <strong style={{ color: "#0ea5e9" }}>
+                                      Original (VN):
+                                    </strong>
+                                    <button
+                                      type="button"
+                                      style={{
+                                        background: "none",
+                                        border: "none",
+                                        cursor: "pointer",
+                                        color: "#0ea5e9",
+                                        fontSize: 10,
+                                        textDecoration: "underline",
+                                      }}
+                                      onClick={() => {
+                                        // Reset: overwrite textarea with original VN text
+                                        // (This will hide this blue box immediately)
+                                        setSummaryRows((prev) =>
+                                          prev.map((r, i) =>
+                                            i === idx
+                                              ? {
+                                                ...r,
+                                                nextSteps: (row as any).adminSummaryVn,
+                                              }
+                                              : r
+                                          )
+                                        );
+                                      }}
+                                    >
+                                      Reset to Original ↓
+                                    </button>
+                                  </div>
+                                  <div
+                                    style={{
+                                      whiteSpace: "pre-wrap",
+                                      color: "var(--text-muted)",
+                                    }}
+                                  >
+                                    {(row as any).adminSummaryVn}
+                                  </div>
+                                </div>
+                              )}
+                            <textarea
+                              className="input"
+                              style={{ width: "100%", fontSize: 12 }}
+                              placeholder="Add notes for AM..."
+                              value={row.nextSteps}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setSummaryRows((prev) =>
+                                  prev.map((r, i) =>
+                                    i === idx ? { ...r, nextSteps: value } : r
+                                  )
+                                );
+                              }}
+                              rows={3}
+                            />
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
-
                 {/* EMAIL PREVIEW & SEND SECTION */}
                 <div className="am-summary-email-section">
                   <div className="am-summary-email-header">
                     <span>Final Step: Email</span>
                   </div>
-
                   <div
                     style={{
                       padding: 16,
@@ -4439,7 +3953,6 @@ useEffect(() => {
                       Review the table above. Click below to generate the email,
                       add your message, and send via Outlook.
                     </p>
-
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -4447,7 +3960,6 @@ useEffect(() => {
                       disabled={summaryRows.length === 0}
                       onClick={() => {
                         const { email, name } = parseAmKey(summaryAmKey);
-
                         // Generate Table HTML for the "Sandwich"
                         const tableHtml = `
                           <table style="border-collapse: collapse; width: 100%; font-size: 14px; border: 1px solid #d1d5db;">
@@ -4462,49 +3974,45 @@ useEffect(() => {
                             </thead>
                             <tbody>
                               ${summaryRows
-                                .map((r) => {
-                                  const bg =
-                                    r.status === "green"
-                                      ? "#dcfce7"
-                                      : r.status === "red"
-                                      ? "#fee2e2"
-                                      : "#ffffff";
-                                  const text =
-                                    r.status === "green"
-                                      ? "#166534"
-                                      : r.status === "red"
-                                      ? "#991b1b"
-                                      : "#374151";
-                                  const statusLabel =
-                                    r.status === "green"
-                                      ? "GREEN"
-                                      : r.status === "red"
-                                      ? "RED"
-                                      : "-";
-
-                                  // Logic: Prefer user-edited 'nextSteps'.
-                                  // If empty, fallback to 'adminSummaryVn'.
-                                  // If both exist and differ, show both (optional logic).
-                                  const vnSum = (r as any).adminSummaryVn || "";
-                                  const notes = r.nextSteps || "";
-                                  let finalContent = "";
-
-                                  if (notes && vnSum && notes !== vnSum) {
-                                    // Show editable notes first, then reference original summary below
-                                    finalContent = `<div>${notes}</div><div style="margin-top:8px; padding-top:8px; border-top:1px dashed #ccc; color:#555; font-size:13px;"><em>Admin Summary:</em><br/>${vnSum}</div>`;
-                                  } else if (notes) {
-                                    finalContent = notes;
-                                  } else {
-                                    finalContent = vnSum;
-                                  }
-
-                                  // Convert newlines to breaks for HTML email
-                                  finalContent = finalContent.replace(
-                                    /\n/g,
-                                    "<br/>"
-                                  );
-
-                                  return `
+                            .map((r) => {
+                              const bg =
+                                r.status === "green"
+                                  ? "#dcfce7"
+                                  : r.status === "red"
+                                    ? "#fee2e2"
+                                    : "#ffffff";
+                              const text =
+                                r.status === "green"
+                                  ? "#166534"
+                                  : r.status === "red"
+                                    ? "#991b1b"
+                                    : "#374151";
+                              const statusLabel =
+                                r.status === "green"
+                                  ? "GREEN"
+                                  : r.status === "red"
+                                    ? "RED"
+                                    : "-";
+                              // Logic: Prefer user-edited 'nextSteps'.
+                              // If empty, fallback to 'adminSummaryVn'.
+                              // If both exist and differ, show both (optional logic).
+                              const vnSum = (r as any).adminSummaryVn || "";
+                              const notes = r.nextSteps || "";
+                              let finalContent = "";
+                              if (notes && vnSum && notes !== vnSum) {
+                                // Show editable notes first, then reference original summary below
+                                finalContent = `<div>${notes}</div><div style="margin-top:8px; padding-top:8px; border-top:1px dashed #ccc; color:#555; font-size:13px;"><em>Admin Summary:</em><br/>${vnSum}</div>`;
+                              } else if (notes) {
+                                finalContent = notes;
+                              } else {
+                                finalContent = vnSum;
+                              }
+                              // Convert newlines to breaks for HTML email
+                              finalContent = finalContent.replace(
+                                /\n/g,
+                                "<br/>"
+                              );
+                              return `
                                   <tr style="background-color: ${bg};">
                                     <td style="padding:8px; border:1px solid #e5e7eb;">${r.schoolName}</td>
                                     <td style="padding:8px; border:1px solid #e5e7eb;">${r.campus}</td>
@@ -4512,12 +4020,11 @@ useEffect(() => {
                                     <td style="padding:8px; border:1px solid #e5e7eb; color: ${text}; font-weight: bold;">${statusLabel}</td>
                                     <td style="padding:8px; border:1px solid #e5e7eb;">${finalContent}</td>
                                   </tr>`;
-                                })
-                                .join("")}
+                            })
+                            .join("")}
                             </tbody>
                           </table>
                         `;
-
                         setEmailModalState({
                           isOpen: true,
                           mode: "sandwich",
@@ -4537,7 +4044,6 @@ useEffect(() => {
                       Draft & Send Email...
                     </button>
                   </div>
-
                   <div className="am-summary-footer" style={{ marginTop: 12 }}>
                     <button
                       type="button"
@@ -4556,7 +4062,6 @@ useEffect(() => {
                 </div>
               </>
             )}
-
             {summaryMonth && summaryAmKey && summaryRows.length === 0 && (
               <div className="am-summary-empty">
                 No observations for this AM in {summaryMonth}.
@@ -4565,8 +4070,7 @@ useEffect(() => {
           </div>
         </div>
       )}
-
-      <EmailComposeModal 
+      <EmailComposeModal
         isOpen={emailModalState.isOpen}
         onClose={() => setEmailModalState(prev => ({ ...prev, isOpen: false }))}
         onSuccess={handleEmailSuccess}
@@ -4577,7 +4081,6 @@ useEffect(() => {
         initialBodyHtml={emailModalState.bodyHtml}
         sandwichData={emailModalState.sandwichData}
       />
-
       <EditObservationModal
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
@@ -4586,159 +4089,155 @@ useEffect(() => {
       />
       {/* 🟢 ADD THIS SECTION HERE 🟢 */}
       {/* This is the "Boss Fight" modal for conflicts */}
-      <ConflictResolutionModal 
-         isOpen={isConflictModalOpen}
-         onClose={() => setIsConflictModalOpen(false)}
-         onResolve={handleConflictResolved}
-         localData={conflictLocalData}
-         serverData={conflictServerData}
+      <ConflictResolutionModal
+        isOpen={isConflictModalOpen}
+        onClose={() => setIsConflictModalOpen(false)}
+        onResolve={handleConflictResolved}
+        localData={conflictLocalData}
+        serverData={conflictServerData}
       />
-
-     {/* Bulk Admin Modal */}
-{showBulkAdminModal && (
-  <div className="modal-backdrop" onClick={() => setShowBulkAdminModal(false)} style={{ zIndex: 1100 }}>
-    <div className="modal-panel" style={{ width: "700px", maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
-      <div className="modal-header">
-        <div className="modal-title">Bulk Admin Actions</div>
-        <button type="button" className="btn" onClick={() => setShowBulkAdminModal(false)}>×</button>
-      </div>
-      <div className="modal-body" style={{ overflowY: "auto" }}>
-        <div style={{ display: "flex", gap: "16px", marginBottom: "20px" }}>
-          <div className="toolbar-group" style={{ flex: 1 }}>
-            <span>School</span>
-            <select
-              className="select"
-              value={bulkSchool}
-              onChange={(e) => {
-                setBulkSchool(e.target.value);
-                setBulkSelectedIds(new Set());
-              }}
-            >
-              <option value="">Select school</option>
-              {availableSchools.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div className="toolbar-group" style={{ flex: 1 }}>
-            <span>Month</span>
-            <select
-              className="select"
-              value={bulkMonth}
-              onChange={(e) => {
-                setBulkMonth(e.target.value);
-                setBulkSelectedIds(new Set());
-              }}
-              disabled={!bulkSchool}
-            >
-              <option value="">Select month</option>
-              {availableMonthsForBulk.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
+      {/* Bulk Admin Modal */}
+      {showBulkAdminModal && (
+        <div className="modal-backdrop" onClick={() => setShowBulkAdminModal(false)} style={{ zIndex: 1100 }}>
+          <div className="modal-panel" style={{ width: "700px", maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Bulk Admin Actions</div>
+              <button type="button" className="btn" onClick={() => setShowBulkAdminModal(false)}>×</button>
+            </div>
+            <div className="modal-body" style={{ overflowY: "auto" }}>
+              <div style={{ display: "flex", gap: "16px", marginBottom: "20px" }}>
+                <div className="toolbar-group" style={{ flex: 1 }}>
+                  <span>School</span>
+                  <select
+                    className="select"
+                    value={bulkSchool}
+                    onChange={(e) => {
+                      setBulkSchool(e.target.value);
+                      setBulkSelectedIds(new Set());
+                    }}
+                  >
+                    <option value="">Select school</option>
+                    {availableSchools.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="toolbar-group" style={{ flex: 1 }}>
+                  <span>Month</span>
+                  <select
+                    className="select"
+                    value={bulkMonth}
+                    onChange={(e) => {
+                      setBulkMonth(e.target.value);
+                      setBulkSelectedIds(new Set());
+                    }}
+                    disabled={!bulkSchool}
+                  >
+                    <option value="">Select month</option>
+                    {availableMonthsForBulk.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+              {bulkSchool && bulkMonth && (
+                <>
+                  <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <input
+                        type="checkbox"
+                        checked={filteredObservationsForBulk.length > 0 && bulkSelectedIds.size === filteredObservationsForBulk.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setBulkSelectedIds(new Set(filteredObservationsForBulk.map(o => o.id)));
+                          } else {
+                            setBulkSelectedIds(new Set());
+                          }
+                        }}
+                      />
+                      Select all ({filteredObservationsForBulk.length})
+                    </label>
+                    <span style={{ fontSize: "12px", color: "#666" }}>{bulkSelectedIds.size} selected</span>
+                  </div>
+                  <div style={{ border: "1px solid #e5e7eb", borderRadius: "6px", maxHeight: "400px", overflowY: "auto" }}>
+                    {filteredObservationsForBulk.map(obs => (
+                      <label key={obs.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px", borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={bulkSelectedIds.has(obs.id)}
+                          onChange={(e) => {
+                            const newSet = new Set(bulkSelectedIds);
+                            if (e.target.checked) newSet.add(obs.id);
+                            else newSet.delete(obs.id);
+                            setBulkSelectedIds(newSet);
+                          }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{obs.teacherName}</div>
+                          <div style={{ fontSize: "12px", color: "#6b7280" }}>{obs.campus} • Unit {obs.unit} – Lesson {obs.lesson} • {obs.isoDate ? new Date(obs.isoDate).toLocaleDateString() : obs.dateLabel}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+              {bulkMerging && (
+                <div style={{ marginTop: "16px", padding: "12px", background: "#f3f4f6", borderRadius: "6px" }}>
+                  <div>Merging: {bulkMergeProgress.current} of {bulkMergeProgress.total}</div>
+                  <div style={{ fontSize: "12px", color: "#4b5563" }}>Current: {bulkMergeProgress.currentTeacher}</div>
+                  <progress key={bulkMergeProgress.current} value={bulkMergeProgress.current} max={bulkMergeProgress.total} style={{ width: "100%", marginTop: "8px" }} />
+                </div>
+              )}
+            </div>
+            <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowBulkAdminModal(false)}
+                disabled={bulkMerging}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleBulkAdminMerge}
+                disabled={bulkSelectedIds.size === 0 || bulkMerging}
+                style={{ background: "#4f46e5", color: "white" }}
+              >
+                {bulkMerging ? "Merging..." : "Merge Admin Workbooks"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleBulkAdminEmail}
+                disabled={bulkSelectedIds.size === 0 || bulkMerging}
+                style={{ background: "#10b981", color: "white" }}
+              >
+                Send Admin Update Email
+              </button>
+            </div>
           </div>
         </div>
-
-        {bulkSchool && bulkMonth && (
-          <>
-            <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <input
-                  type="checkbox"
-                  checked={filteredObservationsForBulk.length > 0 && bulkSelectedIds.size === filteredObservationsForBulk.length}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setBulkSelectedIds(new Set(filteredObservationsForBulk.map(o => o.id)));
-                    } else {
-                      setBulkSelectedIds(new Set());
-                    }
-                  }}
-                />
-                Select all ({filteredObservationsForBulk.length})
-              </label>
-              <span style={{ fontSize: "12px", color: "#666" }}>{bulkSelectedIds.size} selected</span>
-            </div>
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: "6px", maxHeight: "400px", overflowY: "auto" }}>
-              {filteredObservationsForBulk.map(obs => (
-                <label key={obs.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px", borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={bulkSelectedIds.has(obs.id)}
-                    onChange={(e) => {
-                      const newSet = new Set(bulkSelectedIds);
-                      if (e.target.checked) newSet.add(obs.id);
-                      else newSet.delete(obs.id);
-                      setBulkSelectedIds(newSet);
-                    }}
-                  />
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{obs.teacherName}</div>
-                    <div style={{ fontSize: "12px", color: "#6b7280" }}>{obs.campus} • Unit {obs.unit} – Lesson {obs.lesson} • {obs.isoDate ? new Date(obs.isoDate).toLocaleDateString() : obs.dateLabel}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </>
-        )}
-
-        {bulkMerging && (
-          <div style={{ marginTop: "16px", padding: "12px", background: "#f3f4f6", borderRadius: "6px" }}>
-            <div>Merging: {bulkMergeProgress.current} of {bulkMergeProgress.total}</div>
-            <div style={{ fontSize: "12px", color: "#4b5563" }}>Current: {bulkMergeProgress.currentTeacher}</div>
-            <progress key={bulkMergeProgress.current} value={bulkMergeProgress.current} max={bulkMergeProgress.total} style={{ width: "100%", marginTop: "8px" }} />
-          </div>
-        )}
-      </div>
-      <div className="modal-footer" style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => setShowBulkAdminModal(false)}
-          disabled={bulkMerging}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={handleBulkAdminMerge}
-          disabled={bulkSelectedIds.size === 0 || bulkMerging}
-          style={{ background: "#4f46e5", color: "white" }}
-        >
-          {bulkMerging ? "Merging..." : "Merge Admin Workbooks"}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={handleBulkAdminEmail}
-          disabled={bulkSelectedIds.size === 0 || bulkMerging}
-          style={{ background: "#10b981", color: "white" }}
-        >
-          Send Admin Update Email
-        </button>
-      </div>
-    </div>
-  </div>
-)} 
-    <ActionDashboardModal
-          isOpen={isActionDashboardOpen}
-          onClose={() => setIsActionDashboardOpen(false)}
-          results={syncPulseResults} // 👈 Passes the state we populated in Step 1
-          onResolve={handleResolveConflict}
-    />
-
-        {/* 🟢 GRAPESEED LOGIN GATE (Auto-Resumes Email) */}
-        <GrapeSeedLoginModal
-          isOpen={showLoginModal}
-          onClose={() => {
-            setShowLoginModal(false);
+      )}
+      <ActionDashboardModal
+        isOpen={isActionDashboardOpen}
+        onClose={() => setIsActionDashboardOpen(false)}
+        results={syncPulseResults} // 👈 Passes the state we populated in Step 1
+        onResolve={handleResolveConflict}
+      />
+      {/* 🟢 GRAPESEED LOGIN GATE (Auto-Resumes Email) */}
+      <GrapeSeedLoginModal
+        isOpen={showLoginModal}
+        onClose={() => {
+          setShowLoginModal(false);
+          setPendingObservation(null);
+        }}
+        onSuccess={(token) => {
+          setShowLoginModal(false);
+          if (pendingObservation) {
+            handlePostCallEmail(pendingObservation);
             setPendingObservation(null);
-          }}
-          onSuccess={(token) => {
-            setShowLoginModal(false);
-            if (pendingObservation) {
-              handlePostCallEmail(pendingObservation);
-              setPendingObservation(null);
-            }
-          }}
-        />
-            {/* ---------- PERFORMANCE RATING MODAL (replaces confirm toast) ---------- */}
+          }
+        }}
+      />
+      {/* ---------- PERFORMANCE RATING MODAL (replaces confirm toast) ---------- */}
       {showPerformanceModal && pendingSyncObs && (
         <div className="modal-backdrop" onClick={() => setShowPerformanceModal(false)} style={{ zIndex: 1200 }}>
           <div className="modal-panel" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
@@ -4770,63 +4269,56 @@ useEffect(() => {
             </div>
             <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button className="btn" onClick={() => setShowPerformanceModal(false)}>Cancel</button>
-<button
-  className="btn"
-  style={{ background: '#4f46e5', color: 'white' }}
-  onClick={async () => {
-    const select = document.getElementById('performance-select') as HTMLSelectElement;
-    const rating = select.value as PerformanceRating;
-    if (!rating) {
-      alert('Please select a performance rating.');
-      return;
-    }
-    
-    const obs = pendingSyncObs;
-    if (!obs) return;
-    
-    const storageKey = `${STORAGE_PREFIX}${obs.id}`;
-    let fullData = await get(storageKey);
-    if (!fullData) {
-      fullData = {
-        id: obs.id,
-        meta: obs.meta || {},
-        indicators: [],
-        status: obs.status,
-        updatedAt: obs.updatedAt || Date.now(),
-        lastSync: obs.lastSync || 0,
-      };
-    }
-    
-    fullData.performance_rating = rating;
-    // 🟢 Also update the first indicator so the workspace sees it
-    if (fullData.indicators && fullData.indicators.length > 0) {
-      fullData.indicators = [...fullData.indicators];
-      fullData.indicators[0] = { ...fullData.indicators[0], performance_rating: rating };
-    } else {
-      // If no indicators, initialize with a placeholder
-      const { INITIAL_INDICATORS } = await import("./constants");
-      fullData.indicators = [{ ...INITIAL_INDICATORS[0], performance_rating: rating }];
-    }
-    fullData.updatedAt = Date.now();
-    
-    await set(storageKey, fullData);
-    
-    setShowPerformanceModal(false);
-    setPendingSyncObs(null);
-    
-    await handlePush(obs.id, fullData, true);
-  }}
->
-  Set Rating & Sync Now
-</button>
+              <button
+                className="btn"
+                style={{ background: '#4f46e5', color: 'white' }}
+                onClick={async () => {
+                  const select = document.getElementById('performance-select') as HTMLSelectElement;
+                  const rating = select.value as PerformanceRating;
+                  if (!rating) {
+                    alert('Please select a performance rating.');
+                    return;
+                  }
+                  const obs = pendingSyncObs;
+                  if (!obs) return;
+                  const storageKey = `${STORAGE_PREFIX}${obs.id}`;
+                  let fullData = await get(storageKey);
+                  if (!fullData) {
+                    fullData = {
+                      id: obs.id,
+                      meta: obs.meta || {},
+                      indicators: [],
+                      status: obs.status,
+                      updatedAt: obs.updatedAt || Date.now(),
+                      lastSync: obs.lastSync || 0,
+                    };
+                  }
+                  fullData.performance_rating = rating;
+                  // 🟢 Also update the first indicator so the workspace sees it
+                  if (fullData.indicators && fullData.indicators.length > 0) {
+                    fullData.indicators = [...fullData.indicators];
+                    fullData.indicators[0] = { ...fullData.indicators[0], performance_rating: rating };
+                  } else {
+                    // If no indicators, initialize with a placeholder
+                    const { INITIAL_INDICATORS } = await import("./constants");
+                    fullData.indicators = [{ ...INITIAL_INDICATORS[0], performance_rating: rating }];
+                  }
+                  fullData.updatedAt = Date.now();
+                  await set(storageKey, fullData);
+                  setShowPerformanceModal(false);
+                  setPendingSyncObs(null);
+                  await handlePush(obs.id, fullData, true);
+                }}
+              >
+                Set Rating & Sync Now
+              </button>
             </div>
           </div>
         </div>
-      )}  
+      )}
     </>
   );
 };
-
 /* -------------------------------------------------- */
 /* ACTION DASHBOARD MODAL (Sync v2 - Fully Revised)   */
 /* -------------------------------------------------- */
@@ -4848,12 +4340,9 @@ export const ActionDashboardModal: React.FC<{
     newCampuses: true,
     newTeachers: true, // Default open the "New" categories
   });
-
   if (!isOpen) return null;
-
   const toggle = (key: string) =>
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
-
   // Helper to render accordion sections
   const renderSection = (
     key: string,
@@ -4865,7 +4354,6 @@ export const ActionDashboardModal: React.FC<{
   ) => {
     if (!items || items.length === 0) return null;
     const isExpanded = expanded[key];
-
     return (
       <div
         className="obs-group"
@@ -4893,7 +4381,6 @@ export const ActionDashboardModal: React.FC<{
       </div>
     );
   };
-
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
       <div
@@ -4907,7 +4394,6 @@ export const ActionDashboardModal: React.FC<{
             ×
           </button>
         </div>
-
         <div className="modal-body" style={{ overflowY: "auto" }}>
           {/* Section 1: New Campuses */}
           {renderSection(
@@ -4991,22 +4477,19 @@ export const ActionDashboardModal: React.FC<{
               <div key={item.grapeseed_id} className="detail-row" style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "12px" }}>
                 <div style={{ flexGrow: 1 }}>
                   <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {item.name} 
-                    {item.is_handshake && <span style={{fontSize:'9px', color:'#2563eb', background:'#eff6ff', padding:'2px 6px', borderRadius:'10px', border:'1px solid #dbeafe'}}>LINK READY</span>}
+                    {item.name}
+                    {item.is_handshake && <span style={{ fontSize: '9px', color: '#2563eb', background: '#eff6ff', padding: '2px 6px', borderRadius: '10px', border: '1px solid #dbeafe' }}>LINK READY</span>}
                   </div>
                   <div style={{ fontSize: "11px", color: "#666" }}>{item.email}</div>
-                  
                   {/* 🟢 THE REASON TAG */}
                   <div style={{ fontSize: "10px", color: "#6d28d9", background: "#f5f3ff", padding: "2px 6px", borderRadius: "4px", display: "inline-block", marginTop: "4px", border: "1px solid #ddd6fe" }}>
                     <strong>Reason:</strong> {item.reason}
                   </div>
-
                   {/* 🟢 TARGET DESTINATION */}
                   <div style={{ fontSize: "10px", color: "#475569", marginTop: "4px" }}>
                     📍 Destination: <strong>{item.parent_school_name}</strong> {item.campus_name ? `(${item.campus_name})` : ""}
                   </div>
                 </div>
-                
                 <button
                   className="obs-pill-button"
                   style={{ color: "#8b5cf6", borderColor: "#8b5cf6", fontWeight: "600" }}
@@ -5027,30 +4510,26 @@ export const ActionDashboardModal: React.FC<{
             (item) => {
               const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
               const portalUrl = item.teacherUrl || `https://schools.grapeseed.com/regions/${VIETNAM_REGION_ID}/schools/${item.official_code || "unknown"}/teachers`;
-
               // 🔴 Logic to handle error state styling
               const isError = item.is_error === true;
-
               return (
                 <div key={item.id} className="detail-row" style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid #eee", paddingBottom: "12px", marginBottom: "8px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600 }}>{item.name}</div>
                       <div style={{ fontSize: "11px", color: "#666" }}>{item.school_name}</div>
-                      
                       {/* 🟢 VISUAL COMPARISON BLOCK */}
-                      <div style={{ 
-                        fontSize: "11px", 
-                        marginTop: "6px", 
-                        padding: "6px", 
-                        background: isError ? "#fff1f2" : "#f8fafc", 
-                        borderRadius: "4px", 
-                        border: isError ? "1px solid #fecdd3" : "1px solid #e2e8f0" 
+                      <div style={{
+                        fontSize: "11px",
+                        marginTop: "6px",
+                        padding: "6px",
+                        background: isError ? "#fff1f2" : "#f8fafc",
+                        borderRadius: "4px",
+                        border: isError ? "1px solid #fecdd3" : "1px solid #e2e8f0"
                       }}>
                         <div style={{ marginBottom: '2px', color: isError ? "#991b1b" : "#64748b" }}>
                           <strong>My teacher list:</strong> {Array.isArray(item.current_tags) && item.current_tags.length > 0 ? item.current_tags.join(", ") : <em>(Empty)</em>}
                         </div>
-                        
                         {isError ? (
                           <div style={{ color: "#b91c1c", fontWeight: 600 }}>
                             <strong>⚠️ Audit Failure:</strong> {item.expected[0]}
@@ -5062,7 +4541,6 @@ export const ActionDashboardModal: React.FC<{
                         )}
                       </div>
                     </div>
-
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: '12px' }}>
                       <button
                         className="obs-pill-button"
@@ -5071,7 +4549,6 @@ export const ActionDashboardModal: React.FC<{
                       >
                         Portal ⧉
                       </button>
-                      
                       {/* Only show Sync & Clear if it's a real mismatch, not a network error */}
                       {!isError && (
                         <button
@@ -5127,19 +4604,17 @@ export const ActionDashboardModal: React.FC<{
                   </div>
                   <div style={{ fontWeight: 600 }}>{item.db_record.campus_name}</div>
                 </div>
-
                 {/* Logic: Suggestion vs Dropdown */}
                 {item.suggestions && item.suggestions.length > 0 ? (
                   <div style={{ background: '#fffbeb', padding: '8px', borderRadius: '6px', border: '1px solid #fef3c7' }}>
                     <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#b45309', marginBottom: '4px' }}>
                       {item.suggestions.length === 1 ? "💡 Suggestion:" : "❓ Multiple potential matches:"}
                     </div>
-                    
                     {item.suggestions.length === 1 ? (
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '13px' }}>Link to <strong>{item.suggestions[0].name}</strong>?</span>
-                        <button 
-                          className="obs-pill-button" 
+                        <button
+                          className="obs-pill-button"
                           style={{ color: '#b45309', borderColor: '#b45309' }}
                           onClick={() => onResolve("linkCampus", { db_id: item.db_record.id, api_item: item.suggestions[0] })}
                         >
@@ -5148,8 +4623,8 @@ export const ActionDashboardModal: React.FC<{
                       </div>
                     ) : (
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <select 
-                          className="select select-compact" 
+                        <select
+                          className="select select-compact"
                           id={`select-${item.db_record.id}`}
                           style={{ flexGrow: 1 }}
                         >
@@ -5157,7 +4632,7 @@ export const ActionDashboardModal: React.FC<{
                             <option key={s.id} value={JSON.stringify(s)}>{s.name}</option>
                           ))}
                         </select>
-                        <button 
+                        <button
                           className="obs-pill-button"
                           onClick={() => {
                             const el = document.getElementById(`select-${item.db_record.id}`) as HTMLSelectElement;
@@ -5174,8 +4649,7 @@ export const ActionDashboardModal: React.FC<{
                     No similar names found in GrapeSEED.
                   </div>
                 )}
-                
-                <button 
+                <button
                   style={{ alignSelf: 'flex-start', fontSize: '10px', color: '#dc2626', background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
                   onClick={() => onResolve("deactivateCampus", item.db_record)}
                 >
@@ -5191,9 +4665,9 @@ export const ActionDashboardModal: React.FC<{
             "🗑️",
             "#dc2626", // Red for deletion/deactivation
             (item) => (
-              <div 
-                key={item.id} 
-                className="detail-row" 
+              <div
+                key={item.id}
+                className="detail-row"
                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #eee' }}
               >
                 <div>
@@ -5202,7 +4676,7 @@ export const ActionDashboardModal: React.FC<{
                     ID: {item.campus_id || 'No ID'} | Code: {item.official_code}
                   </div>
                 </div>
-                <button 
+                <button
                   className="obs-pill-button"
                   style={{ color: '#dc2626', borderColor: '#dc2626' }}
                   onClick={() => onResolve("deactivateCampus", item)}
@@ -5228,7 +4702,6 @@ export const ActionDashboardModal: React.FC<{
             database to match the official GrapeSEED Portal data.
           </div>
         </div>
-
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onClose}>
             Close Dashboard
