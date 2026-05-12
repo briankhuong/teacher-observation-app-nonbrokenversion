@@ -767,7 +767,8 @@ export const TeachersScreen: React.FC = () => {
   const [showViewModal, setShowViewModal] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [filterStatus, setFilterStatus] = useState<'all' | 'new' | 'active' | 'mutual' | 'inactive'>('active');
-  // 🟢 NEW: Secondary Filters (Performance & Month)
+  // 🆕 Remember which tab to restore when search is cleared
+  const [preSearchTab, setPreSearchTab] = useState<typeof filterStatus | null>(null);
   const [filterPerformance, setFilterPerformance] = useState<string>('all');
   const [filterMonth, setFilterMonth] = useState<string>(''); // Format: "YYYY-MM"
   // 🟢 UPDATED: Multi-step Filter & Stats Engine
@@ -824,10 +825,29 @@ export const TeachersScreen: React.FC = () => {
       }
       return { ...r, _derivedStatus: derivedStatus };
     });
-    // STEP 2: Filter by Status Tab
-    let result = filterStatus === 'all'
-      ? rowsWithStatus
-      : rowsWithStatus.filter(r => r._derivedStatus === filterStatus);
+    // STEP 1.5: Search across ALL teachers (bypasses current tab)
+    let searchFiltered = rowsWithStatus;
+    const isSearching = search && search.trim();
+    if (isSearching) {
+      const term = flattenText(search);
+      searchFiltered = rowsWithStatus.filter(r => {
+        const fields = [r.name, r.email, r.school_name, r.campus].filter(Boolean);
+        return fields.some(field => flattenText(String(field)).includes(term));
+      });
+    }
+    // STEP 2: Filter by Status Tab (skipped when searching — show all matches)
+    let result;
+    if (isSearching) {
+      // Search mode: show matching teachers from ALL tabs
+      result = searchFiltered;
+    } else if (filterStatus === 'all') {
+      result = searchFiltered;
+    } else if (filterStatus === 'active') {
+      // Active tab now shows both "active" and "mutual" teachers
+      result = searchFiltered.filter(r => r._derivedStatus === 'active' || r._derivedStatus === 'mutual');
+    } else {
+      result = searchFiltered.filter(r => r._derivedStatus === filterStatus);
+    }
     // STEP 3: Filter by Performance
     if (filterPerformance !== 'all') {
       result = result.filter(r => r.latest_performance === filterPerformance);
@@ -852,7 +872,7 @@ export const TeachersScreen: React.FC = () => {
       counts: {
         all: rows.length,
         new: newCount,
-        active: activeCount,
+        active: activeCount + mutualCount, // Active tab now includes mutual teachers
         mutual: mutualCount,
         inactive: inactiveCount
       },
@@ -870,7 +890,7 @@ export const TeachersScreen: React.FC = () => {
         }
       }
     };
-  }, [rows, filterStatus, filterPerformance, filterMonth]);
+  }, [rows, filterStatus, filterPerformance, filterMonth, search]);
   // TanStack Table State
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
     try {
@@ -1002,6 +1022,20 @@ export const TeachersScreen: React.FC = () => {
   useEffect(() => {
     setSelectedTeacherIds(new Set());
   }, [filterStatus, counts.new]);
+  // 🆕 When search becomes non-empty, switch to 'all' tab; restore when cleared
+  useEffect(() => {
+    if (search && search.trim()) {
+      // Only store the current tab if we haven't already stored one
+      setPreSearchTab(prev => prev ?? filterStatus);
+      setFilterStatus('all');
+    } else {
+      // Restore the previous tab if one was saved
+      if (preSearchTab) {
+        setFilterStatus(preSearchTab);
+        setPreSearchTab(null);
+      }
+    }
+  }, [search]); // ✅ Only runs when search changes
   const handleAcknowledgeAll = async () => {
     const ok = window.confirm(`Are you sure you want to acknowledge all ${counts.new} new teachers? This will clear your inbox.`);
     if (!ok) return;
@@ -1047,7 +1081,7 @@ export const TeachersScreen: React.FC = () => {
     () => [
       // 🟢 Checkbox column – only visible in the "Newly Added Teachers" tab
       // 🟢 Checkbox column – only visible in the "Newly Added Teachers" tab
-      ...(filterStatus === 'new' ? [{
+      {
         id: 'select',
         header: ({ table }: { table: any }) => {
           const allRows = table.getRowModel().rows;
@@ -1093,7 +1127,7 @@ export const TeachersScreen: React.FC = () => {
         minSize: 40,
         enableSorting: false,
         enableResizing: false,
-      }] : []),
+      },
       {
         accessorKey: "name",
         header: "Teacher",
@@ -1415,10 +1449,10 @@ export const TeachersScreen: React.FC = () => {
     columns,
     state: {
       sorting,
-      globalFilter: search,
+      globalFilter: '', // search is handled manually in useMemo across all teachers
     },
     onSortingChange: setSorting,
-    // 🟢 Register the custom filter here
+    // globalFilterFn no longer needed, but you can keep it for compatibility
     globalFilterFn: fuzzyVietnameseFilter,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -2025,37 +2059,39 @@ export const TeachersScreen: React.FC = () => {
                   </button>
                 )}
               </div>
-              {/* 🟢 NEW: Bulk Acknowledge Button (Only shows when in New Inbox) */}
-              {filterStatus === 'new' && counts.new > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ background: '#eab308', color: '#000', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
-                    onClick={handleAcknowledgeAll}
-                  >
-                    ✨ Acknowledge All ({counts.new})
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
-                    onClick={handleRejectAll}
-                  >
-                    ❌ Reject All
-                  </button>
-                  {selectedTeacherIds.size > 0 && (
+              {/* 🟢 Action bar: bulk acknowledge/reject (New tab only) and delete selected (any tab) */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', gap: '8px' }}>
+                {filterStatus === 'new' && counts.new > 0 && (
+                  <>
                     <button
                       type="button"
                       className="btn"
-                      style={{ background: '#dc2626', color: '#fff', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
-                      onClick={handleRejectSelected}
+                      style={{ background: '#eab308', color: '#000', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
+                      onClick={handleAcknowledgeAll}
                     >
-                      ❌ Reject Selected ({selectedTeacherIds.size})
+                      ✨ Acknowledge All ({counts.new})
                     </button>
-                  )}
-                </div>
-              )}
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
+                      onClick={handleRejectAll}
+                    >
+                      ❌ Reject All
+                    </button>
+                  </>
+                )}
+                {selectedTeacherIds.size > 0 && (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{ background: '#dc2626', color: '#fff', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
+                    onClick={handleRejectSelected}
+                  >
+                    ❌ Delete Selected ({selectedTeacherIds.size})
+                  </button>
+                )}
+              </div>
               {/* 3. Column Visibility Menu (Positioned Absolute) */}
               <div
                 style={{
