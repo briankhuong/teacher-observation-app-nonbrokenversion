@@ -1521,7 +1521,7 @@ router.post("/api/sync-school-status", async (req, res) => {
     }, { concurrency: 10 });
     // 5. Existing schools: re‑enable, campus‑level sync, refresh admin – parallel
     const existingCodes = [...dbCodes].filter(code => apiIds.has(code));
-    let reEnabledCount = 0, campusDisabledCount = 0, adminUpdatedCount = 0;
+    let reEnabledCount = 0, campusDisabledCount = 0, adminUpdatedCount = 0, newCampusCount = 0;
     await pMap(existingCodes, async (code) => {
       const dbRows = dbByCode.get(code) || [];
       // Re‑enable any that were disabled
@@ -1593,10 +1593,52 @@ router.post("/api/sync-school-status", async (req, res) => {
             else log(`❌ Update error: ${updErr.message}`);
           }
         }, { concurrency: 10 });
+        // 🆕 Discover and insert new campuses for this school
+        const dbCampusIds = new Set(dbRows.map(r => r.campus_id).filter(Boolean));
+        const newApiCampuses = apiCampuses.filter(c => !c.disabled && !dbCampusIds.has(c.id));
+        if (newApiCampuses.length > 0) {
+          const newRows = await pMap(newApiCampuses, async (campus) => {
+            const { adminName, adminEmail, adminPhone } = await enrichCampusAdmin(code, campus);
+            return {
+              trainer_id: userId,
+              school_name: dbRows[0]?.school_name || 'Unknown',
+              campus_name: campus.name,
+              official_code: code,
+              campus_id: campus.id,
+              admin_name: adminName,
+              admin_email: adminEmail,
+              admin_phone: adminPhone || campus.phone || null,
+              address: campus.fullAddress || null,
+              caring: false,
+              disabled: false,
+              exclusive: dbRows[0]?.exclusive || 'exclusive',
+              needs_review: true,
+              admin_workbook_url: null,
+              notes: null,
+              visit_count: null,
+              created_at: new Date(),
+              updated_at: new Date(),
+            };
+          }, { concurrency: 5 });
+          if (newRows.length > 0) {
+            const { error: insertErr } = await supabase.from('schools').insert(newRows);
+            if (insertErr) {
+              log(`❌ Insert new campuses error for ${code}: ${insertErr.message}`);
+            } else {
+              newCampusCount += newRows.length;
+              log(`🏫 Added ${newRows.length} new campus(es) for school ${code}`);
+            }
+          }
+        }
       } catch (e) {
         log(`⚠️ Campus sync error for ${code}: ${e.message}`);
       }
     }, { concurrency: 5 });
+    // Update the final summary to include new campuses
+    log(
+      `✅ Sync complete: ${newSchoolCount} new schools, ${newCampusCount || 0} new campuses, ${disabledCount} disabled, ` +
+      `${reEnabledCount} re‑enabled, ${campusDisabledCount} campuses disabled, ${adminUpdatedCount} admin refreshed.`
+    );
     log(
       `✅ Sync complete: ${newSchoolCount} new, ${disabledCount} disabled, ` +
       `${reEnabledCount} re‑enabled, ${campusDisabledCount} campuses disabled, ${adminUpdatedCount} admin refreshed.`
