@@ -18,7 +18,7 @@ import type {
   Table,
   FilterFn, // 🟢 Added FilterFn
 } from "@tanstack/react-table";
-import { Search, Plus, RefreshCw,Pencil } from "lucide-react";
+import { Search, Plus, RefreshCw, Pencil } from "lucide-react";
 import { isGrapeSeedTokenValid } from "./utils/authHelpers";
 import { GrapeSeedLoginModal } from "./components/GrapeSeedLoginModal";
 import { flattenText } from "./utils/textUtils";
@@ -26,12 +26,9 @@ const fuzzyVietnameseFilter: FilterFn<SchoolRow> = (row, columnId, value) => {
   const itemValue = row.getValue(columnId);
   const searchTerm = flattenText(value);
   const targetValue = flattenText(String(itemValue || ""));
-
   return targetValue.includes(searchTerm);
 };
-
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
-
 export interface SchoolRow {
   id: string;
   trainer_id: string;
@@ -56,10 +53,9 @@ export interface SchoolRow {
   disabled: boolean;
   exclusive: string | null;   // 'shared' | 'exclusive' | 'temporary'
   visit_count: number | null; // 🟢 NEW
-    needs_review: boolean; // 🟢 NEW
-        previous_data: any; // 🟢 NEW
+  needs_review: boolean; // 🟢 NEW
+  previous_data: any; // 🟢 NEW
 }
-
 type SchoolFormState = {
   school_name: string;
   campus_name: string;
@@ -78,7 +74,6 @@ type SchoolFormState = {
   exclusive: string;   // "" means unset, but we'll enforce one of 'shared'/'exclusive'/'temporary'
   visit_count: string; // 🟢 NEW
 };
-
 const emptyForm: SchoolFormState = {
   school_name: "",
   campus_name: "",
@@ -97,7 +92,6 @@ const emptyForm: SchoolFormState = {
   exclusive: "exclusive",   // default value as per your request
   visit_count: "",          // 🟢 NEW
 };
-
 interface SchoolFormModalProps {
   open: boolean;
   mode: "create" | "edit";
@@ -108,7 +102,6 @@ interface SchoolFormModalProps {
   // 🟢 UPDATED: Accepts optional token
   onSubmit: (values: SchoolFormState, autoCreateToken?: string) => Promise<void>;
 }
-
 interface SchoolViewModalProps {
   open: boolean;
   row: SchoolRow | null;
@@ -116,7 +109,6 @@ interface SchoolViewModalProps {
   onEdit: (row: SchoolRow) => void;
   onDelete: (row: SchoolRow) => Promise<void>;
 }
-
 const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
   open,
   row,
@@ -125,7 +117,6 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
   onDelete,
 }) => {
   if (!open || !row) return null;
-
   return (
     <div className="modal-backdrop">
       <div className="modal-panel" style={{ display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
@@ -135,15 +126,13 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
             ×
           </button>
         </div>
-
-    <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
+        <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
           <div className="detail-row" style={{ background: row.caring ? 'rgba(34, 197, 94, 0.1)' : 'transparent', padding: '8px', borderRadius: '6px' }}>
             <label>Caring School Status</label>
             <span style={{ fontWeight: 600, color: row.caring ? '#22c55e' : 'var(--text)' }}>
               {row.caring ? "✅ Caring School" : "—"}
             </span>
           </div>
-
           <div className="detail-row">
             <label>School Name</label>
             <span>{row.school_name}</span>
@@ -154,20 +143,17 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
           </div>
           {/* Helper to highlight if changed */}
           {(() => {
-                    // 🟢 Parse previous_data if it's a JSON string
-        let prev: any = row.previous_data;
-        if (typeof prev === 'string') {
-          try { prev = JSON.parse(prev); } catch (e) { prev = {}; }
-        }
-        if (!prev || typeof prev !== 'object') prev = {};
-
-        // 🟢 UPDATED: Only highlight if needs_review is still true
-        const isChanged = (field: string) =>
-          row.needs_review && prev[field] !== undefined && prev[field] !== row[field as keyof SchoolRow];
-
-        const highlightStyle = (changed: boolean) =>
-          changed ? { backgroundColor: '#fef9c3', padding: '2px 6px', borderRadius: '4px', color: '#000' } : {};
-
+            // 🟢 Parse previous_data if it's a JSON string
+            let prev: any = row.previous_data;
+            if (typeof prev === 'string') {
+              try { prev = JSON.parse(prev); } catch (e) { prev = {}; }
+            }
+            if (!prev || typeof prev !== 'object') prev = {};
+            // 🟢 UPDATED: Only highlight if needs_review is still true
+            const isChanged = (field: string) =>
+              row.needs_review && prev[field] !== undefined && prev[field] !== row[field as keyof SchoolRow];
+            const highlightStyle = (changed: boolean) =>
+              changed ? { backgroundColor: '#fef9c3', padding: '2px 6px', borderRadius: '4px', color: '#000' } : {};
             // Debug: log the comparison
             console.log(`\[ViewModal\] previous_data for ${row.school_name} - ${row.campus_name}:`, prev);
             return (
@@ -218,9 +204,7 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
                 </div>
               </>
             );
-
           })()}
-
           <div className="detail-row">
             <label>Account Manager Name</label>
             <span>{row.am_name || "—"}</span>
@@ -229,7 +213,7 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
             <label>Account Manager Email</label>
             <span>{row.am_email || "—"}</span>
           </div>
-                    {/* --- NEW: Status & Exclusive --- */}
+          {/* --- NEW: Status & Exclusive --- */}
           <div className="detail-row">
             <label>Status</label>
             <span style={{ color: row.disabled ? '#ef4444' : '#22c55e', fontWeight: 600 }}>
@@ -244,7 +228,6 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
             <label>Visit Count</label>
             <span>{row.visit_count !== null && row.visit_count !== undefined ? row.visit_count : "—"}</span>
           </div>
-          
           <div className="detail-row">
             <label>Admin Workbook URL</label>
             {row.admin_workbook_url ? (
@@ -255,7 +238,6 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
               <span>—</span>
             )}
           </div>
-
           {row.notes && (
             <div className="detail-row detail-row--notes">
               <label>Notes</label>
@@ -263,7 +245,6 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
             </div>
           )}
         </div>
-
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onCancel}>
             Close
@@ -283,7 +264,6 @@ const SchoolViewModal: React.FC<SchoolViewModalProps> = ({
     </div>
   );
 };
-
 const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   open,
   mode,
@@ -294,11 +274,9 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   onSubmit,
 }) => {
   const { user } = useAuth(); // needed for handleSubmit
-
   const [form, setForm] = useState<SchoolFormState>(initial ?? emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [autoCreate, setAutoCreate] = useState(false);
-
   // new state for multi‑campus lookup
   const [lookupResult, setLookupResult] = useState<{
     schoolName: string;
@@ -315,10 +293,8 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   const [selectedCampusIds, setSelectedCampusIds] = useState<Set<string>>(new Set());
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-
   // Clean name helper for matching logic in Phase B
   const cleanName = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
-
   useEffect(() => {
     if (open) {
       setForm(initial ?? emptyForm);
@@ -329,45 +305,37 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       setHasSearched(false);
     }
   }, [open, initial]);
-
   if (!open) return null;
-
   const handleChange =
     (field: keyof SchoolFormState) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      setForm((prev) => ({ ...prev, [field]: e.target.value }));
-    };
-
+      (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        setForm((prev) => ({ ...prev, [field]: e.target.value }));
+      };
   const handleLookupSchoolDetails = async () => {
     if (!form.official_code.trim()) {
       alert("Please enter an Official Code first.");
       return;
     }
-
     setIsLookingUp(true);
     setLookupResult(null);
     setSelectedCampusIds(new Set());
     setHasSearched(true);
-
     try {
       const resp = await fetch(`${MERGE_SERVER_BASE}/api/lookup-school-details`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ schoolCode: form.official_code.trim() }),
       });
-
       if (!resp.ok) {
         const errData = await resp.json();
         throw new Error(errData.error || "Lookup failed.");
       }
-
       const data = await resp.json();
       if (!data.campuses || data.campuses.length === 0) {
         alert("No active campuses found for this school.");
         setLookupResult({ schoolName: data.schoolName, campuses: [] });
         return;
       }
-
       setLookupResult(data);
       // Pre‑fill AM fields from an existing record for this school code
       const existingSameSchool = existingSchools.find(
@@ -415,7 +383,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       setIsLookingUp(false);
     }
   };
-
   const toggleCampusSelection = (campusId: string) => {
     setSelectedCampusIds((prev) => {
       const next = new Set(prev);
@@ -427,10 +394,8 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       return next;
     });
   };
-
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-
     // If editing, use the original parent‑handled flow (no change)
     if (mode === "edit") {
       if (!form.school_name.trim() || !form.campus_name.trim()) {
@@ -460,7 +425,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       }
       return;
     }
-
     // ---------- Creation mode (multi or single) ----------
     let campusesToCreate: Array<{
       campusId: string;
@@ -470,7 +434,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       adminEmail: string | null;
       adminPhone: string | null;
     }> | null = null;
-
     if (lookupResult && lookupResult.campuses.length > 0) {
       campusesToCreate = lookupResult.campuses.filter((c) =>
         selectedCampusIds.has(c.campusId)
@@ -495,7 +458,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
         },
       ];
     }
-
     setSubmitting(true);
     let token: string | undefined = undefined;
     if (autoCreate) {
@@ -512,7 +474,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
         }
       }
     }
-
     try {
       const insertedRows: SchoolRow[] = [];
       for (const campus of campusesToCreate) {
@@ -537,7 +498,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           admin_workbook_url: form.admin_workbook_url.trim() || null,
           notes: form.notes.trim() || null,
         };
-
         const { data, error } = await supabase
           .from("schools")
           .insert(payload)
@@ -551,7 +511,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
         }
         if (data) insertedRows.push(data as SchoolRow);
       }
-
       // Auto‑create workbooks if requested
       if (autoCreate && token && insertedRows.length > 0) {
         const provisionPromises = insertedRows.map(async (row) => {
@@ -582,7 +541,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
         });
         await Promise.all(provisionPromises);
       }
-
       onCancel();
       if (onRefresh) onRefresh();
     } finally {
@@ -596,12 +554,10 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
         (cleanName(s.campus_name) === cleanName(apiName) &&
           s.official_code === form.official_code)
     );
-
     if (!match) return "selectable";
     if (!match.campus_id) return "repairable";
     return "linked";
   };
-
   return (
     <div className="modal-backdrop">
       <div
@@ -616,7 +572,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
             ×
           </button>
         </div>
-
         <div className="modal-body" style={{ flexGrow: 1, overflowY: "auto" }}>
           {/* Official Code + Search */}
           <div className="form-row">
@@ -647,7 +602,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               </button>
             </div>
           </div>
-
           {/* School Name (filled by API) */}
           <div className="form-row">
             <label>School name *</label>
@@ -659,7 +613,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               placeholder="e.g. VSK Sunshine"
             />
           </div>
-
           {/* Campus(es) – multi‑select UI */}
           <div className="form-row">
             <label>Campus(es) *</label>
@@ -806,7 +759,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               </div>
             )}
           </div>
-
           {/* Admin & Address fields – hidden when multiple campuses are shown */}
           {lookupResult && lookupResult.campuses.length > 1 ? (
             <div className="form-row" style={{ color: '#fcd34d', fontSize: '12px', padding: '8px', background: 'rgba(251,191,36,0.1)', borderRadius: '6px', border: '1px solid #fcd34d' }}>
@@ -856,7 +808,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               </div>
             </>
           )}
-
           {/* AM fields always visible */}
           <div className="form-row">
             <label>Account Manager name</label>
@@ -876,7 +827,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               onChange={handleChange("am_email")}
             />
           </div>
-
           {/* Status, Exclusive, Visit Count, Caring, Notes, Workbook */}
           <div className="form-row">
             <label>Campus Status</label>
@@ -898,7 +848,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               </label>
             </div>
           </div>
-
           <div className="form-row">
             <label>Exclusive</label>
             <select
@@ -913,7 +862,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               <option value="temporary">Temporary</option>
             </select>
           </div>
-
           <div className="form-row">
             <label>Visit Count</label>
             <input
@@ -926,7 +874,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               placeholder="e.g. 5"
             />
           </div>
-
           <div className="form-row">
             <label>Caring Status</label>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -947,7 +894,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               </label>
             </div>
           </div>
-
           <div className="form-row">
             <label>Notes</label>
             <textarea
@@ -958,7 +904,6 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               placeholder="Any special notes about this campus…"
             />
           </div>
-
           <div className="form-row">
             <label>Admin Workbook URL</label>
             {(mode === "create" || !initial?.admin_workbook_url) && (
@@ -1002,16 +947,14 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               />
             )}
           </div>
-
           {(() => {
-                        const allAlreadyExist = !!(
+            const allAlreadyExist = !!(
               lookupResult &&
               lookupResult.campuses.length > 0 &&
               lookupResult.campuses.every((c) =>
                 existingSchools.some((s) => s.campus_id === c.campusId)
               )
             );
-
             return (
               <div className="modal-footer" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
                 {allAlreadyExist && (
@@ -1039,8 +982,8 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
                         ? "Creating…"
                         : "Saving…"
                       : mode === "create"
-                      ? "Create"
-                      : "Save changes"}
+                        ? "Create"
+                        : "Save changes"}
                   </button>
                 </div>
               </div>
@@ -1051,205 +994,196 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
     </div>
   );
 };
-
 export const SchoolsScreen: React.FC = () => {
   const { user } = useAuth();
-
   const [rows, setRows] = useState<SchoolRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  
   // 🟢 NEW: Background Task Tracking
   const [provisioningIds, setProvisioningIds] = useState<Set<string>>(new Set());
-    // 🟢 NEW: Bulk Edit State
+  // 🟢 NEW: Bulk Edit State
   const [isBulkEditMode, setIsBulkEditMode] = useState(false);
-
   // 🟢 NEW: Optimistic Auto-Save Handler (for Schools)
   const handleInlineUpdate = async (id: string, field: keyof SchoolRow, value: any) => {
     // 1. Optimistic UI update
     setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
-
     // 2. Background DB sync
     const { error } = await supabase
       .from("schools")
       .update({ [field]: value, updated_at: new Date().toISOString() })
       .eq("id", id)
       .eq("trainer_id", user?.id);
-
     if (error) {
       console.error(`Failed to update ${field}:`, error);
       alert(`Could not save ${field}. Please refresh and try again.`);
     }
   };
-
   const [search, setSearch] = useState("");
+  const [preSearchTab, setPreSearchTab] = useState<typeof schoolFilter | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
   const [editingRow, setEditingRow] = useState<SchoolRow | null>(null);
-
   const [viewingRow, setViewingRow] = useState<SchoolRow | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
-
-  const [refreshKey, setRefreshKey] = useState(0); 
+  const [refreshKey, setRefreshKey] = useState(0);
   // 🟢 NEW: Status Filter State
-const [schoolFilter, setSchoolFilter] = useState<'all' | 'active' | 'inactive' | 'no_teachers' | 'temporary' | 'needs_review'>('active');
+  const [schoolFilter, setSchoolFilter] = useState<'all' | 'active' | 'inactive' | 'no_teachers' | 'temporary' | 'needs_review'>('active');
   const [sorting, setSorting] = useState<SortingState>([
     { id: "school_name", desc: false },
     { id: "campus_name", desc: false },
   ]);
-
   // 2. Add inside SchoolsScreen component
-const [isPulsing, setIsPulsing] = useState(false);
-const [pulseResults, setPulseResults] = useState<{
-  newCampuses: any[];
-  disabledCampuses: any[];
-  classlessClasses: any[];
-  nameMismatches: any[];
-}>({
-  newCampuses: [],
-  disabledCampuses: [],
-  classlessClasses: [],
-  nameMismatches: []
-});
-
-// 🟢 NEW: Filtered rows and breakdown counts
-const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
-  const active: SchoolRow[] = [];
-  const inactive: SchoolRow[] = [];
-  const noTeachers: SchoolRow[] = [];   // 🟢 NEW
-  const temporary: SchoolRow[] = [];    // 🟢 NEW
-
-  rows.forEach((r) => {
-    if (r.disabled) {
-      inactive.push(r);
-      return;
-    }
-    if (r.exclusive === 'shared' || r.exclusive === 'exclusive') {
-      active.push(r);
-    }
-    if (r.has_empty_class) {
-      noTeachers.push(r);
-    }
-    if (r.exclusive === 'temporary') {
-      temporary.push(r);
-    }
+  const [isPulsing, setIsPulsing] = useState(false);
+  const [pulseResults, setPulseResults] = useState<{
+    newCampuses: any[];
+    disabledCampuses: any[];
+    classlessClasses: any[];
+    nameMismatches: any[];
+  }>({
+    newCampuses: [],
+    disabledCampuses: [],
+    classlessClasses: [],
+    nameMismatches: []
   });
-
-  let filtered: SchoolRow[] = [];
-  if (schoolFilter === 'all') filtered = rows;
-  else if (schoolFilter === 'active') filtered = active;
-  else if (schoolFilter === 'inactive') filtered = inactive;
-  else if (schoolFilter === 'no_teachers') filtered = noTeachers;
-  else if (schoolFilter === 'temporary') filtered = temporary;
-  else if (schoolFilter === 'needs_review') filtered = rows.filter(r => r.needs_review); // NEW
-
-  // 🟢 Display original data for rows under review, and hide new unreviewed schools
-  if (schoolFilter !== 'needs_review') {
-    filtered = filtered
-      .filter(r => {
-        // Hide completely new schools (no previous_data) that are still under review
-        if (r.needs_review && !r.previous_data) return false;
-        return true;
-      })
-      .map(r => {
-        if (!r.needs_review || !r.previous_data) return r;
-        let prev;
-        try {
-          prev = typeof r.previous_data === 'string' ? JSON.parse(r.previous_data) : r.previous_data;
-        } catch { prev = null; }
-        if (!prev || typeof prev !== 'object') return r;
-        return {
-          ...r,
-          admin_name: prev.admin_name ?? r.admin_name,
-          admin_email: prev.admin_email ?? r.admin_email,
-          admin_phone: prev.admin_phone ?? r.admin_phone,
-          address: prev.address ?? r.address,
-          disabled: prev.disabled ?? r.disabled,
-        };
+  const { filteredRows, filterCounts, activeBreakdown } = useMemo(() => {
+    // Step 1: Search across all schools
+    const isSearching = search && search.trim();
+    let sourceRows = rows;
+    if (isSearching) {
+      const term = flattenText(search);
+      sourceRows = rows.filter(r => {
+        const fields = [r.school_name, r.campus_name, r.admin_name, r.admin_email, r.am_name, r.am_email, r.address].filter(Boolean);
+        return fields.some(field => flattenText(String(field)).includes(term));
       });
-  }
-
-  // Active breakdown now only shared/exclusive (temporary is separate)
-  const sharedSchools = new Set<string>();
-  const exclusiveSchools = new Set<string>();
-  active.forEach((r) => {
-    if (r.exclusive === 'shared') sharedSchools.add(r.school_name);
-    else if (r.exclusive === 'exclusive') exclusiveSchools.add(r.school_name);
-  });
-  const temporarySchools = new Set<string>();
-  temporary.forEach(r => temporarySchools.add(r.school_name));
-
-  const breakdown = {
-    shared: sharedSchools.size,
-    exclusive: exclusiveSchools.size,
-    temporary: temporarySchools.size,
-  };
-
-  return {
-    filteredRows: filtered,
-    filterCounts: {
-      all: rows.length,
-      active: active.length,
-      inactive: inactive.length,
-      no_teachers: noTeachers.length,
-      temporary: temporary.length,
-    },
-    activeBreakdown: breakdown,
-  };
-}, [rows, schoolFilter]);
-// Total unique schools across all rows (unfiltered)
-const totalUniqueSchoolCount = useMemo(() => {
-  const names = rows.map((r) => r.school_name);
-  return new Set(names).size;
-}, [rows]);
-// Count unique schools based on currently filtered rows (used by active/inactive/all subtitles)
-const uniqueSchoolCount = useMemo(() => {
+    }
+    const active: SchoolRow[] = [];
+    const inactive: SchoolRow[] = [];
+    const noTeachers: SchoolRow[] = [];
+    const temporary: SchoolRow[] = [];
+    sourceRows.forEach((r) => {
+      if (r.disabled) {
+        inactive.push(r);
+        return;
+      }
+      if (r.exclusive === 'shared' || r.exclusive === 'exclusive') {
+        active.push(r);
+      }
+      if (r.has_empty_class) {
+        noTeachers.push(r);
+      }
+      if (r.exclusive === 'temporary') {
+        temporary.push(r);
+      }
+    });
+    let filtered: SchoolRow[] = [];
+    if (isSearching) {
+      // When searching, show all matching rows (ignore the tab filter)
+      filtered = sourceRows;
+    } else if (schoolFilter === 'all') filtered = sourceRows;
+    else if (schoolFilter === 'active') filtered = active;
+    else if (schoolFilter === 'inactive') filtered = inactive;
+    else if (schoolFilter === 'no_teachers') filtered = noTeachers;
+    else if (schoolFilter === 'temporary') filtered = temporary;
+    else if (schoolFilter === 'needs_review') filtered = sourceRows.filter(r => r.needs_review);
+    // 🟢 Display original data for rows under review, and hide new unreviewed schools (only when not in needs_review tab)
+    if (schoolFilter !== 'needs_review' && !isSearching) {
+      filtered = filtered
+        .filter(r => {
+          if (r.needs_review && !r.previous_data) return false;
+          return true;
+        })
+        .map(r => {
+          if (!r.needs_review || !r.previous_data) return r;
+          let prev;
+          try {
+            prev = typeof r.previous_data === 'string' ? JSON.parse(r.previous_data) : r.previous_data;
+          } catch { prev = null; }
+          if (!prev || typeof prev !== 'object') return r;
+          return {
+            ...r,
+            admin_name: prev.admin_name ?? r.admin_name,
+            admin_email: prev.admin_email ?? r.admin_email,
+            admin_phone: prev.admin_phone ?? r.admin_phone,
+            address: prev.address ?? r.address,
+            disabled: prev.disabled ?? r.disabled,
+          };
+        });
+    }
+    // Active breakdown (shared / exclusive) – based on original active array
+    const sharedSchools = new Set<string>();
+    const exclusiveSchools = new Set<string>();
+    active.forEach((r) => {
+      if (r.exclusive === 'shared') sharedSchools.add(r.school_name);
+      else if (r.exclusive === 'exclusive') exclusiveSchools.add(r.school_name);
+    });
+    const temporarySchools = new Set<string>();
+    temporary.forEach(r => temporarySchools.add(r.school_name));
+    const breakdown = {
+      shared: sharedSchools.size,
+      exclusive: exclusiveSchools.size,
+      temporary: temporarySchools.size,
+    };
+    return {
+      filteredRows: filtered,
+      filterCounts: {
+        all: rows.length,
+        active: active.length,
+        inactive: inactive.length,
+        no_teachers: noTeachers.length,
+        temporary: temporary.length,
+      },
+      activeBreakdown: breakdown,
+    };
+  }, [rows, schoolFilter, search]);
+  // Total unique schools across all rows (unfiltered)
+  const totalUniqueSchoolCount = useMemo(() => {
+    const names = rows.map((r) => r.school_name);
+    return new Set(names).size;
+  }, [rows]);
+  // Count unique schools based on currently filtered rows (used by active/inactive/all subtitles)
+  const uniqueSchoolCount = useMemo(() => {
     const names = filteredRows.map((r) => r.school_name);
     return new Set(names).size;
-}, [filteredRows]);
-
-// Unique school counts for Active and Inactive tabs (independent of filter)
-const activeUniqueCount = useMemo(() => {
-  const names = rows
-    .filter(r => !r.disabled && (r.exclusive === 'shared' || r.exclusive === 'exclusive'))
-    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
-    .map(r => r.school_name);
-  return new Set(names).size;
-}, [rows]);
-const inactiveUniqueCount = useMemo(() => {
-  const names = rows
-    .filter(r => r.disabled)
-    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
-    .map(r => r.school_name);
-  return new Set(names).size;
-}, [rows]);
-// Unique school counts for No Teachers and Temporary tabs
-const noTeachersUniqueCount = useMemo(() => {
-  const names = rows
-    .filter(r => r.has_empty_class && !r.disabled)
-    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
-    .map(r => r.school_name);
-  return new Set(names).size;
-}, [rows]);
-
-const temporaryUniqueCount = useMemo(() => {
-  const names = rows
-    .filter(r => r.exclusive === 'temporary' && !r.disabled)
-    .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
-    .map(r => r.school_name);
-  return new Set(names).size;
-}, [rows]);
-
-const needsReviewCount = useMemo(() => rows.filter(r => r.needs_review).length, [rows]);
-
-const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+  }, [filteredRows]);
+  // Unique school counts for Active and Inactive tabs (independent of filter)
+  const activeUniqueCount = useMemo(() => {
+    const names = rows
+      .filter(r => !r.disabled && (r.exclusive === 'shared' || r.exclusive === 'exclusive'))
+      .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+      .map(r => r.school_name);
+    return new Set(names).size;
+  }, [rows]);
+  const inactiveUniqueCount = useMemo(() => {
+    const names = rows
+      .filter(r => r.disabled)
+      .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+      .map(r => r.school_name);
+    return new Set(names).size;
+  }, [rows]);
+  // Unique school counts for No Teachers and Temporary tabs
+  const noTeachersUniqueCount = useMemo(() => {
+    const names = rows
+      .filter(r => r.has_empty_class && !r.disabled)
+      .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+      .map(r => r.school_name);
+    return new Set(names).size;
+  }, [rows]);
+  const temporaryUniqueCount = useMemo(() => {
+    const names = rows
+      .filter(r => r.exclusive === 'temporary' && !r.disabled)
+      .filter(r => !r.needs_review || (r.previous_data && Object.keys(r.previous_data).length > 0))
+      .map(r => r.school_name);
+    return new Set(names).size;
+  }, [rows]);
+  const needsReviewCount = useMemo(() => rows.filter(r => r.needs_review).length, [rows]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
     try {
       const saved = localStorage.getItem("schoolsColumnVisibility");
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error("Failed to load column visibility from local storage", e);
     }
-        return {
+    return {
       campus_name: false,
       admin_phone: false,
       am_email: false,
@@ -1269,36 +1203,29 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const pendingSchoolSync = useRef<(() => void) | null>(null);
   const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(new Set());
-
   // 🟢 NEW: Background Provisioning Logic
   const runBackgroundProvisioning = async (school: SchoolRow, token: string) => {
     try {
       setProvisioningIds(prev => new Set(prev).add(school.id));
-
       const resp = await fetch(`${MERGE_SERVER_BASE}/api/provision-school`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           schoolName: school.school_name,
           trainerId: user?.id,
           schoolId: school.id // 🟢 ADDED: Send ID for unique naming
         })
       });
       const result = await resp.json();
-
       if (!result.ok) throw new Error(result.error || "Provisioning failed");
-
       // Update DB
       const { error } = await supabase
         .from("schools")
         .update({ admin_workbook_url: result.workbookUrl })
         .eq("id", school.id);
-      
       if (error) throw error;
-
       // Update UI
       setRows(prev => prev.map(r => r.id === school.id ? { ...r, admin_workbook_url: result.workbookUrl } : r));
-
     } catch (err: any) {
       console.error("Background task failed", err);
       alert(`⚠️ Failed to create workbook for ${school.school_name}: ${err.message}`);
@@ -1310,21 +1237,18 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
       });
     }
   };
-
   const handleRejectSchool = async (row: SchoolRow) => {
     // Parse previous_data (it may be a JSON string)
     let prevData: any = row.previous_data;
     if (typeof prevData === 'string') {
       try { prevData = JSON.parse(prevData); } catch (e) { prevData = null; }
     }
-
     // No previous data → this was a newly added school
     if (!prevData || typeof prevData !== 'object' || Object.keys(prevData).length === 0) {
       const ok = window.confirm(
         `Delete newly added school "${row.school_name} - ${row.campus_name}"?`
       );
       if (!ok) return;
-
       // Delete the school
       const { error } = await supabase
         .from("schools")
@@ -1338,7 +1262,6 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
       setRows(prev => prev.filter(r => r.id !== row.id));
       return;
     }
-
     // Has previous data → restore old values
     const updates: any = {
       needs_review: false,
@@ -1350,7 +1273,6 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
     if (prevData.admin_phone !== undefined) updates.admin_phone = prevData.admin_phone;
     if (prevData.address !== undefined) updates.address = prevData.address;
     if (prevData.disabled !== undefined) updates.disabled = prevData.disabled;
-
     const { error } = await supabase
       .from("schools")
       .update(updates)
@@ -1366,30 +1288,25 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
       )
     );
   };
-
   const handleRejectAllSchools = async (selectedIds?: string[]) => {
     // Use provided selection, or fallback to all review items with previous_data
     const idsToProcess = selectedIds && selectedIds.length > 0
       ? selectedIds
       : rows.filter(r => r.needs_review && r.previous_data).map(r => r.id);
-
     if (idsToProcess.length === 0) {
       alert("No schools selected or no schools have previous data to restore.");
       return;
     }
-
     const schoolsWithoutData = idsToProcess.filter(id => {
       const row = rows.find(r => r.id === id);
       return row && (!row.previous_data || Object.keys(row.previous_data).length === 0);
     });
-
     if (schoolsWithoutData.length > 0) {
       const ok = window.confirm(
         `${schoolsWithoutData.length} selected school(s) have no previous data. Clear their review flag anyway?`
       );
       if (!ok) return;
     }
-
     for (const id of idsToProcess) {
       const row = rows.find(r => r.id === id);
       if (!row) continue;
@@ -1397,7 +1314,23 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
     }
     setSelectedReviewIds(new Set());
   };
-
+  const handleDeleteSelected = async () => {
+    if (selectedReviewIds.size === 0) return;
+    const ok = window.confirm(`Delete ${selectedReviewIds.size} selected schools/campuses? This cannot be undone.`);
+    if (!ok) return;
+    const ids = Array.from(selectedReviewIds);
+    const { error } = await supabase
+      .from("schools")
+      .delete()
+      .in("id", ids)
+      .eq("trainer_id", user?.id);
+    if (error) {
+      alert("Failed to delete selected schools.");
+      return;
+    }
+    setRows(prev => prev.filter(r => !selectedReviewIds.has(r.id)));
+    setSelectedReviewIds(new Set());
+  };
   const handleAcknowledgeSchool = async (row: SchoolRow) => {
     const { error } = await supabase
       .from("schools")
@@ -1410,7 +1343,6 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
     }
     setRows(prev => prev.map(r => r.id === row.id ? { ...r, needs_review: false } : r));
   };
-
   const handleAcknowledgeAllSchools = async (selectedIds?: string[]) => {
     const idsToAck = selectedIds && selectedIds.length > 0 ? selectedIds : rows.filter(r => r.needs_review).map(r => r.id);
     const count = idsToAck.length;
@@ -1433,7 +1365,6 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
     setSelectedReviewIds(new Set());
     if (idsToAck.length === needsReviewCount) setSchoolFilter('active');
   };
-
   // Helper: safely parse previous_data into a plain object
   const getPreviousData = (row: SchoolRow) => {
     let prev: any = row.previous_data;
@@ -1444,137 +1375,132 @@ const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => 
     return prev;
   };
   // Define Columns
-const columns = useMemo<ColumnDef<SchoolRow>[]>(
+  const columns = useMemo<ColumnDef<SchoolRow>[]>(
     () => [
-      // 🟢 Checkbox column only in Needs Review tab
-      ...(schoolFilter === 'needs_review'
-        ? [
-            {
-              id: 'select',
-              header: () => (
-                <input
-                  type="checkbox"
-                  checked={
-                    selectedReviewIds.size > 0 &&
-                    selectedReviewIds.size === filteredRows.filter(r => r.needs_review).length
-                  }
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      const allIds = filteredRows.filter(r => r.needs_review).map(r => r.id);
-                      setSelectedReviewIds(new Set(allIds));
-                    } else {
-                      setSelectedReviewIds(new Set());
-                    }
-                  }}
-                  style={{ width: 'auto', margin: 0 }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ),
-              cell: ({ row }: { row: any }) => (
-                <input
-                  type="checkbox"
-                  checked={selectedReviewIds.has(row.original.id)}
-                  onChange={() => {
-                    setSelectedReviewIds((prev) => {
-                      const next = new Set(prev);
-                      const id = row.original.id;
-                      if (next.has(id)) next.delete(id);
-                      else next.add(id);
-                      return next;
-                    });
-                  }}
-                  style={{ width: 'auto', margin: 0 }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ),
-              size: 40,
-              minSize: 40,
-              enableSorting: false,
-            } as ColumnDef<SchoolRow>,
-          ]
-        : []),
+      {
+        id: 'select',
+        header: ({ table }: { table: any }) => {
+          const allRows = table.getRowModel().rows;
+          const allSelected = allRows.length > 0 && allRows.every((row: any) => selectedReviewIds.has(row.original.id));
+          return (
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => {
+                if (allSelected) {
+                  setSelectedReviewIds(new Set());
+                } else {
+                  const allIds = allRows.map((row: any) => row.original.id);
+                  setSelectedReviewIds(new Set(allIds));
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 'auto', margin: 0 }}
+            />
+          );
+        },
+        cell: ({ row }: { row: any }) => (
+          <input
+            type="checkbox"
+            checked={selectedReviewIds.has(row.original.id)}
+            onChange={(e) => {
+              e.stopPropagation();
+              const id = row.original.id;
+              setSelectedReviewIds(prev => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                return next;
+              });
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'auto', margin: 0 }}
+          />
+        ),
+        size: 40,
+        minSize: 40,
+        enableSorting: false,
+        enableResizing: false,
+      },
       // ---------- existing school_name column ----------
       {
         accessorKey: "school_name",
         header: "School & Campus",
         cell: (info) => (
-    <>
-      <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        {info.row.original.school_name}
-        
-        {/* ⚡ NEW: No ID Tag (Calculated logic) */}
-        {!info.row.original.campus_id && (
-          <span className="tag-pill tag-pill-warning" title="This campus has no API ID link">
-            No Campus ID
-          </span>
-        )}
-
-        {/* Existing No Teacher Tag */}
-        {info.row.original.has_empty_class && (
-          <span className="tag-pill tag-pill-notag" title="This school has classes with no teacher assigned">
-            No Teacher
-          </span>
-        )}
-        {/* 🟢 NEW: Inactive Tag */}
-{info.row.original.disabled && (
-  <span
-    className="tag-pill"
-    style={{
-      background: 'rgba(239, 68, 68, 0.15)',
-      borderColor: '#ef4444',
-      border: '1px solid',
-      color: '#ef4444',
-      fontWeight: 600,
-      fontSize: '10px',
-      display: 'inline-block',
-      padding: '1px 8px',
-      borderRadius: '12px',
-    }}
-  >
-    Inactive
-  </span>
-)}
-{/* 🟢 NEW: Exclusive tag (only show if shared or temporary) */}
-{info.row.original.exclusive && info.row.original.exclusive !== 'exclusive' && (
-  <span
-    className="tag-pill"
-    style={{
-      background:
-        info.row.original.exclusive === 'temporary' ? 'rgba(234,179,8,0.15)' :
-        'rgba(59,130,246,0.15)',
-      borderColor:
-        info.row.original.exclusive === 'temporary' ? '#eab308' :
-        '#3b82f6',
-      border: '1px solid',
-      color:
-        info.row.original.exclusive === 'temporary' ? '#eab308' :
-        '#3b82f6',
-      fontWeight: 600,
-      fontSize: '10px',
-      display: 'inline-block',
-      padding: '1px 8px',
-      borderRadius: '12px',
-    }}
-  >
-    {info.row.original.exclusive === 'shared' ? 'Shared' : 'Temporary'}
-  </span>
-)}
-        
-      </div>
-      <div className="entity-cell-sub">{info.row.original.campus_name}</div>
-    </>
-  ),
-  id: "school_name",
-  minSize: 150,
-  size: 250,
-},
+          <>
+            <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {info.row.original.school_name}
+              {/* ⚡ NEW: No ID Tag (Calculated logic) */}
+              {!info.row.original.campus_id && (
+                <span className="tag-pill tag-pill-warning" title="This campus has no API ID link">
+                  No Campus ID
+                </span>
+              )}
+              {/* Existing No Teacher Tag */}
+              {info.row.original.has_empty_class && (
+                <span className="tag-pill tag-pill-notag" title="This school has classes with no teacher assigned">
+                  No Teacher
+                </span>
+              )}
+              {/* 🟢 NEW: Inactive Tag */}
+              {info.row.original.disabled && (
+                <span
+                  className="tag-pill"
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    borderColor: '#ef4444',
+                    border: '1px solid',
+                    color: '#ef4444',
+                    fontWeight: 600,
+                    fontSize: '10px',
+                    display: 'inline-block',
+                    padding: '1px 8px',
+                    borderRadius: '12px',
+                  }}
+                >
+                  Inactive
+                </span>
+              )}
+              {/* 🟢 NEW: Exclusive tag (only show if shared or temporary) */}
+              {info.row.original.exclusive && info.row.original.exclusive !== 'exclusive' && (
+                <span
+                  className="tag-pill"
+                  style={{
+                    background:
+                      info.row.original.exclusive === 'temporary' ? 'rgba(234,179,8,0.15)' :
+                        'rgba(59,130,246,0.15)',
+                    borderColor:
+                      info.row.original.exclusive === 'temporary' ? '#eab308' :
+                        '#3b82f6',
+                    border: '1px solid',
+                    color:
+                      info.row.original.exclusive === 'temporary' ? '#eab308' :
+                        '#3b82f6',
+                    fontWeight: 600,
+                    fontSize: '10px',
+                    display: 'inline-block',
+                    padding: '1px 8px',
+                    borderRadius: '12px',
+                  }}
+                >
+                  {info.row.original.exclusive === 'shared' ? 'Shared' : 'Temporary'}
+                </span>
+              )}
+            </div>
+            <div className="entity-cell-sub">{info.row.original.campus_name}</div>
+          </>
+        ),
+        id: "school_name",
+        minSize: 150,
+        size: 250,
+      },
       {
         accessorKey: "campus_name",
         header: "Campus Name",
         minSize: 100,
         size: 150,
       },
-             {
+      {
         accessorKey: "admin_name",
         header: "Admin Name",
         cell: (info) => {
@@ -1582,7 +1508,6 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
           const prev = getPreviousData(row);
           const nameChanged = row.needs_review && prev.admin_name !== undefined && prev.admin_name !== row.admin_name;
           const phoneChanged = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
-
           return (
             <>
               <div className="entity-cell-main">
@@ -1619,7 +1544,6 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
           const row = info.row.original;
           const prev = getPreviousData(row);
           const changed = row.needs_review && prev.admin_email !== undefined && prev.admin_email !== row.admin_email;
-          
           if (changed) {
             return (
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
@@ -1640,7 +1564,6 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
           const row = info.row.original;
           const prev = getPreviousData(row);
           const changed = row.needs_review && prev.admin_phone !== undefined && prev.admin_phone !== row.admin_phone;
-          
           if (changed) {
             return (
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
@@ -1654,7 +1577,6 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 100,
         size: 150,
       },
-
       {
         accessorKey: "am_name",
         header: "AM Name",
@@ -1674,32 +1596,30 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 150,
         size: 200,
       },
-        {
-    accessorKey: "address",
-    header: "Address",
-    cell: (info) => {
-      const row = info.row.original;
-      const prev = getPreviousData(row);
-      const changed = row.needs_review && prev.address !== undefined && prev.address !== row.address;
-
-      if (changed) {
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
-            <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.85em' }}>
-              {String(prev.address || "—")}
-            </span>
-            <span style={{ color: '#22c55e', fontWeight: 600 }}>
-              {String(row.address || "—")}
-            </span>
-          </div>
-        );
-      }
-      return <span>{String(info.getValue() || "—")}</span>;
-    },
-    minSize: 200,
-    size: 250,
+      {
+        accessorKey: "address",
+        header: "Address",
+        cell: (info) => {
+          const row = info.row.original;
+          const prev = getPreviousData(row);
+          const changed = row.needs_review && prev.address !== undefined && prev.address !== row.address;
+          if (changed) {
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.4' }}>
+                <span style={{ textDecoration: 'line-through', color: '#ef4444', fontSize: '0.85em' }}>
+                  {String(prev.address || "—")}
+                </span>
+                <span style={{ color: '#22c55e', fontWeight: 600 }}>
+                  {String(row.address || "—")}
+                </span>
+              </div>
+            );
+          }
+          return <span>{String(info.getValue() || "—")}</span>;
+        },
+        minSize: 200,
+        size: 250,
       },
-
       {
         accessorKey: "notes",
         header: "Notes",
@@ -1713,16 +1633,14 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         enableSorting: false,
         cell: (info) => {
           const row = info.row.original;
-          
           // 🟢 NEW: Spinner logic
           if (provisioningIds.has(row.id)) {
             return (
-              <div style={{color: '#2563eb', display:'flex', alignItems:'center', gap:'6px', fontWeight:500}}>
+              <div style={{ color: '#2563eb', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 500 }}>
                 <span className="spinner-small"></span> Creating...
               </div>
             );
           }
-
           return info.getValue() ? (
             <a
               href={info.getValue() as string}
@@ -1740,7 +1658,7 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 120,
         size: 180,
       },
-            // 🟢 NEW: Disabled Status (Hidden by default)
+      // 🟢 NEW: Disabled Status (Hidden by default)
       {
         accessorKey: "disabled",
         header: "Status",
@@ -1822,7 +1740,7 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 90,
         size: 100,
       },
-            // 🟢 NEW: Caring column (editable in bulk edit)
+      // 🟢 NEW: Caring column (editable in bulk edit)
       {
         accessorKey: "caring",
         header: "Caring",
@@ -1843,7 +1761,7 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         minSize: 90,
         size: 100,
       },
-            // 🟢 NEW: Visit Count (Hidden by default, editable in bulk edit)
+      // 🟢 NEW: Visit Count (Hidden by default, editable in bulk edit)
       {
         accessorKey: "visit_count",
         header: "Visits",
@@ -1914,7 +1832,7 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
             className="table-actions"
             onClick={(e) => e.stopPropagation()}
           >
-                    {schoolFilter === 'needs_review' && info.row.original.needs_review && (
+            {schoolFilter === 'needs_review' && info.row.original.needs_review && (
               <>
                 <button
                   type="button"
@@ -1953,30 +1871,38 @@ const columns = useMemo<ColumnDef<SchoolRow>[]>(
         ),
       },
     ],
-        [setShowColumnMenu, provisioningIds, isBulkEditMode, handleInlineUpdate, schoolFilter, selectedReviewIds, filteredRows]
+    [setShowColumnMenu, provisioningIds, isBulkEditMode, handleInlineUpdate, schoolFilter, selectedReviewIds, filteredRows]
   );
-
-const table = useReactTable({
+  const table = useReactTable({
     data: filteredRows,
     columns,
     state: {
       sorting,
-      globalFilter: search,
+      globalFilter: '', // search is handled manually in useMemo across all schools
       columnVisibility,
     },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
-    // 🟢 Register the custom filter here
-    globalFilterFn: fuzzyVietnameseFilter, 
+    // globalFilterFn no longer needed
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
-
   useEffect(() => {
     setSelectedReviewIds(new Set());
   }, [schoolFilter]);
-
+  // 🆕 When search becomes non-empty, switch to 'all' tab; restore when cleared
+  useEffect(() => {
+    if (search && search.trim()) {
+      setPreSearchTab(prev => prev ?? schoolFilter);
+      setSchoolFilter('all');
+    } else {
+      if (preSearchTab) {
+        setSchoolFilter(preSearchTab);
+        setPreSearchTab(null);
+      }
+    }
+  }, [search]);
   if (!user) {
     return (
       <div className="card">
@@ -1989,18 +1915,14 @@ const table = useReactTable({
       </div>
     );
   }
-
   const trainerId = user.id;
-
   useEffect(() => {
     let cancelled = false;
-
     async function loadSchools() {
       try {
         setLoading(true);
         setLoadError(null);
-
-                const { data, error } = await supabase
+        const { data, error } = await supabase
           .from("schools")
           .select(
             `
@@ -2032,13 +1954,11 @@ const table = useReactTable({
           .eq("trainer_id", trainerId)
           .order("school_name", { ascending: true })
           .order("campus_name", { ascending: true });
-
         if (error) {
           console.error("[DB] load schools error", error);
           if (!cancelled) setLoadError(error.message);
           return;
         }
-
         if (!cancelled && data) {
           setRows(data as SchoolRow[]);
         }
@@ -2046,13 +1966,11 @@ const table = useReactTable({
         if (!cancelled) setLoading(false);
       }
     }
-
     loadSchools();
     return () => {
       cancelled = true;
     };
   }, [trainerId, refreshKey]);
-
   const openCreate = () => {
     setFormMode("create");
     setEditingRow(null);
@@ -2060,13 +1978,11 @@ const table = useReactTable({
     setViewingRow(null);
     setShowViewModal(false);
   };
-
   const openView = (row: SchoolRow) => {
     setViewingRow(row);
     setShowViewModal(true);
     setShowForm(false);
   }
-
   const openEdit = (row: SchoolRow) => {
     setFormMode("edit");
     setEditingRow(row);
@@ -2074,7 +1990,6 @@ const table = useReactTable({
     setViewingRow(null);
     setShowViewModal(false);
   };
-
   const openEditFromView = (row: SchoolRow) => {
     setFormMode("edit");
     setEditingRow(row);
@@ -2082,37 +1997,32 @@ const table = useReactTable({
     setViewingRow(null);
     setShowViewModal(false);
   };
-
   const handleDelete = async (row: SchoolRow) => {
     const ok = window.confirm(
       `Delete campus "${row.school_name} – ${row.campus_name}"?\nThis cannot be undone.`
     );
     if (!ok) return;
-
     const { error } = await supabase
       .from("schools")
       .delete()
       .eq("id", row.id)
       .eq("trainer_id", trainerId);
-
     if (error) {
       console.error("[DB] delete school error", error);
       alert("Could not delete school. Please try again.");
       return;
     }
-
     setRows((prev) => prev.filter((s) => s.id !== row.id));
     if (viewingRow?.id === row.id) {
       setViewingRow(null);
       setShowViewModal(false);
     }
   };
-
   const submitForm = async (values: SchoolFormState, autoCreateToken?: string) => {
     if (formMode === "create") {
       const { data, error } = await supabase
         .from("schools")
-                .insert({
+        .insert({
           trainer_id: user.id,
           school_name: values.school_name.trim(),
           campus_name: values.campus_name.trim(),
@@ -2133,106 +2043,93 @@ const table = useReactTable({
         })
         .select()
         .single();
-
       if (error) {
         console.error("[DB] create school error", error);
         alert("Could not create school. Please try again.");
         return;
       }
-
       const newRow = data as SchoolRow;
       setRows((prev) => [...prev, newRow]);
       openView(newRow); // Open View Modal on creation
       setShowForm(false);
-
       // 🟢 Trigger Background Task if requested
       if (autoCreateToken) {
         runBackgroundProvisioning(newRow, autoCreateToken);
       }
       return;
     }
-
     if (!editingRow) return;
-
     const { data, error } = await supabase
       .from("schools")
-              .update({
-          school_name: values.school_name.trim(),
-          campus_name: values.campus_name.trim(),
-          official_code: values.official_code.trim() || null,
-          campus_id: values.campus_id.trim() || null,
-          admin_name: values.admin_name.trim() || null,
-          admin_email: values.admin_email.trim() || null,
-          admin_phone: values.admin_phone.trim() || null,
-          am_name: values.am_name.trim() || null,
-          am_email: values.am_email.trim() || null,
-          address: values.address.trim() || null,
-          notes: values.notes.trim() || null,
-          admin_workbook_url: values.admin_workbook_url.trim() || null,
-          caring: values.caring,
-          disabled: values.disabled,
-          exclusive: values.exclusive || 'exclusive',
-          visit_count: values.visit_count ? Number(values.visit_count) : null,
-          updated_at: new Date().toISOString(),
-        })
+      .update({
+        school_name: values.school_name.trim(),
+        campus_name: values.campus_name.trim(),
+        official_code: values.official_code.trim() || null,
+        campus_id: values.campus_id.trim() || null,
+        admin_name: values.admin_name.trim() || null,
+        admin_email: values.admin_email.trim() || null,
+        admin_phone: values.admin_phone.trim() || null,
+        am_name: values.am_name.trim() || null,
+        am_email: values.am_email.trim() || null,
+        address: values.address.trim() || null,
+        notes: values.notes.trim() || null,
+        admin_workbook_url: values.admin_workbook_url.trim() || null,
+        caring: values.caring,
+        disabled: values.disabled,
+        exclusive: values.exclusive || 'exclusive',
+        visit_count: values.visit_count ? Number(values.visit_count) : null,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", editingRow.id)
       .eq("trainer_id", trainerId)
       .select()
       .single();
-
     if (error) {
       console.error("[DB] update school error", error);
       alert("Could not save changes. Please try again.");
       return;
     }
-
     const updated = data as SchoolRow;
     setRows((prev) =>
       prev.map((r) => (r.id === editingRow.id ? updated : r))
     );
-    
     // 🟢 UPDATED: Trigger Auto-create in Edit Mode
     if (autoCreateToken) {
-       runBackgroundProvisioning(updated, autoCreateToken);
+      runBackgroundProvisioning(updated, autoCreateToken);
     }
-
     openView(updated);
     setShowForm(false);
   };
-
   const formInitial: SchoolFormState | undefined =
     formMode === "edit" && editingRow
       ? {
-          school_name: editingRow.school_name,
-          campus_name: editingRow.campus_name,
-          official_code: editingRow.official_code ?? "",
-          campus_id: editingRow.campus_id ?? "",
-          admin_name: editingRow.admin_name ?? "",
-          admin_email: editingRow.admin_email ?? "",
-          admin_phone: editingRow.admin_phone ?? "",
-          am_name: editingRow.am_name ?? "",
-          am_email: editingRow.am_email ?? "",
-          address: editingRow.address ?? "",
-          notes: editingRow.notes ?? "",
-          admin_workbook_url: editingRow.admin_workbook_url ?? "",
-          caring: editingRow.caring ?? false,
-          disabled: editingRow.disabled ?? false,
-          exclusive: editingRow.exclusive ?? "exclusive",
-          visit_count: editingRow.visit_count !== null && editingRow.visit_count !== undefined ? String(editingRow.visit_count) : "",
-        }
+        school_name: editingRow.school_name,
+        campus_name: editingRow.campus_name,
+        official_code: editingRow.official_code ?? "",
+        campus_id: editingRow.campus_id ?? "",
+        admin_name: editingRow.admin_name ?? "",
+        admin_email: editingRow.admin_email ?? "",
+        admin_phone: editingRow.admin_phone ?? "",
+        am_name: editingRow.am_name ?? "",
+        am_email: editingRow.am_email ?? "",
+        address: editingRow.address ?? "",
+        notes: editingRow.notes ?? "",
+        admin_workbook_url: editingRow.admin_workbook_url ?? "",
+        caring: editingRow.caring ?? false,
+        disabled: editingRow.disabled ?? false,
+        exclusive: editingRow.exclusive ?? "exclusive",
+        visit_count: editingRow.visit_count !== null && editingRow.visit_count !== undefined ? String(editingRow.visit_count) : "",
+      }
       : undefined;
-
   const performSync = async (token: string) => {
     if (!user?.id) return;
     try {
       setLoading(true);
-
       const syncResp = await fetch(`${MERGE_SERVER_BASE}/api/sync-school-status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, userId: user.id }),
       });
-
       if (syncResp.ok) {
         const result = await syncResp.json();
         if (result.logs && Array.isArray(result.logs)) {
@@ -2252,10 +2149,8 @@ const table = useReactTable({
       setLoading(false);
     }
   };
-
   const handleSchoolSync = async () => {
     if (!user?.id) return;
-
     // Check if we already have a valid user GrapeSEED token
     if (isGrapeSeedTokenValid()) {
       const token = localStorage.getItem("grapeseed_token")!;
@@ -2266,7 +2161,6 @@ const table = useReactTable({
       setShowGrapeLogin(true);
     }
   };
-
   const handleGrapeLoginSuccess = () => {
     setShowGrapeLogin(false);
     // If a sync was pending, re‑run it now that we have a fresh token
@@ -2275,57 +2169,47 @@ const table = useReactTable({
       pendingSchoolSync.current = null;
     }
   };
-
-
-const runPulseAudit = async () => {
-  if (isPulsing) return;
-
-  setIsPulsing(true);
-  console.log("🚀 Pulse Engine: Starting deep audit...");
-
-  try {
-    // 1. Call your new "Shadow Logic" backend route
-    const resp = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: user?.id }),
-    });
-
-    if (!resp.ok) {
-      const errData = await resp.json();
-      throw new Error(errData.error || "Pulse discovery failed.");
+  const runPulseAudit = async () => {
+    if (isPulsing) return;
+    setIsPulsing(true);
+    console.log("🚀 Pulse Engine: Starting deep audit...");
+    try {
+      // 1. Call your new "Shadow Logic" backend route
+      const resp = await fetch(`${MERGE_SERVER_BASE}/api/pulse-audit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user?.id }),
+      });
+      if (!resp.ok) {
+        const errData = await resp.json();
+        throw new Error(errData.error || "Pulse discovery failed.");
+      }
+      const results = await resp.json();
+      // 2. Store findings in our state (to be used by Item 3: Action Dashboard)
+      setPulseResults({
+        newCampuses: results.newCampuses || [],
+        disabledCampuses: results.disabledCampuses || [],
+        classlessClasses: results.classlessClasses || [],
+        nameMismatches: results.nameMismatches || []
+      });
+      // 3. Simple Feedback (We will improve this in Item 3)
+      const totalIssues =
+        (results.newCampuses?.length || 0) +
+        (results.disabledCampuses?.length || 0) +
+        (results.classlessClasses?.length || 0) +
+        (results.nameMismatches?.length || 0);
+      if (totalIssues > 0) {
+        alert(`✅ Pulse Complete: ${totalIssues} sync issues found. Check the Action Dashboard.`);
+      } else {
+        alert("✅ Pulse Complete: Everything is perfectly in sync!");
+      }
+    } catch (err: any) {
+      console.error("Pulse Audit Error:", err);
+      alert(`❌ Pulse Error: ${err.message}`);
+    } finally {
+      setIsPulsing(false);
     }
-
-    const results = await resp.json();
-
-    // 2. Store findings in our state (to be used by Item 3: Action Dashboard)
-    setPulseResults({
-      newCampuses: results.newCampuses || [],
-      disabledCampuses: results.disabledCampuses || [],
-      classlessClasses: results.classlessClasses || [],
-      nameMismatches: results.nameMismatches || []
-    });
-
-    // 3. Simple Feedback (We will improve this in Item 3)
-    const totalIssues = 
-      (results.newCampuses?.length || 0) + 
-      (results.disabledCampuses?.length || 0) + 
-      (results.classlessClasses?.length || 0) +
-      (results.nameMismatches?.length || 0);
-
-    if (totalIssues > 0) {
-      alert(`✅ Pulse Complete: ${totalIssues} sync issues found. Check the Action Dashboard.`);
-    } else {
-      alert("✅ Pulse Complete: Everything is perfectly in sync!");
-    }
-
-  } catch (err: any) {
-    console.error("Pulse Audit Error:", err);
-    alert(`❌ Pulse Error: ${err.message}`);
-  } finally {
-    setIsPulsing(false);
-  }
-};
+  };
   // 🟢 NEW: Toggle Bulk Edit and adjust columns automatically
   const toggleBulkEdit = () => {
     setIsBulkEditMode(prev => {
@@ -2367,144 +2251,136 @@ const runPulseAudit = async () => {
       return nextMode;
     });
   };
-
-
   return (
     <>
       <div className="card">
         <div className="card-header tm-header-layout">
-        {/* Tier 1: Title & Info */}
-                <div className="tm-title-section">
-          <div className="card-title">Schools & campuses</div>
-          <div className="card-subtitle">
-             {schoolFilter === 'active' && (
-               <span>
-                 <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.active}</strong> active campuses
-                 <span style={{ marginLeft: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                   (Shared: {activeBreakdown.shared} · Exclusive: {activeBreakdown.exclusive})
-                 </span>
-               </span>
-             )}
-             {schoolFilter === 'inactive' && (
-               <span>
-                 <strong style={{ color: 'var(--text-main)' }}>{inactiveUniqueCount}</strong> unique inactive schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.inactive}</strong> campuses
-               </span>
-             )}
-             {schoolFilter === 'no_teachers' && (
-               <span>
-                 <strong style={{ color: 'var(--text-main)' }}>{noTeachersUniqueCount}</strong> unique schools with no assigned teachers across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.no_teachers}</strong> campuses
-               </span>
-             )}
-             {schoolFilter === 'temporary' && (
-               <span>
-                 <strong style={{ color: 'var(--text-main)' }}>{temporaryUniqueCount}</strong> unique temporary schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.temporary}</strong> campuses
-               </span>
-             )}
-             {schoolFilter === 'all' && (
-              <span>
-                <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.all}</strong> campuses
-              </span>
-            )}
+          {/* Tier 1: Title & Info */}
+          <div className="tm-title-section">
+            <div className="card-title">Schools & campuses</div>
+            <div className="card-subtitle">
+              {schoolFilter === 'active' && (
+                <span>
+                  <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.active}</strong> active campuses
+                  <span style={{ marginLeft: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    (Shared: {activeBreakdown.shared} · Exclusive: {activeBreakdown.exclusive})
+                  </span>
+                </span>
+              )}
+              {schoolFilter === 'inactive' && (
+                <span>
+                  <strong style={{ color: 'var(--text-main)' }}>{inactiveUniqueCount}</strong> unique inactive schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.inactive}</strong> campuses
+                </span>
+              )}
+              {schoolFilter === 'no_teachers' && (
+                <span>
+                  <strong style={{ color: 'var(--text-main)' }}>{noTeachersUniqueCount}</strong> unique schools with no assigned teachers across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.no_teachers}</strong> campuses
+                </span>
+              )}
+              {schoolFilter === 'temporary' && (
+                <span>
+                  <strong style={{ color: 'var(--text-main)' }}>{temporaryUniqueCount}</strong> unique temporary schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.temporary}</strong> campuses
+                </span>
+              )}
+              {schoolFilter === 'all' && (
+                <span>
+                  <strong style={{ color: 'var(--text-main)' }}>{uniqueSchoolCount}</strong> unique schools across <strong style={{ color: 'var(--text-main)' }}>{filterCounts.all}</strong> campuses
+                </span>
+              )}
+            </div>
+          </div>
+          {/* Tier 2: The Level Toolbar */}
+          <div className="tm-toolbar-row">
+            {/* Left: Pill Search */}
+            <div className="tm-search-wrapper">
+              <Search size={14} strokeWidth={2} className="tm-search-icon-svg" />
+              <input
+                className="tm-search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search schools..."
+              />
+            </div>
+            {/* Right: Icon Group + Primary Action */}
+            <div className="tm-actions-group">
+              {/* Bulk Edit Toggle */}
+              <button
+                type="button"
+                className={`btn ${isBulkEditMode ? 'btn-primary' : 'btn-ghost'}`}
+                style={{
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  border: isBulkEditMode ? undefined : '1px solid #475569',
+                  borderRadius: '9999px',
+                  padding: '4px 16px'
+                }}
+                onClick={toggleBulkEdit}
+              >
+                {isBulkEditMode ? "Done Editing" : <><Pencil size={14} /> Bulk Edit</>}
+              </button>
+              {/* Sync Schools with GrapeSEED */}
+              <button
+                type="button"
+                className="tm-pure-icon"
+                onClick={handleSchoolSync}
+                title="Sync Schools with GrapeSEED"
+                style={{ marginLeft: '8px' }}
+              >
+                <RefreshCw size={18} strokeWidth={2} />
+              </button>
+              <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
+              <button
+                type="button"
+                className="tm-btn-primary"
+                onClick={openCreate}
+              >
+                <Plus size={18} strokeWidth={2} style={{ marginRight: '6px' }} />
+                New school / campus
+              </button>
+            </div>
+          </div>
+          {/* 🟢 NEW: Status Filter Tabs */}
+          <div className="filter-tabs-row" style={{ marginTop: '16px' }}>
+            <button
+              className={`filter-tab ${schoolFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setSchoolFilter('all')}
+            >
+              All Schools <span className="count-badge">{totalUniqueSchoolCount}</span>
+            </button>
+            <button
+              className={`filter-tab ${schoolFilter === 'active' ? 'active-green' : ''}`}
+              onClick={() => setSchoolFilter('active')}
+            >
+              Active <span className="count-badge-color">{activeUniqueCount}</span>
+            </button>
+            <button
+              className={`filter-tab ${schoolFilter === 'inactive' ? 'active-red' : ''}`}
+              onClick={() => setSchoolFilter('inactive')}
+            >
+              Inactive <span className="count-badge-color">{inactiveUniqueCount}</span>
+            </button>
+            <button
+              className={`filter-tab ${schoolFilter === 'no_teachers' ? 'active-yellow' : ''}`}
+              onClick={() => setSchoolFilter('no_teachers')}
+            >
+              No Teachers <span className="count-badge-color">{noTeachersUniqueCount}</span>
+            </button>
+            <button
+              className={`filter-tab ${schoolFilter === 'temporary' ? 'active-blue' : ''}`}
+              onClick={() => setSchoolFilter('temporary')}
+            >
+              Temporary <span className="count-badge-color">{temporaryUniqueCount}</span>
+            </button>
+            <button
+              className={`filter-tab ${schoolFilter === 'needs_review' ? 'active-yellow' : ''}`}
+              onClick={() => setSchoolFilter('needs_review')}
+            >
+              Needs Review <span className="count-badge-color">{needsReviewCount}</span>
+            </button>
           </div>
         </div>
-
-        {/* Tier 2: The Level Toolbar */}
-        <div className="tm-toolbar-row">
-          {/* Left: Pill Search */}
-          <div className="tm-search-wrapper">
-            <Search size={14} strokeWidth={2} className="tm-search-icon-svg" />
-            <input
-              className="tm-search-input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search schools..."
-            />
-          </div>
-
-          {/* Right: Icon Group + Primary Action */}
-                    <div className="tm-actions-group">
-            {/* Bulk Edit Toggle */}
-            <button
-              type="button"
-              className={`btn ${isBulkEditMode ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ 
-                fontWeight: 600, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px',
-                border: isBulkEditMode ? undefined : '1px solid #475569', 
-                borderRadius: '9999px', 
-                padding: '4px 16px' 
-              }}
-              onClick={toggleBulkEdit}
-            >
-              {isBulkEditMode ? "Done Editing" : <><Pencil size={14} /> Bulk Edit</>}
-            </button>
-
-            {/* Sync Schools with GrapeSEED */}
-            <button
-              type="button"
-              className="tm-pure-icon"
-              onClick={handleSchoolSync}
-              title="Sync Schools with GrapeSEED"
-              style={{ marginLeft: '8px' }}
-            >
-              <RefreshCw size={18} strokeWidth={2} />
-            </button>
-            <ImportSchoolsBtn onUploadComplete={() => setRefreshKey(prev => prev + 1)} />
-
-            <button
-              type="button"
-              className="tm-btn-primary"
-              onClick={openCreate}
-            >
-              <Plus size={18} strokeWidth={2} style={{ marginRight: '6px' }} />
-              New school / campus
-            </button>
-          </div>
-        </div>
-              {/* 🟢 NEW: Status Filter Tabs */}
-      <div className="filter-tabs-row" style={{ marginTop: '16px' }}>
-        <button
-          className={`filter-tab ${schoolFilter === 'all' ? 'active' : ''}`}
-          onClick={() => setSchoolFilter('all')}
-        >
-        All Schools <span className="count-badge">{totalUniqueSchoolCount}</span>
-        </button>
-        <button
-          className={`filter-tab ${schoolFilter === 'active' ? 'active-green' : ''}`}
-          onClick={() => setSchoolFilter('active')}
-        >
-          Active <span className="count-badge-color">{activeUniqueCount}</span>
-        </button>
-        <button
-          className={`filter-tab ${schoolFilter === 'inactive' ? 'active-red' : ''}`}
-          onClick={() => setSchoolFilter('inactive')}
-        >
-          Inactive <span className="count-badge-color">{inactiveUniqueCount}</span>
-        </button>
-        <button
-          className={`filter-tab ${schoolFilter === 'no_teachers' ? 'active-yellow' : ''}`}
-          onClick={() => setSchoolFilter('no_teachers')}
-        >
-          No Teachers <span className="count-badge-color">{noTeachersUniqueCount}</span>
-        </button>
-        <button
-          className={`filter-tab ${schoolFilter === 'temporary' ? 'active-blue' : ''}`}
-          onClick={() => setSchoolFilter('temporary')}
-        >
-          Temporary <span className="count-badge-color">{temporaryUniqueCount}</span>
-        </button>
-
-        <button
-          className={`filter-tab ${schoolFilter === 'needs_review' ? 'active-yellow' : ''}`}
-          onClick={() => setSchoolFilter('needs_review')}
-        >
-          Needs Review <span className="count-badge-color">{needsReviewCount}</span>
-        </button>
-      </div>
-      </div>
-
         <div className="card-body" style={{ position: "relative" }}>
           {loading && <div>Loading schools…</div>}
           {loadError && (
@@ -2512,7 +2388,6 @@ const runPulseAudit = async () => {
               Could not load schools ({loadError})
             </div>
           )}
-
           {!loading && table.getRowModel().rows.length === 0 && !loadError && (
             <div className="empty-state">
               <p>No schools yet.</p>
@@ -2525,33 +2400,43 @@ const runPulseAudit = async () => {
               </button>
             </div>
           )}
-
           {!loading && table.getRowModel().rows.length > 0 && (
             <>
-                            {/* Bulk Acknowledge / Reject for Needs Review tab */}
-                            {schoolFilter === 'needs_review' && needsReviewCount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', gap: '8px' }}>
+              {/* Action bar: bulk acknowledge/reject (Review tab) + delete selected (any tab) */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', gap: '8px' }}>
+                {schoolFilter === 'needs_review' && needsReviewCount > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ background: '#eab308', color: '#000', border: 'none', fontWeight: 600 }}
+                      onClick={() => handleAcknowledgeAllSchools(Array.from(selectedReviewIds))}
+                      disabled={selectedReviewIds.size === 0}
+                    >
+                      ✨ Acknowledge Selected ({selectedReviewIds.size})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 600 }}
+                      onClick={() => handleRejectAllSchools(Array.from(selectedReviewIds))}
+                      disabled={selectedReviewIds.size === 0}
+                    >
+                      ↩️ Reject Selected ({selectedReviewIds.size})
+                    </button>
+                  </>
+                )}
+                {selectedReviewIds.size > 0 && (
                   <button
                     type="button"
                     className="btn"
-                    style={{ background: '#eab308', color: '#000', border: 'none', fontWeight: 600 }}
-                    onClick={() => handleAcknowledgeAllSchools(Array.from(selectedReviewIds))}
-                    disabled={selectedReviewIds.size === 0}
+                    style={{ background: '#dc2626', color: '#fff', border: 'none', fontWeight: 600 }}
+                    onClick={handleDeleteSelected}
                   >
-                    ✨ Acknowledge Selected ({selectedReviewIds.size})
+                    ❌ Delete Selected ({selectedReviewIds.size})
                   </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 600 }}
-                    onClick={() => handleRejectAllSchools(Array.from(selectedReviewIds))}
-                    disabled={selectedReviewIds.size === 0}
-                  >
-                    ↩️ Reject Selected ({selectedReviewIds.size})
-                  </button>
-                </div>
-              )}
-
+                )}
+              </div>
               <div
                 style={{
                   position: "absolute",
@@ -2601,75 +2486,74 @@ const runPulseAudit = async () => {
                 )}
               </div>
               <div className="table-wrapper">
-              <table className="simple-table">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id}>
-                      {headerGroup.headers.map((header) => (
-                        <th
-                          key={header.id}
-                          colSpan={header.colSpan}
-                          style={{ width: header.getSize() }}
-                          className={header.column.getCanSort() ? "sortable-header" : ""}
-                        >
-                          {header.isPlaceholder ? null : (
-                            <div
-                              {...{
-                                className: header.column.getCanSort()
-                                  ? "cursor-pointer select-none"
-                                  : "",
-                                onClick: header.column.getToggleSortingHandler(),
-                              }}
-                            >
-                              {flexRender(
-                                header.column.columnDef.header,
-                                header.getContext()
-                              )}
-                              {{
-                                asc: " ↑",
-                                desc: " ↓",
-                              }[header.column.getIsSorted() as string] ?? null}
-                            </div>
-                          )}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.map((row) => {
-                    const isActive = row.original.id === viewingRow?.id;
-                    return (
-                      <tr
-                        key={row.id}
-                        className={
-                          "simple-table-row" +
-                          (isActive ? " simple-table-row--active" : "")
-                        }
-                        onClick={() => openView(row.original)}
-                      >
-                        {row.getVisibleCells().map((cell) => (
-                          <td
-                            key={cell.id}
-                            style={{ width: cell.column.getSize() }}
+                <table className="simple-table">
+                  <thead>
+                    {table.getHeaderGroups().map((headerGroup) => (
+                      <tr key={headerGroup.id}>
+                        {headerGroup.headers.map((header) => (
+                          <th
+                            key={header.id}
+                            colSpan={header.colSpan}
+                            style={{ width: header.getSize() }}
+                            className={header.column.getCanSort() ? "sortable-header" : ""}
                           >
-                            {flexRender(
-                              cell.column.columnDef.cell,
-                              cell.getContext()
+                            {header.isPlaceholder ? null : (
+                              <div
+                                {...{
+                                  className: header.column.getCanSort()
+                                    ? "cursor-pointer select-none"
+                                    : "",
+                                  onClick: header.column.getToggleSortingHandler(),
+                                }}
+                              >
+                                {flexRender(
+                                  header.column.columnDef.header,
+                                  header.getContext()
+                                )}
+                                {{
+                                  asc: " ↑",
+                                  desc: " ↓",
+                                }[header.column.getIsSorted() as string] ?? null}
+                              </div>
                             )}
-                          </td>
+                          </th>
                         ))}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </thead>
+                  <tbody>
+                    {table.getRowModel().rows.map((row) => {
+                      const isActive = row.original.id === viewingRow?.id;
+                      return (
+                        <tr
+                          key={row.id}
+                          className={
+                            "simple-table-row" +
+                            (isActive ? " simple-table-row--active" : "")
+                          }
+                          onClick={() => openView(row.original)}
+                        >
+                          {row.getVisibleCells().map((cell) => (
+                            <td
+                              key={cell.id}
+                              style={{ width: cell.column.getSize() }}
+                            >
+                              {flexRender(
+                                cell.column.columnDef.cell,
+                                cell.getContext()
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </div>
       </div>
-
       <SchoolFormModal
         open={showForm}
         mode={formMode}
@@ -2679,7 +2563,6 @@ const runPulseAudit = async () => {
         onRefresh={() => setRefreshKey(prev => prev + 1)}
         onSubmit={submitForm}
       />
-      
       <SchoolViewModal
         open={showViewModal}
         row={viewingRow}
@@ -2687,7 +2570,6 @@ const runPulseAudit = async () => {
         onEdit={openEditFromView}
         onDelete={handleDelete}
       />
-
       {/* 🟢 NEW: Spinner Style */}
       <style>{`
         .spinner-small {
@@ -2695,7 +2577,7 @@ const runPulseAudit = async () => {
         }
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
-           <GrapeSeedLoginModal
+      <GrapeSeedLoginModal
         isOpen={showGrapeLogin}
         onClose={() => {
           setShowGrapeLogin(false);
@@ -2703,7 +2585,6 @@ const runPulseAudit = async () => {
         }}
         onSuccess={handleGrapeLoginSuccess}
       />
- 
     </>
   );
 };
