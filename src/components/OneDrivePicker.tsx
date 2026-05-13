@@ -1,9 +1,7 @@
 // src/components/OneDrivePicker.tsx
 import React, { useEffect, useState } from "react";
 import { getGraphAccessToken } from "../msal/getGraphToken";
-
 type PickerMode = "file" | "folder";
-
 interface DriveItem {
   id: string;
   name: string;
@@ -11,66 +9,61 @@ interface DriveItem {
   file?: { mimeType: string };
   parentReference?: { driveId: string };
 }
-
 interface OneDrivePickerProps {
   mode: PickerMode;
   title?: string;
   onSelect: (item: { name: string; driveId: string; itemId: string }) => void;
   onCancel: () => void;
+  // new optional props
+  initialDriveId?: string;
+  initialFolderId?: string;
+  initialFolderName?: string;
 }
-
 export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
   mode,
   title,
   onSelect,
   onCancel,
+  initialDriveId,
+  initialFolderId,
+  initialFolderName,
 }) => {
   const [token, setToken] = useState<string | null>(null);
   const [items, setItems] = useState<DriveItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Navigation State
-  const [driveId, setDriveId] = useState<string | null>(null);
-  const [folderId, setFolderId] = useState<string>("root");
-  const [breadcrumbs, setBreadcrumbs] = useState<{ id: string; name: string }[]>([
-    { id: "root", name: "OneDrive" },
-  ]);
-
-  // 1. Init Token (With Race Condition Fix)
+  // Navigation State – start from the initial folder if provided
+  const [driveId, setDriveId] = useState<string | null>(initialDriveId || null);
+  const [folderId, setFolderId] = useState<string>(initialFolderId || "root");
+  const [breadcrumbs, setBreadcrumbs] = useState<{ id: string; name: string }[]>(
+    initialFolderId
+      ? [{ id: initialFolderId, name: initialFolderName || "Folder" }]
+      : [{ id: "root", name: "OneDrive" }]
+  );
+  // 1. Init Token
   useEffect(() => {
     let isMounted = true;
-
     getGraphAccessToken()
       .then((accessToken) => {
         if (isMounted) {
-            setToken(accessToken);
-            setError(null);
+          setToken(accessToken);
+          setError(null);
         }
       })
       .catch((err) => {
         if (!isMounted) return;
-
-        // 🟢 FIX: Ignore "interaction_in_progress"
-        // This error just means we are already logging in from the first mount.
-        // We can safely ignore it because the first successful call will load the files.
-        if (err.message && err.message.includes("interaction_in_progress")) {
-            console.warn("Ignored MSAL interaction race condition.");
-            return;
+        if (err.message?.includes("interaction_in_progress")) {
+          console.warn("Ignored MSAL interaction race condition.");
+          return;
         }
-
         setError("Could not sign in to Microsoft: " + err.message);
       });
-
     return () => { isMounted = false; };
   }, []);
-
-  // 2. Fetch Items when Folder Changes
+  // 2. Fetch Items when Folder changes
   useEffect(() => {
     if (!token) return;
-
-    let url = `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`;
-
+    const url = `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`;
     setLoading(true);
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => {
@@ -79,6 +72,7 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
       })
       .then((data) => {
         setItems(data.value || []);
+        // Resolve driveId from first item if not already known
         if (!driveId && data.value && data.value.length > 0) {
           setDriveId(data.value[0].parentReference.driveId);
         }
@@ -88,19 +82,16 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
         setError(err.message);
         setLoading(false);
       });
-  }, [token, folderId]);
-
+  }, [token, folderId, driveId]);
   const handleNavigate = (newFolderId: string, newName: string) => {
     setFolderId(newFolderId);
     setBreadcrumbs((prev) => [...prev, { id: newFolderId, name: newName }]);
   };
-
   const handleBreadcrumbClick = (index: number) => {
     const target = breadcrumbs[index];
     setFolderId(target.id);
     setBreadcrumbs((prev) => prev.slice(0, index + 1));
   };
-
   const handleSelection = (item: DriveItem) => {
     const dId = item.parentReference?.driveId || driveId;
     if (!dId) {
@@ -109,38 +100,33 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
     }
     onSelect({ name: item.name, driveId: dId, itemId: item.id });
   };
-
   const handleSelectCurrentFolder = () => {
     const current = breadcrumbs[breadcrumbs.length - 1];
-    
-    if (current.id === 'root') {
-         if(!driveId) return;
-         onSelect({ name: "Root", driveId, itemId: "root" });
-         return;
+    if (!driveId) {
+      alert("Wait for items to load first.");
+      return;
     }
-
-    if (!driveId) { alert("Wait for items to load first."); return; }
-    
-    onSelect({ name: current.name, driveId: driveId, itemId: folderId });
+    onSelect({ name: current.name, driveId, itemId: folderId });
   };
-
   return (
     <div className="modal-backdrop">
       <div className="modal-panel" style={{ height: "80vh", display: "flex", flexDirection: "column" }}>
-        
         {/* HEADER */}
         <div className="modal-header">
           <div className="modal-title">{title || "Select from OneDrive"}</div>
           <button onClick={onCancel} className="btn">×</button>
         </div>
-
         {/* BREADCRUMBS */}
         <div style={{ padding: "10px 20px", borderBottom: "1px solid #eee", background: "#f9fafb", fontSize: "14px" }}>
           {breadcrumbs.map((b, i) => (
             <span key={b.id}>
               {i > 0 && " / "}
-              <span 
-                style={{ cursor: "pointer", color: i === breadcrumbs.length - 1 ? "black" : "#2563eb", fontWeight: i === breadcrumbs.length - 1 ? "600" : "400" }}
+              <span
+                style={{
+                  cursor: "pointer",
+                  color: i === breadcrumbs.length - 1 ? "black" : "#2563eb",
+                  fontWeight: i === breadcrumbs.length - 1 ? "600" : "400"
+                }}
                 onClick={() => handleBreadcrumbClick(i)}
               >
                 {b.name}
@@ -148,23 +134,17 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
             </span>
           ))}
         </div>
-
         {/* LIST */}
         <div style={{ flex: 1, overflowY: "auto", padding: "10px 20px" }}>
           {loading && <div style={{ padding: 20, textAlign: "center", color: "#666" }}>Loading files...</div>}
-          
-          {/* Only show error if we DON'T have items. If we have items, the error is likely a false positive. */}
           {error && items.length === 0 && <div style={{ color: "red", padding: 20 }}>{error}</div>}
-
           {!loading && !error && items.length === 0 && (
             <div style={{ padding: 20, textAlign: "center", fontStyle: "italic", color: "#999" }}>Empty folder</div>
           )}
-
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {items.map((item) => {
               const isFolder = !!item.folder;
               const isDimmed = mode === "folder" && !isFolder;
-
               return (
                 <li
                   key={item.id}
@@ -193,7 +173,6 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
             })}
           </ul>
         </div>
-
         {/* FOOTER */}
         <div className="modal-footer" style={{ justifyContent: "space-between" }}>
           <div style={{ fontSize: "12px", color: "#666" }}>
@@ -202,7 +181,7 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
           <div>
             <button onClick={onCancel} className="btn" style={{ marginRight: 10 }}>Cancel</button>
             {mode === "folder" && (
-              <button 
+              <button
                 className="btn btn-primary"
                 onClick={handleSelectCurrentFolder}
                 disabled={loading}

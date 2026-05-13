@@ -14,6 +14,7 @@ import {
 import type { ColumnDef, SortingState, ColumnResizeMode, VisibilityState, FilterFn } from "@tanstack/react-table";
 import { Search, RefreshCw, Plus, Copy, ExternalLink, Check, Pencil, Trash2 } from "lucide-react";
 import { flattenText } from "./utils/textUtils";
+import { OneDrivePicker } from "./components/OneDrivePicker";
 const MERGE_SERVER_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 export interface TeacherRow {
   id: string;
@@ -366,6 +367,52 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
       loadSchools(); // 🟢 Load schools when modal opens
     }
   }, [open, initial]);
+  // --- OneDrive integration ---
+  const [showOneDrivePicker, setShowOneDrivePicker] = useState(false);
+  const [oneDriveFolder, setOneDriveFolder] = useState<{ driveId: string; folderId: string; folderName: string } | null>(null);
+  // Load teacher folder settings
+  useEffect(() => {
+    if (!open || !user) return;
+    (async () => {
+      const { data } = await supabase
+        .from("trainer_settings")
+        .select("teacher_folder_drive_id, teacher_folder_item_id")
+        .eq("trainer_id", user.id)
+        .single();
+      if (data && data.teacher_folder_drive_id && data.teacher_folder_item_id) {
+        setOneDriveFolder({
+          driveId: data.teacher_folder_drive_id,
+          folderId: data.teacher_folder_item_id,
+          folderName: "Teacher Workbooks",
+        });
+      }
+    })();
+  }, [open, user]);
+  // Called when a file is selected in OneDrive picker
+  const handleOneDriveFileSelected = async (item: { name: string; driveId: string; itemId: string }) => {
+    setShowOneDrivePicker(false);
+    try {
+      const token = await getGraphAccessToken();
+      const resp = await fetch(
+        `https://graph.microsoft.com/v1.0/drives/${item.driveId}/items/${item.itemId}/createLink`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ type: "edit", scope: "organization" }),
+        }
+      );
+      if (!resp.ok) throw new Error("Failed to create sharing link");
+      const data = await resp.json();
+      // data.link.webUrl is the edit link
+      setForm(prev => ({ ...prev, worksheet_url: data.link.webUrl }));
+      setLookupStatus("idle");
+    } catch (err: any) {
+      alert("Could not create sharing link: " + err.message);
+    }
+  };
   // 🟢 Helper to fetch schools
   async function loadSchools() {
     if (!user) return;
@@ -615,7 +662,17 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
                 {lookupStatus === "no_match" && (
                   <div style={{ fontSize: '12px', color: '#fca5a5', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                     <span>No workbook found for this email.</span>
-                    <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setLookupStatus("idle")}>×</span>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'underline' }}
+                        onClick={() => setShowOneDrivePicker(true)}
+                      >
+                        Browse OneDrive
+                      </button>
+                      <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setLookupStatus("idle")}>×</span>
+                    </div>
                   </div>
                 )}
                 {/* 🟢 FIXED: Dark Themed Result Picker */}
@@ -670,6 +727,17 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
                   : "Save changes"}
             </button>
           </div>
+          {showOneDrivePicker && (
+            <OneDrivePicker
+              mode="file"
+              title="Select Teacher Workbook"
+              initialDriveId={oneDriveFolder?.driveId}
+              initialFolderId={oneDriveFolder?.folderId}
+              initialFolderName={oneDriveFolder?.folderName}
+              onSelect={handleOneDriveFileSelected}
+              onCancel={() => setShowOneDrivePicker(false)}
+            />
+          )}
         </div>
       </div>
     </div>
