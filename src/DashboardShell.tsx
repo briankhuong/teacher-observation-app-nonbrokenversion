@@ -1351,15 +1351,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       // 6. Refresh the whole dashboard to ensure UI matches the fresh IndexedDB data
       await refreshDashboard();
       // Force correct rawDate for this observation from meta.date
-      const obsRow = observations.find(o => o.id === id);
-      if (obsRow && obsRow.isoDate) {
-        const correctTs = new Date(obsRow.isoDate).getTime();
-        if (!isNaN(correctTs)) {
-          setObservations(prev => prev.map(o =>
-            o.id === id ? { ...o, rawDate: correctTs, dateLabel: new Date(correctTs).toLocaleDateString() } : o
-          ));
-        }
-      }
       console.log("✅ Sync Complete and dashboard refreshed!");
     } catch (err: any) {
       console.error("Sync failed:", err);
@@ -1683,6 +1674,13 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         if (i.good || i.growth || i.commentText) progress++;
       });
       const statusColor = (growth > 0 && good === 0) ? "growth" : (good > 0 && growth === 0) ? "good" : "mixed";
+      // Date – use the real observation date, not the sync timestamp
+      let rawDate = finalData.updatedAt || Date.now();
+      let displayDate = new Date(rawDate).toLocaleDateString();
+      if (finalData.meta?.date) {
+        const ts = safeParseTimestamp(finalData.meta.date);
+        if (ts) { rawDate = ts; displayDate = new Date(ts).toLocaleDateString(); }
+      }
       rows.push({
         id: finalData.id,
         teacherName: finalData.meta.teacherName || "Unknown",
@@ -1691,9 +1689,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         unit: finalData.meta.unit || "",
         lesson: finalData.meta.lesson || "",
         supportType: finalData.meta.supportType || "Visit",
-        dateLabel: new Date(finalData.updatedAt).toLocaleDateString(),
-        isoDate: finalData.meta.date,
-        rawDate: finalData.updatedAt,
+        dateLabel: displayDate,
+        isoDate: finalData.meta?.date,
+        rawDate,
         status: finalData.status,
         progress,
         totalIndicators: inds.length,
