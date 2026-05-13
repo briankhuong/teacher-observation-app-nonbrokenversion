@@ -32,6 +32,7 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
   const [items, setItems] = useState<DriveItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
   // Navigation State – start from the initial folder if provided
   const [driveId, setDriveId] = useState<string | null>(initialDriveId || null);
   const [folderId, setFolderId] = useState<string>(initialFolderId || "root");
@@ -134,6 +135,22 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
             </span>
           ))}
         </div>
+        {/* SEARCH */}
+        <div style={{ padding: "10px 20px 0 20px" }}>
+          <input
+            type="text"
+            placeholder="Search files & folders..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              borderRadius: "6px",
+              border: "1px solid #e5e7eb",
+              fontSize: "14px",
+            }}
+          />
+        </div>
         {/* LIST */}
         <div style={{ flex: 1, overflowY: "auto", padding: "10px 20px" }}>
           {loading && <div style={{ padding: 20, textAlign: "center", color: "#666" }}>Loading files...</div>}
@@ -142,36 +159,48 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
             <div style={{ padding: 20, textAlign: "center", fontStyle: "italic", color: "#999" }}>Empty folder</div>
           )}
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {items.map((item) => {
-              const isFolder = !!item.folder;
-              const isDimmed = mode === "folder" && !isFolder;
-              return (
-                <li
-                  key={item.id}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "10px", padding: "12px 8px",
-                    borderBottom: "1px solid #f0f0f0",
-                    cursor: isDimmed ? "default" : "pointer",
-                    opacity: isDimmed ? 0.5 : 1
-                  }}
-                  onClick={() => {
-                    if (isFolder) {
-                      handleNavigate(item.id, item.name);
-                    } else if (mode === "file") {
-                      handleSelection(item);
-                    }
-                  }}
-                >
-                  <span style={{ fontSize: "20px" }}>{isFolder ? "📁" : "📄"}</span>
-                  <span style={{ flex: 1, fontWeight: isFolder ? 600 : 400 }}>{item.name}</span>
-                  {mode === "file" && !isFolder && (
-                    <button className="btn btn-sm btn-ghost" style={{ fontSize: '12px' }}>Select</button>
-                  )}
-                  {isFolder && <span style={{ color: "#ccc" }}>›</span>}
-                </li>
-              );
-            })}
+            {items
+              .filter(item => {
+                if (!searchTerm.trim()) return true;
+                const term = searchTerm.toLowerCase();
+                return item.name.toLowerCase().includes(term);
+              })
+              .map((item) => {
+                const isFolder = !!item.folder;
+                const isDimmed = mode === "folder" && !isFolder;
+                return (
+                  <li
+                    key={item.id}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "10px", padding: "12px 8px",
+                      borderBottom: "1px solid #f0f0f0",
+                      cursor: isDimmed ? "default" : "pointer",
+                      opacity: isDimmed ? 0.5 : 1
+                    }}
+                    onClick={() => {
+                      if (isFolder) {
+                        handleNavigate(item.id, item.name);
+                      } else if (mode === "file") {
+                        handleSelection(item);
+                      }
+                    }}
+                  >
+                    <span style={{ fontSize: "20px" }}>{isFolder ? "📁" : "📄"}</span>
+                    <span style={{ flex: 1, fontWeight: isFolder ? 600 : 400 }}>{item.name}</span>
+                    {mode === "file" && !isFolder && (
+                      <button className="btn btn-sm btn-ghost" style={{ fontSize: '12px' }}>Select</button>
+                    )}
+                    {isFolder && <span style={{ color: "#ccc" }}>›</span>}
+                  </li>
+                );
+              })}
           </ul>
+          {!loading && !error && items.length > 0 && searchTerm.trim() &&
+            items.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+              <div style={{ padding: 20, textAlign: "center", fontStyle: "italic", color: "#999" }}>
+                No files or folders match your search.
+              </div>
+            )}
         </div>
         {/* FOOTER */}
         <div className="modal-footer" style={{ justifyContent: "space-between" }}>
