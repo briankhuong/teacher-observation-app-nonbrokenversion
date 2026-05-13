@@ -2672,7 +2672,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   };
   // ✅ NEW: Callback when email is sent successfully
   const handleEmailSuccess = async () => {
-    // 1. Determine targets (Bulk IDs or Single ID)
     const targetIds = emailModalState.obsIds && emailModalState.obsIds.length > 0
       ? emailModalState.obsIds
       : (emailModalState.obsId ? [emailModalState.obsId] : []);
@@ -2684,24 +2683,63 @@ export const DashboardShell: React.FC<DashboardProps> = ({
     if (type === "post") metaKey = "emailSentPost";
     if (type === "admin") metaKey = "emailSentAdmin";
     if (!metaKey) return;
-    // 2. Update UI (Optimistic Loop)
+    // Optimistic UI update
     setObservations((prev) =>
       prev.map((o) => {
         if (targetIds.includes(o.id)) {
-          return {
-            ...o,
-            meta: { ...o.meta, [metaKey]: timestamp },
-          };
+          return { ...o, meta: { ...o.meta, [metaKey]: timestamp } };
         }
         return o;
       })
     );
-    // 3. Save to DB (Parallel Loop)
-    // We reuse the robust persist function we fixed earlier
+    // Save to DB while preserving sync state
     await Promise.all(
-      targetIds.map((id) =>
-        persistMergedLinkToObservationMeta(id, { [metaKey]: timestamp })
-      )
+      targetIds.map(async (id) => {
+        const storageKey = `${STORAGE_PREFIX}${id}`;
+        let local = await get<any>(storageKey);
+        if (!local) {
+          // No local copy – just update Supabase
+          const { data } = await supabase
+            .from("observations")
+            .select("meta")
+            .eq("id", id)
+            .single();
+          if (data) {
+            const nextMeta = { ...(data.meta || {}), [metaKey]: timestamp };
+            await supabase.from("observations").update({ meta: nextMeta }).eq("id", id);
+          }
+          return;
+        }
+        // Check if the observation was already synced before this email
+        const obsRow = observations.find(o => o.id === id);
+        const wasSynced = obsRow?.syncStatus === 'synced';
+        // Update meta locally
+        local.meta = { ...(local.meta || {}), [metaKey]: timestamp };
+        // Update Supabase
+        const { error } = await supabase
+          .from("observations")
+          .update({ meta: local.meta })
+          .eq("id", id);
+        if (error) {
+          console.error("Failed to update meta on server", error);
+          return;
+        }
+        // If the observation was already synced, align local timestamps so it stays green
+        if (wasSynced) {
+          const { data: updatedRow } = await supabase
+            .from("observations")
+            .select("updated_at")
+            .eq("id", id)
+            .single();
+          if (updatedRow) {
+            const serverTime = new Date(updatedRow.updated_at).getTime();
+            local.lastSync = serverTime;
+            local.updatedAt = serverTime;
+          }
+        }
+        // Save the updated local copy
+        await set(storageKey, local);
+      })
     );
     await refreshDashboard();
   };
