@@ -986,22 +986,6 @@ export const TeachersScreen: React.FC = () => {
     setRows(prev => prev.filter(r => !selectedTeacherIds.has(r.id)));
     setSelectedTeacherIds(new Set());
   };
-  const handleRejectAll = async () => {
-    if (counts.new === 0) return;
-    if (!window.confirm(`Delete ALL ${counts.new} new teachers? This cannot be undone.`)) return;
-    const newTeacherIds = filteredRows.map(r => r.id);
-    const { error } = await supabase
-      .from("teachers")
-      .delete()
-      .in("id", newTeacherIds)
-      .eq("trainer_id", user?.id);
-    if (error) {
-      alert("Failed to delete teachers.");
-      return;
-    }
-    setRows(prev => prev.filter(r => !newTeacherIds.includes(r.id)));
-    setSelectedTeacherIds(new Set());
-  };
   // 🟢 MOVED: Acknowledge functions moved UP so columns can use them
   const handleAcknowledge = async (row: TeacherRow) => {
     const { error } = await supabase
@@ -1036,20 +1020,25 @@ export const TeachersScreen: React.FC = () => {
       }
     }
   }, [search]); // ✅ Only runs when search changes
-  const handleAcknowledgeAll = async () => {
-    const ok = window.confirm(`Are you sure you want to acknowledge all ${counts.new} new teachers? This will clear your inbox.`);
+  const handleAcknowledgeSelected = async () => {
+    if (selectedTeacherIds.size === 0) return;
+    const ok = window.confirm(`Acknowledge ${selectedTeacherIds.size} selected teachers?`);
     if (!ok) return;
-    const { error } = await supabase
-      .from("teachers")
-      .update({ needs_review: false })
-      .eq("trainer_id", user?.id) // Safe fallback to user?.id
-      .eq("needs_review", true);
-    if (error) {
-      alert("Failed to acknowledge teachers.");
-      return;
+    const ids = Array.from(selectedTeacherIds);
+    for (const id of ids) {
+      const { error } = await supabase
+        .from("teachers")
+        .update({ needs_review: false })
+        .eq("id", id)
+        .eq("trainer_id", user?.id);
+      if (error) {
+        alert(`Failed to acknowledge teacher ${id}: ${error.message}`);
+        return;
+      }
     }
-    setRows(prev => prev.map(r => ({ ...r, needs_review: false })));
-    setFilterStatus('active');
+    setRows(prev => prev.map(r => ids.includes(r.id) ? { ...r, needs_review: false } : r));
+    setSelectedTeacherIds(new Set());
+    if (ids.length === counts.new) setFilterStatus('active');
   };
   // 🟢 NEW: Background Provisioning Logic
   const runBackgroundProvisioning = async (teacher: TeacherRow, token: string) => {
@@ -2059,7 +2048,7 @@ export const TeachersScreen: React.FC = () => {
                   </button>
                 )}
               </div>
-              {/* 🟢 Action bar: bulk acknowledge/reject (New tab only) and delete selected (any tab) */}
+              {/* 🟢 Action bar: acknowledge/reject selected (New tab only) and delete selected (other tabs) */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', gap: '8px' }}>
                 {filterStatus === 'new' && counts.new > 0 && (
                   <>
@@ -2067,21 +2056,23 @@ export const TeachersScreen: React.FC = () => {
                       type="button"
                       className="btn"
                       style={{ background: '#eab308', color: '#000', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
-                      onClick={handleAcknowledgeAll}
+                      onClick={handleAcknowledgeSelected}
+                      disabled={selectedTeacherIds.size === 0}
                     >
-                      ✨ Acknowledge All ({counts.new})
+                      ✨ Acknowledge Selected ({selectedTeacherIds.size})
                     </button>
                     <button
                       type="button"
                       className="btn"
                       style={{ background: '#ef4444', color: '#fff', border: 'none', fontWeight: 600, boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }}
-                      onClick={handleRejectAll}
+                      onClick={handleRejectSelected}
+                      disabled={selectedTeacherIds.size === 0}
                     >
-                      ❌ Reject All
+                      ❌ Reject Selected ({selectedTeacherIds.size})
                     </button>
                   </>
                 )}
-                {selectedTeacherIds.size > 0 && (
+                {selectedTeacherIds.size > 0 && filterStatus !== 'new' && (
                   <button
                     type="button"
                     className="btn"

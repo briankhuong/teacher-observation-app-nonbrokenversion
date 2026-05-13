@@ -2402,7 +2402,7 @@ export const SchoolsScreen: React.FC = () => {
           )}
           {!loading && table.getRowModel().rows.length > 0 && (
             <>
-              {/* Action bar: bulk acknowledge/reject (Review tab) + delete selected (any tab) */}
+              {/* Action bar: bulk acknowledge/reject (Review tab) + delete selected (other tabs) */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', gap: '8px' }}>
                 {schoolFilter === 'needs_review' && needsReviewCount > 0 && (
                   <>
@@ -2426,7 +2426,7 @@ export const SchoolsScreen: React.FC = () => {
                     </button>
                   </>
                 )}
-                {selectedReviewIds.size > 0 && (
+                {selectedReviewIds.size > 0 && schoolFilter !== 'needs_review' && (
                   <button
                     type="button"
                     className="btn"
