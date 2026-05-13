@@ -46,7 +46,7 @@ router.post("/api/sync-teachers", async (req, res) => {
     if (userErr || !trainerUser) throw new Error("Trainer not found");
     const myName = clean(trainerUser.user_metadata?.display_name || trainerUser.user_metadata?.full_name || "").split(" ")[0];
     log(`👤 Syncing for Trainer: "${myName}"`);
-    /* 2. GET ALL ACTIVE SCHOOLS */
+    /* 2. GET ALL ACTIVE SCHOOLS (campuses) */
     const { data: dbSchools, error: schoolsErr } = await supabase
       .from("schools")
       .select("id, school_name, campus_name, official_code, campus_id")
@@ -54,90 +54,67 @@ router.post("/api/sync-teachers", async (req, res) => {
       .eq("disabled", false);
     if (schoolsErr) throw new Error(`DB Error: ${schoolsErr.message}`);
     if (!dbSchools || dbSchools.length === 0) return res.json({ success: true, logs: ["⚠️ No schools."] });
-    /* PHASE 1: ORPHAN ALIGNMENT (Text Clues) */
-    const { data: orphans } = await supabase.from("teachers").select("*").eq("trainer_id", userId).is("school_id", null);
-    if (orphans?.length > 0) {
-      const alignmentUpdates = orphans.map(t => {
-        const tText = clean(`${t.school_name} ${t.campus}`);
-        let best = { id: null, score: 0, name: "", campus: "" };
-        dbSchools.forEach(s => {
-          const sText = clean(`${s.school_name} ${s.campus_name}`);
-          const score = (tText === sText) ? 1.0 : getSimilarity(tText, sText);
-          if (score > best.score) best = { id: s.id, score, name: s.school_name, campus: s.campus_name };
-        });
-        return (best.score >= 0.9) ? { id: t.id, school_id: best.id, school_name: best.name, campus: best.campus, updated_at: new Date() } : null;
-      }).filter(Boolean);
-      if (alignmentUpdates.length > 0) await supabase.from("teachers").upsert(alignmentUpdates);
-    }
-    /* MASTER LOOP: MULTI-SILO PROCESSOR */
+    /* MASTER LOOP: CAMPUS LEVEL */
     await pMap(dbSchools, async (schoolRow) => {
       const schoolLogPrefix = `[${schoolRow.school_name}]`;
-      let targetCampusId = schoolRow.campus_id;
+      const targetCampusId = schoolRow.campus_id;
       try {
-        /* PHASE 2: BUILDING REPAIR (GEOGRAPHY) */
-        const apiCResp = await fetch(`https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/campuses/accessiblecampuses`, { headers: getHeaders(token) });
-        if (!apiCResp.ok) return;
-        const apiCampuses = await apiCResp.json();
-        const targetApiCamp = apiCampuses.find(c => c.id === targetCampusId) ||
-          apiCampuses.find(c => clean(c.name) === clean(schoolRow.campus_name));
-        if (!targetApiCamp) return log(`${schoolLogPrefix} ❌ Campus not found.`);
-        if (targetCampusId !== targetApiCamp.id) {
-          await supabase.from("schools").update({ campus_id: targetApiCamp.id }).eq("id", schoolRow.id);
-          targetCampusId = targetApiCamp.id;
-        }
-        /* PHASE 3: SOURCE OF TRUTH (TRIPLE-NULL NET) */
-        const [classResp, { data: allPotentialTeachers }] = await Promise.all([
-          fetch(`https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`, { headers: getHeaders(token) }),
-          supabase.from("teachers").select("*").or(`school_id.eq.${schoolRow.id},school_name.eq."${schoolRow.school_name}"`)
-        ]);
+        /* 3. FETCH CLASSES & DB TEACHERS FOR THIS CAMPUS */
+        const classUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolRow.official_code}/classes?campusId=${targetCampusId}&offset=0&limit=100&disabled=false`;
+        const classResp = await fetch(classUrl, { headers: getHeaders(token) });
+        if (!classResp.ok) return;
         const classData = await classResp.json();
         const apiClasses = classData.schoolClasses || classData || [];
-        // Empty Class Alert
-        supabase.from("schools").update({ has_empty_class: apiClasses.some(c => !c.teacherId) }).eq("id", schoolRow.id).then();
         const apiActiveIds = new Set();
         apiClasses.forEach(c => {
           if (c.teacherId) apiActiveIds.add(c.teacherId.toLowerCase());
           if (c.substituteTeacherIds) c.substituteTeacherIds.forEach(id => apiActiveIds.add(id.toLowerCase()));
         });
-        const emailToApiId = new Map();
-        const apiProfiles = await pMap([...apiActiveIds], async (id) => {
-          const r = await fetch(`https://services.grapeseed.com/account/v1/users?ids=${id}`, { headers: getHeaders(token) });
-          const d = await r.json();
-          return Array.isArray(d) ? d[0] : d;
-        }, { concurrency: 10 });
-        apiProfiles.forEach(p => { if (p?.email) emailToApiId.set(p.email.toLowerCase().trim(), p.id.toLowerCase()); });
+        // Fetch teachers for this campus by the unique campus_id
+        const { data: campusTeachers, error: teachersErr } = await supabase
+          .from("teachers")
+          .select("*")
+          .eq("campus_id", targetCampusId);
+        if (teachersErr) {
+          log(`${schoolLogPrefix} ❌ Error fetching teachers: ${teachersErr.message}`);
+          return;
+        }
+        const dbCampusTeachers = campusTeachers || [];
         const updatesToSave = [];
         const insertsToSave = [];
-        /* PHASE 4: RESOLUTION (ORIGINAL TAG LOGIC TRANSLANTED) */
-        const sandboxCandidates = (allPotentialTeachers || []).filter(t => t.campus_id === targetCampusId || !t.campus_id);
-        await pMap(sandboxCandidates, async (t) => {
-          let gseedId = (t.grapeseed_id || "").toLowerCase();
-          const cleanEmail = (t.email || "").toLowerCase().trim();
-          // DETECTIVE HEAL: Bridge ID via Email Phonebook
-          if (!gseedId && emailToApiId.has(cleanEmail)) {
-            gseedId = emailToApiId.get(cleanEmail);
+        /* 4. PROCESS EXISTING TEACHERS */
+        await pMap(dbCampusTeachers, async (t) => {
+          const gseedId = (t.grapeseed_id || "").toLowerCase();
+          if (!gseedId) return;                     // should not happen (IDs are always present now)
+          // 🆕 Repair missing school_id
+          if (!t.school_id) {
+            t.school_id = schoolRow.id;
           }
           const isActive = apiActiveIds.has(gseedId);
           let finalTags = Array.isArray(t.tags) ? t.tags : [];
           if (isActive) {
-            // --- START ORIGINAL TAG SIEVE ---
+            // ---- Active: fetch tags and compute ----
             let rawTagObjects = [];
-            if (gseedId && gseedId !== "null" && gseedId !== "") {
-              const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
-              if (tagResp.ok) {
-                const tData = await tagResp.json();
-                // UNIVERSAL PARSER (COPY-PASTE)
-                if (tData.tags) rawTagObjects = tData.tags;
-                else if (tData.entityTags) rawTagObjects = tData.entityTags;
-                else if (Array.isArray(tData)) {
-                  if (tData[0] && (tData[0].tags || tData[0].entityTags)) rawTagObjects = tData[0].tags || tData[0].entityTags;
-                  else rawTagObjects = tData;
-                }
+            const tagResp = await fetch(
+              `https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${gseedId}&regionId=${VIETNAM_REGION_ID}`,
+              { headers: getHeaders(token, VIETNAM_REGION_ID) }
+            );
+            if (tagResp.ok) {
+              const tData = await tagResp.json();
+              if (tData.tags) rawTagObjects = tData.tags;
+              else if (tData.entityTags) rawTagObjects = tData.entityTags;
+              else if (Array.isArray(tData)) {
+                if (tData[0] && (tData[0].tags || tData[0].entityTags)) rawTagObjects = tData[0].tags || tData[0].entityTags;
+                else rawTagObjects = tData;
               }
             }
+            // Extract tag names, skip numbers AND the "nexus" model tag
             const rawNames = rawTagObjects
               .map(tag => (tag.name || "").trim())
-              .filter(name => isNaN(Number(name)))
+              .filter(name => {
+                if (isNaN(Number(name)) && name.toLowerCase() !== "nexus") return true;
+                return false;
+              })
               .map(name => clean(name).split(" ")[0]);
             const hasMe = rawNames.some(n => n === myName);
             const others = [...new Set(rawNames.filter(n => n !== myName))];
@@ -147,13 +124,12 @@ router.post("/api/sync-teachers", async (req, res) => {
               if (hasMe) finalTags = [];
               else finalTags = ["No tag"];
             }
-            // --- END ORIGINAL TAG SIEVE ---
           } else {
-            // --- ORIGINAL INACTIVE APPENDAGE LOGIC ---
+            // ---- Inactive: ensure "Inactive" is present ----
             const currentClean = finalTags.filter(tag => tag.toLowerCase() !== "inactive");
             finalTags = [...currentClean, "Inactive"];
           }
-          // Determine if tags actually changed
+          // Compare old and new tags
           const oldTags = (t.tags || []).slice().sort();
           const newTags = [...finalTags].sort();
           const tagsChanged = JSON.stringify(oldTags) !== JSON.stringify(newTags);
@@ -164,29 +140,52 @@ router.post("/api/sync-teachers", async (req, res) => {
             email: t.email,
             grapeseed_id: gseedId,
             campus_id: targetCampusId,
-            school_id: schoolRow.id,
+            school_id: schoolRow.id,      // uses the possibly repaired value; the update will also set school_id correctly in DB
             school_name: schoolRow.school_name,
             campus: schoolRow.campus_name,
             tags: finalTags,
             needs_review: tagsChanged ? true : (t.needs_review ?? false),
             updated_at: new Date()
           });
-          touchedTeacherIds.add(t.id); touchedTeacherIds.add(t.id);
+          touchedTeacherIds.add(t.id);
         }, { concurrency: 20 });
-        /* PHASE 5: THE CLONER (NEW INSTANCES) */
-        const siloIds = new Set(updatesToSave.map(u => u.grapeseed_id).filter(id => id));
+        /* 5. NEW TEACHER DISCOVERY */
+        const siloIds = new Set(dbCampusTeachers.map(t => (t.grapeseed_id || "").toLowerCase()).filter(id => id));
         const missingIds = [...apiActiveIds].filter(id => !siloIds.has(id));
-        for (const id of missingIds) {
-          const profile = apiProfiles.find(p => p && p.id.toLowerCase() === id);
-          if (profile) {
-            // NEW DISCOVERY TAG PROCESSING (PARALLEL FETCH)
-            const tagResp = await fetch(`https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${id}&regionId=${VIETNAM_REGION_ID}`, { headers: getHeaders(token, VIETNAM_REGION_ID) });
+        if (missingIds.length > 0) {
+          // Fetch profiles in batch
+          const apiProfiles = await pMap(missingIds, async (id) => {
+            const r = await fetch(`https://services.grapeseed.com/account/v1/users?ids=${id}`, { headers: getHeaders(token) });
+            const d = await r.json();
+            return Array.isArray(d) ? d[0] : d;
+          }, { concurrency: 10 });
+          for (let i = 0; i < missingIds.length; i++) {
+            const id = missingIds[i];
+            const profile = apiProfiles[i];
+            if (!profile) continue;
+            // Fetch tags for the new teacher
+            const tagResp = await fetch(
+              `https://services.grapeseed.com/admin/v1/tags/teachertagsbyrole?entityId=${id}&regionId=${VIETNAM_REGION_ID}`,
+              { headers: getHeaders(token, VIETNAM_REGION_ID) }
+            );
             let rawT = [];
             if (tagResp.ok) {
               const d = await tagResp.json();
-              rawT = d.tags || d.entityTags || (Array.isArray(d) ? d[0]?.tags : []);
+              // Universal parser – always fallback to empty array
+              if (d.tags) rawT = d.tags;
+              else if (d.entityTags) rawT = d.entityTags;
+              else if (Array.isArray(d)) {
+                if (d[0] && (d[0].tags || d[0].entityTags)) rawT = d[0].tags || d[0].entityTags;
+                else rawT = d;        // d is an array of tag objects
+              }
+              // just in case: ensure we have an array
+              if (!Array.isArray(rawT)) rawT = [];
             }
-            const pNames = (rawT || []).map(tag => (tag.name || "").trim()).filter(n => isNaN(Number(n))).map(n => clean(n).split(" ")[0]);
+            // Process names (skip numbers and "nexus")
+            const pNames = rawT
+              .map(tag => (tag.name || "").trim())
+              .filter(name => isNaN(Number(name)) && name.toLowerCase() !== "nexus")
+              .map(name => clean(name).split(" ")[0]);
             const others = [...new Set(pNames.filter(n => n !== myName))];
             const cloneTags = others.length > 0 ? others : (pNames.includes(myName) ? [] : ["No tag"]);
             insertsToSave.push({
@@ -206,16 +205,17 @@ router.post("/api/sync-teachers", async (req, res) => {
             log(`${schoolLogPrefix} ✨ [CLONED] ${profile.name}`);
           }
         }
-        /* PHASE 6: COMMIT (Updated for Ghost Hunter) */
-        // 🟢 Capture IDs of newly inserted teachers for the Safe List
+        /* 6. COMMIT */
         const insertPromise = insertsToSave.length > 0
           ? supabase.from("teachers").insert(insertsToSave).select("id")
           : Promise.resolve({ data: [] });
         const [updateRes, insertRes] = await Promise.all([
-          updatesToSave.length > 0 ? supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' }) : Promise.resolve(),
+          updatesToSave.length > 0
+            ? supabase.from("teachers").upsert(updatesToSave, { onConflict: 'id' })
+            : Promise.resolve(),
           insertPromise
         ]);
-        // Add newly generated IDs to the Safe List
+        // Add newly created IDs to the safe list
         if (insertRes.data) {
           insertRes.data.forEach(row => touchedTeacherIds.add(row.id));
         }
@@ -223,12 +223,9 @@ router.post("/api/sync-teachers", async (req, res) => {
         log(`${schoolLogPrefix} ❌ Error: ${schoolErr.message}`);
       }
     }, { concurrency: 15 });
-    // 🟢 GHOST HUNTER CLEANUP (The Purge)
-    // Run this AFTER the loop finishes
+    /* 🟢 GHOST HUNTER CLEANUP (The Purge) */
     if (touchedTeacherIds.size > 0) {
       const safeListArray = Array.from(touchedTeacherIds);
-      // 1. Fetch Untouched Teachers
-      // 🟢 REMOVED the .not("tags"...) filter so we catch teachers with NULL/Empty tags
       const { data: ghosts, error: ghostErr } = await supabase
         .from("teachers")
         .select("id, tags, name, email, school_name")
@@ -237,17 +234,13 @@ router.post("/api/sync-teachers", async (req, res) => {
       if (ghostErr) {
         log(`👻 Ghost Hunter Query Failed: ${ghostErr.message}`);
       } else if (ghosts && ghosts.length > 0) {
-        // 2. Filter in JS: Find those who are NOT ALREADY strictly ["Inactive"]
-        // This saves us from updating records that are already correct.
         const validGhosts = ghosts.filter(t => {
           const currentTags = t.tags || [];
           return JSON.stringify(currentTags) !== JSON.stringify(["Inactive"]);
         });
         if (validGhosts.length > 0) {
-          // 3. Overwrite tags to ["Inactive"]
           const updatePromises = validGhosts.map(async (t) => {
-            const msg = `👻 [INACTIVE] Overwriting: ${t.name} (${t.email}) | School: ${t.school_name}`;
-            log(msg);
+            log(`👻 [INACTIVE] Overwriting: ${t.name} (${t.email}) | School: ${t.school_name}`);
             return supabase
               .from("teachers")
               .update({
@@ -1338,9 +1331,6 @@ router.post("/api/sync-teaching-models", async (req, res) => {
     res.status(500).json({ success: false, error: err.message, logs });
   }
 });
-// -------------------------------------------------- */
-// School Status Sync (from /visitations/schoolstatuses)
-// -------------------------------------------------- */
 // -------------------------------------------------- */
 // School Status Sync (from /visitations/schoolstatuses) – OPTIMIZED
 // -------------------------------------------------- */
