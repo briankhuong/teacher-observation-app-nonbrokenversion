@@ -1,19 +1,3 @@
-// import {
-//   DndContext,
-//   closestCenter,
-//   KeyboardSensor,
-//   PointerSensor,
-//   useSensor,
-//   useSensors,
-// } from '@dnd-kit/core';
-// import type { DragEndEvent } from '@dnd-kit/core'; // 🟢 FIXED: Separated as a type import
-// import {
-//   arrayMove,
-//   SortableContext,
-//   sortableKeyboardCoordinates,
-//   verticalListSortingStrategy,
-//   useSortable
-// } from '@dnd-kit/sortable';
 import {
   DndContext,
   closestCenter,
@@ -32,8 +16,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { exportAdminExcel } from "./exportAdminExcel";
 import { emailTeacherReport } from "./emailTeacherReport";
 import { generateAdminSummary } from "./utils/gemini";
-import { getOptimizedInkImage } from "./utils/imageOptimizer"; // If you created this file
-// Add these imports
+import { getOptimizedInkImage } from "./utils/imageOptimizer";
 import { get, set, del } from 'idb-keyval';
 import { INITIAL_INDICATORS } from "./constants";
 import type {
@@ -42,10 +25,8 @@ import type {
   Stroke,
   IndicatorState as BaseIndicatorState
 } from "./constants";
-// 🟢 NEW: Safely extend the interface locally to prevent dropping the history
 type IndicatorState = BaseIndicatorState & { originalCommentText?: string | null };
 import { Pin, ArrowUpToLine, Download } from 'lucide-react';
-// Add to imports
 import { stitchHandwritingBatches } from "./utils/imageStitcher";
 import { transcribeWithGroq } from "./utils/transcribe";
 const CANVAS_HEIGHT_STORAGE_KEY = "canvas-pad-height";
@@ -55,10 +36,9 @@ const TEXTAREA_HEIGHT_STORAGE_KEY = "textarea-height";
 const DEFAULT_TEXTAREA_HEIGHT = 120;
 const MIN_TEXTAREA_HEIGHT = 60;
 const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar-width";
-// 🟢 FIXED: Stricter constraints to prevent broken layout
 const DEFAULT_SIDEBAR_WIDTH = 340;
-const MIN_SIDEBAR_WIDTH = 300; // Increased from 220 to prevent button overlap
-const MAX_SIDEBAR_WIDTH = 550; // Cap width so it doesn't take over screen
+const MIN_SIDEBAR_WIDTH = 300;
+const MAX_SIDEBAR_WIDTH = 550;
 function getPersistedSidebarWidth(): number {
   if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
   try {
@@ -94,21 +74,18 @@ function cleanupOldDrafts(currentId: string): boolean {
   let clearedCount = 0;
   try {
     const keysToRemove: string[] = [];
-    // 1. Scan for other drafts
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      // If it looks like an observation BUT is not the current one
       if (key && key.startsWith("obs-v1-") && !key.includes(currentId)) {
         keysToRemove.push(key);
       }
     }
-    // 2. Delete them
     keysToRemove.forEach(key => {
       localStorage.removeItem(key);
       clearedCount++;
     });
     console.log(`🧹 Deleted ${clearedCount} old drafts to free space.`);
-    return clearedCount > 0; // Return true if we actually deleted something
+    return clearedCount > 0;
   } catch (e) {
     console.warn("Cleanup failed", e);
     return false;
@@ -141,7 +118,6 @@ function setPersistedTextareaHeight(height: number) {
     console.error("Failed to write persisted textarea height", error);
   }
 }
-// 🟢 NEW: Track Changes Diff Algorithm
 function getDiff(oldString: string | null | undefined = "", newString: string | null | undefined = "") {
   const oldWords = (oldString || "").split(/(\s+)/);
   const newWords = (newString || "").split(/(\s+)/);
@@ -172,22 +148,16 @@ function getDiff(oldString: string | null | undefined = "", newString: string | 
   }
   return result;
 }
-// 🟢 UPDATED CLEANER: 
-// 1. Removes \[OCR\]/\[Hints\]
-// 2. Removes (GA) tags (so they don't show up in the text box)
-// 3. KEEPS empty lines and hyphens
 function cleanTextForPreview(text: string): string {
   if (!text) return "";
   return text
     .split('\n')
     .map(line => {
-      // Remove [OCR], [Hints]
       let cleaned = line.replace(/\[(OCR|Hints)\]/gi, "");
-      // Remove (GA) tags so they don't leak into the editor view
       cleaned = cleaned.replace(/\s*\(\s*GA\s*\)\s*$/i, "");
       return cleaned.trimEnd();
     })
-    .join('\n'); // 🟢 KEEPS EMPTY LINES
+    .join('\n');
 }
 const MERGE_SERVER_BASE = import.meta.env.VITE_MERGE_SERVER_BASE;
 import {
@@ -241,7 +211,7 @@ interface SavedObservationPayload {
     lesson: string;
     supportType: "Training" | "LVA" | "Visit";
     date: string;
-    teacher_id?: string; // 🟢 ADD THIS LINE HERE
+    teacher_id?: string;
     grapeseed_id?: string | null;
     teacherWorkbookUrl?: string | null;
     adminWorkbookUrl?: string | null;
@@ -257,10 +227,8 @@ interface SavedObservationPayload {
   lastSync?: number;
 }
 const STORAGE_PREFIX = "obs-v1-";
-// (In ObservationWorkspaceShell.tsx - Replace existing strokesToPngBase64)
 async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
   if (!strokes.length) throw new Error("No strokes to convert");
-  // 1. Calculate Bounds (Crop Logic)
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const stroke of strokes) {
     for (const p of stroke.points) {
@@ -270,20 +238,16 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
       if (p.y > maxY) maxY = p.y;
     }
   }
-  // Add Padding
   const padding = 40;
   const width = Math.max(1, (maxX - minX) + (padding * 2));
   const height = Math.max(1, (maxY - minY) + (padding * 2));
-  // 2. Create Sized Canvas
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("2D canvas not supported");
-  // 3. White Background (Better for OCR than dark)
   ctx.fillStyle = "#FFFFFF";
   ctx.fillRect(0, 0, width, height);
-  // 4. Draw Strokes (Shifted by minX/minY)
   ctx.translate(-minX + padding, -minY + padding);
   for (const stroke of strokes) {
     if (!stroke.points.length) continue;
@@ -291,7 +255,7 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
     ctx.lineWidth = stroke.size || 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.strokeStyle = "#000000"; // Force Black Ink for Contrast
+    ctx.strokeStyle = "#000000";
     const first = stroke.points[0];
     ctx.moveTo(first.x, first.y);
     for (let i = 1; i < stroke.points.length; i++) {
@@ -299,7 +263,6 @@ async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
     }
     ctx.stroke();
   }
-  // 5. Export Small JPEG
   const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
   return dataUrl.split(",")[1];
 }
@@ -319,7 +282,6 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
     const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     try {
       console.log(`OCR Attempt ${attempt}/${MAX_RETRIES}...`);
-      // 🟢 The optimization happens here inside strokesToPngBase64
       const imageBase64 = await strokesToPngBase64(strokes);
       const response = await fetch(`${MERGE_SERVER_BASE}/api/ocr-gemini`, {
         method: "POST",
@@ -351,10 +313,8 @@ async function runOcrOnStrokes(strokes: Stroke[]): Promise<OcrResult> {
     confidence: 0
   };
 }
-// Find your normalizeIndicators function or update the load logic:
 function normalizeIndicators(raw: any): IndicatorState[] {
   const data = Array.isArray(raw) ? raw : (raw?.indicators || []);
-  // 🟢 SEEDING: Ensure every item has a sortOrder
   return data.map((ind: any, index: number) => ({
     ...ind,
     sortOrder: typeof ind.sortOrder === 'number' ? ind.sortOrder : (index + 1) * 1000
@@ -374,22 +334,17 @@ export const ObservationWorkspaceShell: React.FC<
   const { user } = useAuth();
   const [indicators, setIndicators] =
     useState<IndicatorState[]>(INITIAL_INDICATORS as IndicatorState[]);
-  // Tracks which rows are currently open (Accordion state)
   const [openRowIds, setOpenRowIds] = useState<Set<string>>(new Set([indicators[0]?.id]));
   const [activeRowId, setActiveRowId] = useState<string | null>(indicators[0]?.id || null);
-  // Tracks which rows are "Locked" (Pinned state)
   const [pinnedRowIds, setPinnedRowIds] = useState<Set<string>>(new Set());
   const [adminPerformanceRating, setAdminPerformanceRating] = useState("");
   const [selectedAdminIndicators, setSelectedAdminIndicators] = useState<string[]>([]);
-  // 🟢 FIXED: Unified Accordion Logic for BOTH PC and iPad modes
   const handleRowToggle = (id: string) => {
     setOpenRowIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
-        // If clicking an already open row, close it (unless it's pinned)
         if (!pinnedRowIds.has(id)) next.delete(id);
       } else {
-        // 🟢 ACCORDION: Clear all other unpinned rows before opening the new one
         next.forEach(openId => {
           if (!pinnedRowIds.has(openId)) next.delete(openId);
         });
@@ -397,7 +352,6 @@ export const ObservationWorkspaceShell: React.FC<
       }
       return next;
     });
-    // Keep activeRowId in sync for highlighting
     setActiveRowId(id);
   };
   const handleDragEnd = (event: DragEndEvent) => {
@@ -407,7 +361,6 @@ export const ObservationWorkspaceShell: React.FC<
       const oldIndex = items.findIndex((i) => i.id === active.id);
       const newIndex = items.findIndex((i) => i.id === over.id);
       const newArray = arrayMove(items, oldIndex, newIndex);
-      // 🟢 FIXED: Cast to 'any' to bypass TS interface error locally
       const prevItem = newArray[newIndex - 1] as any;
       const nextItem = newArray[newIndex + 1] as any;
       let newOrder: number;
@@ -419,40 +372,30 @@ export const ObservationWorkspaceShell: React.FC<
       return newArray;
     });
   };
-  // 🟢 NEW: Send to Top Logic (PC Only)
   const handleSendToTop = useCallback((id: string) => {
     setIndicators((prev) => {
-      // 1. Find the current absolute minimum sortOrder in the list
       const currentMin = Math.min(...prev.map(i => (i as any).sortOrder || 0));
-      // 2. Subtract 1000 to guarantee it rockets past the current #1 item
       const newTopOrder = currentMin - 1000;
-      // 3. Apply it to the target indicator
       const nextArray = prev.map(ind =>
         ind.id === id ? { ...ind, sortOrder: newTopOrder } : ind
       );
-      // 4. Trigger auto-save
       isDirtyRef.current = true;
       return nextArray;
     });
   }, []);
-  // 🟢 FIXED: Master Command logic
   const handleToggleAll = () => {
     const allIds = indicators.map(ind => ind.id);
-    // Strictly check if EVERY row is open
     const isEverythingOpen = openRowIds.size === indicators.length;
     if (isEverythingOpen) {
-      // If full, collapse everything
       setOpenRowIds(new Set());
       setPinnedRowIds(new Set());
       setActiveRowId(null);
     } else {
-      // If NOT full (even if 1 is open), force everything to open
       setOpenRowIds(new Set(allIds));
     }
   };
-  // 🟢 Helper to toggle a pin
   const togglePin = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation(); // Prevents the row from toggling expansion
+    e.stopPropagation();
     setPinnedRowIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -477,9 +420,7 @@ export const ObservationWorkspaceShell: React.FC<
   const [isAiPolishing, setIsAiPolishing] = useState(false);
   const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
   const [isCanvasVisible, setIsCanvasVisible] = useState(true);
-  // 🖥️ Device detection: true for screens >= 768px (desktop), false for smaller (tablet/phone)
   const [isDesktopMode, setIsDesktopMode] = useState(() => window.innerWidth >= 768);
-  // Optional: listen to window resize to switch mode dynamically
   useEffect(() => {
     const handleResize = () => {
       setIsDesktopMode(window.innerWidth >= 768);
@@ -496,27 +437,20 @@ export const ObservationWorkspaceShell: React.FC<
   const startYRef = useRef(0);
   const startHeightRef = useRef(0);
   const [lastServerVersion, setLastServerVersion] = useState<number>(0);
-  // Add this near your other useState hooks
   const lastServerVersionRef = useRef(lastServerVersion);
-  // Add this state
   const [isResizerLocked, setIsResizerLocked] = useState(false);
   const [isCanvasLocked, setIsCanvasLocked] = useState(false);
-  // Inside ObservationWorkspaceShell component
   const [isBatchOcrRunning, setIsBatchOcrRunning] = useState(false);
-  const [batchOcrProgress, setBatchOcrProgress] = useState(""); // e.g., "Processing batch 1 of 3..."
+  const [batchOcrProgress, setBatchOcrProgress] = useState("");
   const [rescuedIds, setRescuedIds] = useState<{ teacher_id?: string; grapeseed_id?: string | null }>({});
   const [isMetadataReady, setIsMetadataReady] = useState(false);
-  // Helper to extract IDs like "1.1", "3.4" from any messy string
   const extractIds = (text: string): string[] => {
-    // Finds patterns like "1.1", "10.5", etc.
-    // It ignores dashes, spaces, and text like "Task"
     const matches = text.match(/\d+\.\d+/g);
     return matches ? matches : [];
   };
   const handleConvertAllInk = async () => {
     setOcrError(null);
     if (isBatchOcrRunning) return;
-    // 1. Identify Candidates
     const candidates = indicators.filter(ind => {
       const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
       return hasInk && !ind.ocrUsed;
@@ -531,14 +465,11 @@ export const ObservationWorkspaceShell: React.FC<
     setIsBatchOcrRunning(true);
     setBatchOcrProgress("Preparing images...");
     try {
-      // 2. Prepare Data for Stitcher
       const stitchItems = candidates.map(ind => ({
         id: ind.number,
         strokes: ind.strokes
       }));
-      // 3. Generate Stitched Batches
       const batches = await stitchHandwritingBatches(stitchItems, 6);
-      // 4. Process Batches
       let processedCount = 0;
       let successCount = 0;
       const newUpdates: Record<string, Partial<IndicatorState>> = {};
@@ -548,7 +479,6 @@ export const ObservationWorkspaceShell: React.FC<
         let attempts = 0;
         let success = false;
         let delay = 2000;
-        // 🔄 RETRY LOOP
         while (attempts < 5 && !success) {
           try {
             const controller = new AbortController();
@@ -576,25 +506,17 @@ export const ObservationWorkspaceShell: React.FC<
             }
             const data = await response.json();
             const resultsMap = data.results || {};
-            // -----------------------------------------------------------
-            // 5. "SET OVERLAP" MATCHING LOGIC (The Robust Fix)
-            // -----------------------------------------------------------
             Object.entries(resultsMap).forEach(([key, text]) => {
               const strText = text as string;
               if (!strText) return;
-              // A. Extract clean IDs from the AI Key (e.g. "3.4 - 5.1" -> ["3.4", "5.1"])
               const aiIds = extractIds(key);
-              // B. Find indicators whose Numbers overlap with these AI IDs
               const targets = indicators.filter(ind => {
-                // Extract IDs from the Indicator Number (e.g. "3.4 – 5.1" -> ["3.4", "5.1"])
                 const indIds = extractIds(ind.number);
-                // Check for intersection: Do they share ANY common ID?
                 return indIds.some(id => aiIds.includes(id));
               });
               if (targets.length === 0) {
                 console.warn(`FAILED MATCH: Key "${key}" (IDs: ${aiIds}) matched nothing.`);
               }
-              // C. Apply Update
               targets.forEach(originalInd => {
                 const existing = originalInd.commentText.trim();
                 if (existing.includes(strText)) return;
@@ -619,7 +541,6 @@ export const ObservationWorkspaceShell: React.FC<
           }
         }
       }
-      // 6. Bulk Update React State
       if (Object.keys(newUpdates).length > 0) {
         setIndicators(prev => prev.map(ind => {
           if (newUpdates[ind.id]) {
@@ -644,13 +565,10 @@ export const ObservationWorkspaceShell: React.FC<
       setBatchOcrProgress("");
     }
   };
-  // --- SIDEBAR RESIZE STATE ---
   const [sidebarWidth, setSidebarWidth] = useState(getPersistedSidebarWidth);
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  // Update the startSidebarResize function
   const startSidebarResize = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    // 🔒 STOP if locked
     if (isResizerLocked) return;
     e.preventDefault();
     setIsSidebarResizing(true);
@@ -659,11 +577,7 @@ export const ObservationWorkspaceShell: React.FC<
     (e: MouseEvent | TouchEvent) => {
       if (!isSidebarResizing) return;
       const clientX = (e as MouseEvent).clientX ?? (e as TouchEvent).touches[0].clientX;
-      // Calculate new width based on pointer position
-      // Assuming sidebar is on the left, width is just clientX
-      // If there is padding/margins on the left, you might need to adjust (e.g. clientX - 16)
       let newWidth = clientX;
-      // Constrain
       newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
       setSidebarWidth(newWidth);
     },
@@ -673,18 +587,17 @@ export const ObservationWorkspaceShell: React.FC<
     if (isSidebarResizing) {
       setIsSidebarResizing(false);
       setPersistedSidebarWidth(sidebarWidth);
-      window.dispatchEvent(new Event("resize")); // Trigger resize for canvas/charts if needed
+      window.dispatchEvent(new Event("resize"));
     }
   }, [isSidebarResizing, sidebarWidth]);
-  // Attach Resize Listeners
   useEffect(() => {
     if (isSidebarResizing) {
       window.addEventListener("mousemove", doSidebarResize);
       window.addEventListener("mouseup", stopSidebarResize);
       window.addEventListener("touchmove", doSidebarResize);
       window.addEventListener("touchend", stopSidebarResize);
-      document.body.style.cursor = "col-resize"; // Visual feedback
-      document.body.style.userSelect = "none";   // Prevent selection
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
     } else {
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
@@ -698,7 +611,6 @@ export const ObservationWorkspaceShell: React.FC<
       document.body.style.userSelect = "";
     };
   }, [isSidebarResizing, doSidebarResize, stopSidebarResize]);
-  // Keep the Ref in sync with the State automatically
   useEffect(() => {
     lastServerVersionRef.current = lastServerVersion;
   }, [lastServerVersion]);
@@ -818,15 +730,14 @@ export const ObservationWorkspaceShell: React.FC<
   const [adminPreview, setAdminPreview] = useState<AdminExportModel | null>(null);
   const [isOcrRunning, setIsOcrRunning] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null); // 👈 Add this state
-  // 🟢 NEW: Track if user has actually made changes
-  // 1. Add these states near your other UI states
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const transcriptionTargetRef = useRef<'indicator' | 'admin'>('indicator');
   const isDirtyRef = useRef(false);
+  const scrollToIndicatorRef = useRef<string | null>(null);
   useEffect(() => {
     if (indicators.length === 0) return;
     if (activeIndex >= indicators.length) {
@@ -842,7 +753,6 @@ export const ObservationWorkspaceShell: React.FC<
         if (Array.isArray(masterList)) {
           const match = masterList.find((obs) => obs.id === observationMeta.id);
           if (match) {
-            // 🟢 LOOK DEEPER: Check both top-level AND inside meta
             const tId = match.teacher_id || match.meta?.teacher_id;
             const gId = match.grapeseed_id || match.meta?.grapeseed_id;
             if (tId || gId) {
@@ -863,21 +773,26 @@ export const ObservationWorkspaceShell: React.FC<
     hydrateIds();
   }, [observationMeta.id]);
   useEffect(() => {
+    if (!scrollToIndicatorRef.current) return;
+    const targetId = scrollToIndicatorRef.current;
+    scrollToIndicatorRef.current = null;
+    const el = document.querySelector(`[data-indicator-id="${targetId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [openRowIds, activeIndex]);
+  useEffect(() => {
     let cancelled = false;
     async function load() {
       let localData: SavedObservationPayload | undefined;
-      // 🟢 CHANGE: Load from IndexedDB first
       try {
         localData = await get<SavedObservationPayload>(storageKey);
-        // 🛡️ MIGRATION: If nothing in IndexedDB, check localStorage
-        // This ensures old drafts are not lost when you switch to this new code.
         if (!localData) {
           const rawLegacy = localStorage.getItem(storageKey);
           if (rawLegacy) {
             console.log("♻️ Migrating data from LocalStorage to IndexedDB...");
             try {
               localData = JSON.parse(rawLegacy);
-              // Save it to IndexedDB immediately so next load is fast & modern
               if (localData) await set(storageKey, localData);
             } catch (e) {
               console.error("Legacy migration failed", e);
@@ -891,30 +806,23 @@ export const ObservationWorkspaceShell: React.FC<
         const row = await loadObservationFromDb(observationMeta.id);
         if (cancelled) return;
         setLastServerVersion(new Date(row.updated_at).getTime());
-        // 🟢 FIX: Use the Server's clock as the source of truth
         const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
         const lastSyncReceipt = localData?.lastSync || 0;
-        // Logic: If the server is newer than our last receipt, something changed elsewhere
         if (serverTime > lastSyncReceipt) {
           console.log("📡 Server is newer than our last receipt. Potential conflict.");
-          // Only use server data if local is NOT "dirty" (has no un-pushed edits)
           const isDirty = localData && (localData.updatedAt > (localData.lastSync || 0));
           if (!isDirty) {
             console.log("Auto-pulling server data (Local is not dirty).");
           } else {
             console.warn("Conflict detected: Local and Server both have new changes.");
-            // You could trigger a Conflict Modal here if you had one in the workspace
           }
         }
-        // 🟢 STABILIZER: Always set the "Memory" to the server's time
         setLastServerVersion(serverTime);
         if (localData && (localData.updatedAt > (localData.lastSync || 0))) {
-          // Use local data if we have uncommitted changes
           let localIndicators = localData.indicators;
           if (!localIndicators || localIndicators.length === 0) {
             localIndicators = INITIAL_INDICATORS;
           }
-          // 🟢 Inject rating from localData into first indicator
           if (localData.performance_rating && localIndicators.length > 0) {
             localIndicators = [...localIndicators];
             localIndicators[0] = { ...localIndicators[0], performance_rating: localData.performance_rating };
@@ -925,10 +833,8 @@ export const ObservationWorkspaceShell: React.FC<
           setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
           return;
         }
-        // If Server is newer (or no local data), use Server data
         let normalizedFromDb = normalizeIndicators(row.indicators);
         if (normalizedFromDb.length === 0) normalizedFromDb = INITIAL_INDICATORS;
-        // 🟢 Inject the top-level performance rating into the first indicator
         if (row.performance_rating && normalizedFromDb.length > 0) {
           normalizedFromDb = [...normalizedFromDb];
           normalizedFromDb[0] = { ...normalizedFromDb[0], performance_rating: row.performance_rating };
@@ -942,7 +848,6 @@ export const ObservationWorkspaceShell: React.FC<
           setIndicators(localData.indicators);
           setObservationStatus(localData.status ?? "draft");
           setScratchpadText(localData.scratchpadText ?? "");
-          // Restore "Memory" for offline functionality
           if (localData.lastSync) {
             setLastServerVersion(localData.lastSync);
           }
@@ -960,8 +865,6 @@ export const ObservationWorkspaceShell: React.FC<
       setSyncError(null);
       try {
         const existingOnDisk = await get<SavedObservationPayload>(storageKey);
-        // 🛡️ THE TRIPLE THREAT RESCUE
-        // We look in the payload, the rescued state, and finally the existing disk file.
         const safeTeacherId = payload.teacher_id || rescuedIds.teacher_id || existingOnDisk?.teacher_id || existingOnDisk?.meta?.teacher_id;
         const safeGrapeSeedId = payload.grapeseed_id || rescuedIds.grapeseed_id || existingOnDisk?.grapeseed_id || existingOnDisk?.meta?.grapeseed_id;
         const safePayload: SavedObservationPayload = {
@@ -973,16 +876,13 @@ export const ObservationWorkspaceShell: React.FC<
             teacher_id: safeTeacherId,
             grapeseed_id: safeGrapeSeedId
           },
-          // 🟢 FIX: Ensure updatedAt is ALWAYS fresh local time
           updatedAt: Date.now(),
-          // 🟢 FIX: Keep the existing receipt; handlePush on the Dashboard will update it
           lastSync: payload.lastSync || existingOnDisk?.lastSync || 0
         };
         await set(storageKey, safePayload);
         setLastSavedAt(safePayload.updatedAt);
         setSaveStatus("saved");
         isDirtyRef.current = false;
-        // Log for your peace of mind
         if (safeTeacherId && !payload.teacher_id) {
           console.log("🩹 ID Rescued during save:", safeTeacherId);
         }
@@ -1053,7 +953,6 @@ export const ObservationWorkspaceShell: React.FC<
         }
       }));
       isDirtyRef.current = true;
-      // Show the result modal
       setBatchResult({ changed, unchanged });
       setShowBatchResultModal(true);
     } catch (err: any) {
@@ -1068,12 +967,9 @@ export const ObservationWorkspaceShell: React.FC<
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
       setCanvasDirty(false);
     }
-    // 1. 🟢 FETCH EXISTING DATA FIRST
-    // This provides the 'existingOnDisk' reference and the 'lastSync' receipt.
     const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
     const existingOnDisk = await get<SavedObservationPayload>(storageKey);
     const lastSyncReceipt = existingOnDisk?.lastSync || lastServerVersionRef.current || 0;
-    // 2. BUILD THE PAYLOAD
     const newPayload: SavedObservationPayload = {
       id: observationMeta.id,
       teacher_id: rescuedIds.teacher_id || teacher_id,
@@ -1086,17 +982,13 @@ export const ObservationWorkspaceShell: React.FC<
       indicators,
       performance_rating: indicators[0]?.performance_rating || null,
       status: observationStatus,
-      // 🟢 MOVE TIME FORWARD: updatedAt (Now) > lastSync (Receipt) 
-      // This is what makes the Sync button turn BLUE.
       updatedAt: Date.now(),
       scratchpadText,
       adminSummaryVN
     };
-    // 3. SEND TO PERSIST
     persistObservation(newPayload);
   };
   const handleExportObservation = () => {
-    // Create a JSON export of the current observation
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
       teacher_id: rescuedIds.teacher_id || teacher_id,
@@ -1130,7 +1022,6 @@ export const ObservationWorkspaceShell: React.FC<
       setAdminSummaryVN(translatedSummary);
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
-        // 🟢 Explicit ID Rescue
         teacher_id: rescuedIds.teacher_id || teacher_id,
         grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
         meta: {
@@ -1153,7 +1044,6 @@ export const ObservationWorkspaceShell: React.FC<
     }
   };
   const handleBackToDashboard = () => {
-    // First, save any unsaved changes (same as before)
     if (isDirtyRef.current || canvasDirty) {
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
@@ -1173,7 +1063,6 @@ export const ObservationWorkspaceShell: React.FC<
       };
       persistObservation(payload);
     }
-    // Then open the backup prompt
     setShowBackupModal(true);
   };
   const handleToggleLock = () => {
@@ -1185,7 +1074,6 @@ export const ObservationWorkspaceShell: React.FC<
       observationStatus === "draft" ? "saved" : "draft";
     const payload: SavedObservationPayload = {
       id: observationMeta.id,
-      // 🟢 Explicit ID Rescue
       teacher_id: rescuedIds.teacher_id || teacher_id,
       grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
       meta: {
@@ -1313,7 +1201,6 @@ export const ObservationWorkspaceShell: React.FC<
         : baseModel;
     await exportAdminExcel(modelToExport);
   };
-  // 🟢 FIXED: Type definition added for newEdits
   const handleExportPreview = () => {
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
@@ -1328,7 +1215,6 @@ export const ObservationWorkspaceShell: React.FC<
       includeInTrainerSummary: !!ind.includeInTrainerSummary,
     }));
     const model = buildTeacherExportModel(metaForExport, exportIndicators, trainerName);
-    // 🟢 FIX: Explicitly type this object to satisfy TypeScript
     const newEdits: Record<string, { strengths: string; growths: string }> = {};
     indicators.forEach(ind => {
       if (!ind.commentText) {
@@ -1340,10 +1226,7 @@ export const ObservationWorkspaceShell: React.FC<
       const gLines: string[] = [];
       lines.forEach(line => {
         const safeLine = line || "";
-        // 1. Check for explicit (GA) marker
         const hasGaMarker = safeLine.includes('(GA)');
-        // 2. NEW RULE: Fallback to checkbox state if no marker is present
-        // It goes to Growth if: marker is present OR (Growth is checked AND Good is NOT)
         const shouldBeGrowth = hasGaMarker || (!ind.good && ind.growth);
         let clean = safeLine
           .replace(/\[.*?\]/g, '')
@@ -1366,15 +1249,12 @@ export const ObservationWorkspaceShell: React.FC<
     setExportPreview(model);
     setShowExportPreview(true);
   };
-  // 🟢 UPDATED: Handles Saving AND Jumping
   const handleSavePreview = (targetIndex?: any) => {
     console.log("🔒 Starting Strict Save...");
-    // 1. Determine if we are jumping (Check if arg is a number, not an Event object)
     const jumpTo = (typeof targetIndex === 'number') ? targetIndex : null;
     const newIndicators = indicators.map(ind => {
       const edit = previewEdits[ind.id];
       if (!edit) return ind;
-      // --- STEP 1: PARSE ORIGINAL ---
       const originalLines = ind.commentText ? ind.commentText.split('\n') : [];
       const originalContentMap = originalLines.reduce((acc, line) => {
         const lineWithoutSystemTags = line.replace(/\[(OCR|Hints)\]/gi, '').trim();
@@ -1384,7 +1264,6 @@ export const ObservationWorkspaceShell: React.FC<
         acc.push({ cues: extractedCues });
         return acc;
       }, [] as { cues: string }[]);
-      // --- STEP 2: PARSE EDITS ---
       const cleanSplit = (text: string) =>
         text.split('\n').map(t => t.trim()).filter(t => t.length > 0);
       const newStrengthLines = cleanSplit(edit.strengths);
@@ -1393,7 +1272,6 @@ export const ObservationWorkspaceShell: React.FC<
         ...newStrengthLines.map(t => ({ text: t, type: 'strength' })),
         ...newGrowthLines.map(t => ({ text: t, type: 'growth' }))
       ];
-      // --- STEP 3: STITCH ---
       const finalLines = allNewLines.map((lineObj, index) => {
         let finalText = lineObj.text;
         if (lineObj.type === 'strength') {
@@ -1410,7 +1288,6 @@ export const ObservationWorkspaceShell: React.FC<
         }
         return { text: finalText, type: lineObj.type };
       });
-      // --- STEP 4: FORMAT ---
       const finishedStrengths = finalLines.filter(l => l.type === 'strength').map(l => l.text);
       const finishedGrowths = finalLines.filter(l => l.type === 'growth').map(l => l.text);
       const sBlock = finishedStrengths.join('\n');
@@ -1425,10 +1302,8 @@ export const ObservationWorkspaceShell: React.FC<
         aiPendingReview: false
       };
     });
-    // 2. Commit Data
     setIndicators(newIndicators);
     isDirtyRef.current = true;
-    // 🟢 FIXED: Removed self-reference and manual lastSync
     const previewPayload: Omit<SavedObservationPayload, 'lastSync'> = {
       id: observationMeta.id,
       meta: { ...observationMeta, teacher_id: rescuedIds.teacher_id || teacher_id, grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id },
@@ -1439,11 +1314,8 @@ export const ObservationWorkspaceShell: React.FC<
       adminSummaryVN,
     };
     persistObservation(previewPayload as SavedObservationPayload);
-    // 3. Close Modal
     setShowExportPreview(false);
-    // 4. 🟢 JUMP (If requested)
     if (jumpTo !== null) {
-      // Small timeout ensures modal closes cleanly before slide switch
       setTimeout(() => setActiveIndex(jumpTo), 50);
     }
   };
@@ -1497,7 +1369,6 @@ export const ObservationWorkspaceShell: React.FC<
         return ind;
       });
       setIndicators(polishedIndicators);
-      // Re-run load logic to update preview
       const metaForExport = { teacherName, schoolName, campus, unit, lesson, supportType, date: observationMeta.date };
       const exportInds = polishedIndicators.map(ind => ({
         id: ind.id, number: ind.number, title: ind.title, description: ind.description,
@@ -1525,18 +1396,15 @@ export const ObservationWorkspaceShell: React.FC<
     }
   };
   const handleAdminPreview = async () => {
-    // 1. Save Canvas if dirty (Standard check)
     if (canvasDirty) {
       handleStrokesChange(activeIndex, indicators[activeIndex].strokes);
       setCanvasDirty(false);
     }
-    // 2. Validation
     const hasSummaryCandidates = indicators.some((i) => i.includeInTrainerSummary);
     if (!hasSummaryCandidates) {
       alert("Please check 'Include in Summary' for at least one indicator.");
       return;
     }
-    // 3. Build Base Model (Calculates everything except the AI summary)
     const metaForExport: ObservationMetaForExport = {
       teacherName,
       schoolName,
@@ -1557,8 +1425,6 @@ export const ObservationWorkspaceShell: React.FC<
       includeInTrainerSummary: !!ind.includeInTrainerSummary,
     }));
     const freshModel = buildAdminExportModel(metaForExport, exportIndicators, trainerName);
-    // 🟢 CRITICAL FIX: Explicitly load the saved 'adminSummaryVN' into the preview.
-    // This ensures that when you reopen the modal, your previous text is restored.
     const finalModel = {
       ...freshModel,
       trainerSummary: adminSummaryVN || "",
@@ -1573,18 +1439,14 @@ export const ObservationWorkspaceShell: React.FC<
       return;
     }
     const extractedLines: string[] = [];
-    // Loop through indicators marked for Admin report
     indicators.forEach(ind => {
       if (!ind.includeInTrainerSummary) return;
       const lines = ind.commentText?.split(/\r?\n/) || [];
       for (const line of lines) {
-        // Check if line starts with (GA) (ignoring leading spaces)
         if (/^\s*\(\s*GA\s*\)/i.test(line)) {
-          // Extract text inside square brackets (non-greedy)
           const bracketMatches = line.match(/\[(.*?)\]/g);
           if (bracketMatches) {
             bracketMatches.forEach(match => {
-              // Remove the brackets, keep the inner text
               const inner = match.slice(1, -1).trim();
               if (inner) extractedLines.push(inner);
             });
@@ -1596,19 +1458,15 @@ export const ObservationWorkspaceShell: React.FC<
       alert("No (GA) lines with bracket content found in Admin‑marked indicators.");
       return;
     }
-    // Format: each line starts with "- " and there is an empty line between points
     const formatted = extractedLines
       .map(text => `- ${text}`)
       .join("\n\n");
-    // Update the adminPreview state (which controls the textarea)
     setAdminPreview(prev => prev ? { ...prev, trainerSummary: formatted } : prev);
-    // Also update the persisted summary state
     setAdminSummaryVN(formatted);
   };
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const handleGenerateAiSummary = async () => {
     if (!adminPreview) return;
-    // Safety check: Don't overwrite existing text without warning
     if (adminPreview.trainerSummary && adminPreview.trainerSummary.length > 20) {
       const confirm = window.confirm("This will overwrite your current summary with a new AI draft. Are you sure?");
       if (!confirm) return;
@@ -1617,7 +1475,6 @@ export const ObservationWorkspaceShell: React.FC<
     try {
       const aiSummary = await generateAdminSummary(indicators);
       setAdminPreview(prev => prev ? { ...prev, trainerSummary: aiSummary } : prev);
-      // Optional: Auto-save to state so it persists if they close/reopen
       setAdminSummaryVN(aiSummary);
     } catch (err) {
       console.error("Summary Generation Error", err);
@@ -1628,17 +1485,13 @@ export const ObservationWorkspaceShell: React.FC<
   };
   const [canvasDirty, setCanvasDirty] = useState(false);
   useEffect(() => {
-    // 1. Don't save if we aren't ready or have no ID
     if (!observationMeta.id || !isMetadataReady) return;
-    // 2. Only save if something actually changed
-    // (isDirtyRef tracks comments/ratings, canvasDirty tracks ink)
     if (!isDirtyRef.current && !canvasDirty) return;
     if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = window.setTimeout(() => {
       console.log("💾 Auto-saving draft...");
       const payload: SavedObservationPayload = {
         id: observationMeta.id,
-        // Priority: Rescued ID > Props ID
         teacher_id: rescuedIds.teacher_id || teacher_id,
         grapeseed_id: rescuedIds.grapeseed_id || grapeseed_id,
         meta: {
@@ -1660,7 +1513,6 @@ export const ObservationWorkspaceShell: React.FC<
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
     };
   }, [
-    // 🟢 ALL ACTUAL DEPENDENCIES LISTED HERE:
     observationMeta,
     isMetadataReady,
     canvasDirty,
@@ -1673,10 +1525,8 @@ export const ObservationWorkspaceShell: React.FC<
     teacher_id,
     grapeseed_id
   ]);
-  // Update this useEffect
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Block if Canvas is dirty OR if we haven't successfully synced to server yet
       const hasUnsavedChanges = canvasDirty || saveStatus !== "saved" || syncError !== null;
       if (!hasUnsavedChanges) return;
       e.preventDefault();
@@ -1695,33 +1545,28 @@ export const ObservationWorkspaceShell: React.FC<
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // 🟢 DETECT SUPPORTED MIME TYPE
-      // Chrome uses 'audio/webm', Safari uses 'audio/mp4'
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
         : "audio/mp4";
-      mimeTypeRef.current = mimeType; // Save it for later
+      mimeTypeRef.current = mimeType;
       const recorder = new MediaRecorder(stream, { mimeType });
       audioChunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
       mediaRecorderRef.current = recorder;
-      recorder.start(1000); // 🟢 Capture chunks every 1s (safer than waiting for stop)
+      recorder.start(1000);
       setIsRecording(true);
     } catch (err) {
       console.error("Mic error", err);
       alert("Could not access microphone.");
     }
   };
-  // Inside ObservationWorkspaceShell.tsx
   const stopRecording = async (target: 'indicator' | 'admin') => {
     if (!mediaRecorderRef.current || !isRecording) return;
     const recorder = mediaRecorderRef.current;
-    // 🟢 Wrap in a promise to wait for the actual onstop event
     const onStopPromise = new Promise<void>((resolve) => {
       recorder.onstop = () => {
-        // 🟢 Cleanup: Explicitly stop tracks to turn off the mic light
         if (recorder.stream) {
           recorder.stream.getTracks().forEach((track) => track.stop());
         }
@@ -1731,9 +1576,7 @@ export const ObservationWorkspaceShell: React.FC<
     recorder.stop();
     setIsRecording(false);
     setIsTranscribing(true);
-    // 🟢 Wait for chunks to finalize
     await onStopPromise;
-    // 🔍 Debug: Check if we actually recorded audio
     const blobSize = audioChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
     console.log(`🎙️ Recording finished. Total Size: ${blobSize} bytes`);
     if (blobSize === 0) {
@@ -1741,7 +1584,6 @@ export const ObservationWorkspaceShell: React.FC<
       setIsTranscribing(false);
       return;
     }
-    // Use the stored mimeType or default to webm
     const mimeType = mimeTypeRef.current || "audio/webm";
     const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
     try {
@@ -1752,14 +1594,12 @@ export const ObservationWorkspaceShell: React.FC<
         alert("⚠️ Transcription returned empty text. Please try again.");
         return;
       }
-      // 🟢 Set dirty flag so the auto-save effect triggers
       isDirtyRef.current = true;
       if (target === 'indicator') {
         setIndicators(prev => {
           const newInds = [...prev];
           if (!newInds[activeIndex]) return prev;
           const existing = newInds[activeIndex].commentText || "";
-          // Append with a newline if existing text exists
           newInds[activeIndex] = {
             ...newInds[activeIndex],
             commentText: existing ? `${existing}\n${textToAdd}` : textToAdd
@@ -1782,13 +1622,11 @@ export const ObservationWorkspaceShell: React.FC<
   };
   const handlePolishWithAi = async (targetIndex: number) => {
     if (isAiPolishing) return;
-    // 1. Get snapshot for the API call
     const currentText = indicators[targetIndex]?.commentText;
     if (!currentText || !currentText.trim()) return;
     setIsAiPolishing(true);
     try {
       const polished = await polishTextWithGroq(currentText);
-      // 2. Perform functional update to guarantee no stale state
       setIndicators(prev => prev.map((ind, i) => {
         if (i !== targetIndex) return ind;
         const isAlreadyReviewing = ind.aiPendingReview;
@@ -1802,7 +1640,6 @@ export const ObservationWorkspaceShell: React.FC<
             aiPendingReview: true
           };
         } else {
-          // If AI returned same text, only clear flags if we were already in review
           return isAlreadyReviewing ? { ...ind, aiPendingReview: false, originalCommentText: null } : ind;
         }
       }));
@@ -1819,7 +1656,6 @@ export const ObservationWorkspaceShell: React.FC<
   };
   const handleConvertHandwritingToText = async () => {
     setOcrError(null);
-    // 1. Validation
     if (!active.strokes || active.strokes.length === 0) {
       setOcrError("No handwriting found.");
       return;
@@ -1827,20 +1663,12 @@ export const ObservationWorkspaceShell: React.FC<
     if (isOcrRunning) return;
     setIsOcrRunning(true);
     try {
-      // -------------------------------------------------------
-      // STEP 1: VISION (Gemini)
-      // -------------------------------------------------------
       console.log("👁️ Step 1: Sending image to Gemini (Vision)...");
-      // Use your existing strokesToPngBase64 or the new optimizer
       const { text: rawText, confidence } = await runOcrOnStrokes(active.strokes);
       if (!rawText) throw new Error("OCR returned empty text");
       console.log("✅ Step 1 Complete. Raw Text:", rawText);
-      // -------------------------------------------------------
-      // STEP 2: IMMEDIATE UPDATE (Show Raw Text)
-      // -------------------------------------------------------
       const now = Date.now();
       const existingComment = active.commentText.trim();
-      // Append [OCR] tag
       const rawCombined = existingComment
         ? `${existingComment}\n\n[OCR]\n${rawText}`
         : `[OCR]\n${rawText}`;
@@ -1852,41 +1680,29 @@ export const ObservationWorkspaceShell: React.FC<
         ocrPendingReview: true,
         aiPendingReview: false
       });
-      // -------------------------------------------------------
-      // STEP 3: PREPARE FOR POLISH (Client-Side Expansion)
-      // -------------------------------------------------------
       console.log("📖 Step 3: Expanding abbreviations...");
-      // Simple Client-Side Map (Add your full list here)
       const ABBREVIATION_MAP: Record<string, string> = {
         "PCs": "Phonogram cards",
         "PWCs": "Phonogram word cards",
         "TM": "Teaching materials",
         "CM": "Classroom management",
-        "(GA)": "(GA)", // Protect the tag
+        "(GA)": "(GA)",
       };
-      // Regex to match whole words only
       const expand = (t: string) => t.replace(/\b(PCs|PWCs|TM|CM)\b/g, m => ABBREVIATION_MAP[m] || m);
       const expandedText = expand(rawText);
-      // -------------------------------------------------------
-      // STEP 4: POLISH (Groq)
-      // -------------------------------------------------------
       console.log("✨ Step 4: Sending to Groq (Polish)...");
       try {
         const polishedText = await polishTextWithGroq(expandedText);
         console.log("✅ Step 4 Complete. Polished Text:", polishedText);
-        // -------------------------------------------------------
-        // STEP 5: FINAL UPDATE (Replace Raw with Polished)
-        // -------------------------------------------------------
         const finalCombined = existingComment
           ? `${existingComment}\n\n[OCR]\n${polishedText}`
           : `[OCR]\n${polishedText}`;
         updateIndicator(activeIndex, {
           commentText: finalCombined,
-          aiPendingReview: true // Marks it as "Polished" purple
+          aiPendingReview: true
         });
       } catch (polishErr) {
         console.warn("⚠️ Groq Polish failed. Keeping raw text.", polishErr);
-        // We don't alert here; the user at least has the raw text.
       }
     } catch (err) {
       console.error("❌ OCR Pipeline failed", err);
@@ -1949,7 +1765,6 @@ export const ObservationWorkspaceShell: React.FC<
     });
   };
   const updateIndicator = (index: number, patch: any) => {
-    // 🟢 NEW: Mark as dirty so we know to save later
     isDirtyRef.current = true;
     setIndicators((prev) =>
       prev.map((ind, i) => (i === index ? { ...ind, ...patch } : ind))
@@ -2157,7 +1972,6 @@ export const ObservationWorkspaceShell: React.FC<
                   onClick={handleConvertAllInk}
                   disabled={isLocked || isBatchOcrRunning || isAiPolishing}
                   style={{
-                    // Distinct color (e.g., Orange/Amber)
                     background: isBatchOcrRunning
                       ? "#d97706"
                       : "linear-gradient(135deg, #f59e0b, #b45309)",
@@ -2165,7 +1979,7 @@ export const ObservationWorkspaceShell: React.FC<
                     color: "white",
                     marginLeft: 8,
                     fontWeight: 500,
-                    minWidth: 100 // Prevent resize jitter when text changes
+                    minWidth: 100
                   }}
                 >
                   {isBatchOcrRunning ? (
@@ -2228,11 +2042,9 @@ export const ObservationWorkspaceShell: React.FC<
                 color: syncError ? "#ef4444" : "var(--text-muted)",
                 fontWeight: syncError ? "bold" : "normal",
                 textAlign: "right",
-                // 🟢 NEW: Allow clicking if it is a storage error
                 cursor: syncError && syncError.includes("Storage") ? "pointer" : "default",
                 textDecoration: syncError && syncError.includes("Storage") ? "underline" : "none"
               }}
-              // 🟢 NEW: The Rescue Action
               onClick={() => {
                 if (syncError && syncError.includes("Storage")) {
                   if (window.confirm("Storage is full. Clear all temporary data to fix this? (Your saved data is safe on the server).")) {
@@ -2283,7 +2095,6 @@ export const ObservationWorkspaceShell: React.FC<
                     flexShrink: 0,
                     display: "flex",
                     flexDirection: "column",
-                    // 🟢 FIX: Ensure transition doesn't fight with drag
                     transition: isSidebarResizing ? "none" : "width 0.2s ease-out"
                   }}
                 >
@@ -2306,13 +2117,10 @@ export const ObservationWorkspaceShell: React.FC<
                         </label>
                         <select
                           className="select"
-                          // Use the first indicator's rating as the source of truth for the dropdown
                           value={indicators[0]?.performance_rating || ""}
                           disabled={observationStatus === "saved"}
                           onChange={(e) => {
-                            // 🟢 The Fix: Cast 'val' to 'PerformanceRating'
                             const val = (e.target.value === "" ? null : e.target.value) as PerformanceRating;
-                            // Update ALL indicators so the rating is consistent across the entire observation object
                             setIndicators(prev => prev.map(ind => ({
                               ...ind,
                               performance_rating: val
@@ -2345,7 +2153,7 @@ export const ObservationWorkspaceShell: React.FC<
                         title={isResizerLocked ? "Unlock width resizing" : "Lock width resizing (Palm rejection)"}
                         style={{
                           padding: "4px 8px",
-                          color: isResizerLocked ? "#f43f5e" : "var(--text-muted)", // Red if locked
+                          color: isResizerLocked ? "#f43f5e" : "var(--text-muted)",
                           background: isResizerLocked ? "rgba(244, 63, 94, 0.1)" : "transparent",
                           border: isResizerLocked ? "1px solid rgba(244, 63, 94, 0.3)" : "1px solid transparent"
                         }}
@@ -2374,7 +2182,7 @@ export const ObservationWorkspaceShell: React.FC<
                     style={{
                       flexGrow: 1,
                       overflowY: 'auto', // 🟢 Allows scrolling
-                      paddingBottom: '40px', // 🟢 Space for the last item
+                      paddingBottom: '40px',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '8px'
@@ -2554,7 +2362,6 @@ export const ObservationWorkspaceShell: React.FC<
                   onTouchStart={startSidebarResize}
                   style={{
                     width: 12,
-                    // 🔒 CHANGE CURSOR: Indicates disabled state when locked
                     cursor: isResizerLocked ? "not-allowed" : "col-resize",
                     background: "transparent",
                     flexShrink: 0,
@@ -2562,13 +2369,11 @@ export const ObservationWorkspaceShell: React.FC<
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    // 🔒 CHANGE BORDER STYLE: Solid if Active/Unlocked, Dashed/Faint if Locked
                     borderLeft: isSidebarResizing
                       ? "2px solid var(--accent)"
                       : (isResizerLocked ? "1px dashed rgba(71, 85, 105, 0.5)" : "1px solid #334155"),
                     transition: "border-color 0.2s"
                   }}
-                  // Disable hover highlight if locked
                   onMouseEnter={(e) => !isResizerLocked && (e.currentTarget.style.borderLeft = "2px solid var(--accent)")}
                   onMouseLeave={(e) => !isSidebarResizing && !isResizerLocked && (e.currentTarget.style.borderLeft = "1px solid #334155")}
                 >
@@ -2621,7 +2426,7 @@ export const ObservationWorkspaceShell: React.FC<
                     onClick={handleGenerateAiSummary}
                     disabled={isGeneratingSummary}
                     style={{
-                      background: "linear-gradient(135deg, #f59e0b, #d97706)", // Amber/Orange
+                      background: "linear-gradient(135deg, #f59e0b, #d97706)",
                       color: "white",
                       border: "none"
                     }}
@@ -2654,10 +2459,10 @@ export const ObservationWorkspaceShell: React.FC<
                 borderBottom: "1px solid #334155",
                 marginBottom: "16px",
                 flexWrap: "wrap",
-                minHeight: "60px",        // ensures the bar is always visible
+                minHeight: "60px",
                 overflow: "visible",      // prevents hidden overflow
-                position: "relative",     // ensures proper stacking
-                zIndex: 5                 // keeps it above background elements
+                position: "relative",
+                zIndex: 5
               }}>
                 {/* Extract button */}
                 <button
@@ -2789,21 +2594,115 @@ export const ObservationWorkspaceShell: React.FC<
               {isDesktopMode ? (
                 <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                   <div className="pc-scroll-feed" style={{ overflowY: 'auto', padding: '20px', height: '100%' }}>
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={handleToggleAll}
-                        style={{ background: "rgba(30, 41, 59, 0.5)", border: "1px solid #334155", color: "#94a3b8", fontSize: 12 }}
-                      >
-                        {openRowIds.size === indicators.length ? "▲ Collapse All Rows" : "▼ Expand All Rows"}
-                      </button>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                      {/* Left side: List of indicators currently needing review (clickable, no trailing commas) */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {indicators.filter(ind => ind.aiPendingReview).length > 0 && (
+                          <>
+                            <span style={{ fontSize: 12, color: "#a78bfa", fontWeight: 600, whiteSpace: "nowrap" }}>
+                              ✨ Polished:
+                            </span>
+                            {indicators
+                              .filter(ind => ind.aiPendingReview)
+                              .map((item, idx) => (
+                                <React.Fragment key={item.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const globalIndex = indicators.findIndex(ind => ind.id === item.id);
+                                      if (globalIndex === -1) return;
+                                      scrollToIndicatorRef.current = item.id;
+                                      setActiveIndex(globalIndex);
+                                      setOpenRowIds(prev => {
+                                        const next = new Set(prev);
+                                        next.add(item.id);
+                                        return next;
+                                      });
+                                      setActiveRowId(item.id);
+                                    }}
+                                    style={{
+                                      background: "rgba(167, 139, 250, 0.15)",
+                                      border: "1px solid rgba(167, 139, 250, 0.4)",
+                                      color: "#c4b5fd",
+                                      borderRadius: "4px",
+                                      padding: "2px 8px",
+                                      fontSize: 12,
+                                      cursor: "pointer",
+                                      fontWeight: 500,
+                                    }}
+                                  >
+                                    {item.number}
+                                  </button>
+                                  {idx < indicators.filter(ind => ind.aiPendingReview).length - 1 && ' '}
+                                </React.Fragment>
+                              ))}
+                          </>
+                        )}
+                      </div>
+                      {/* Right side: Action buttons */}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {indicators.filter(ind => ind.aiPendingReview).length > 2 && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => {
+                                setIndicators(prev => prev.map(ind =>
+                                  ind.aiPendingReview ? { ...ind, aiPendingReview: false, originalCommentText: null } : ind
+                                ));
+                              }}
+                              style={{
+                                background: "rgba(34, 197, 94, 0.1)",
+                                border: "1px solid rgba(34, 197, 94, 0.4)",
+                                color: "#4ade80",
+                                fontSize: 12,
+                                padding: "4px 12px"
+                              }}
+                            >
+                              ✅ Approve All
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => {
+                                setIndicators(prev => prev.map(ind => {
+                                  if (!ind.aiPendingReview) return ind;
+                                  if (ind.originalCommentText != null) {
+                                    return {
+                                      ...ind,
+                                      commentText: ind.originalCommentText,
+                                      aiPendingReview: false,
+                                      originalCommentText: null
+                                    };
+                                  }
+                                  return { ...ind, aiPendingReview: false };
+                                }));
+                              }}
+                              style={{
+                                background: "rgba(239, 68, 68, 0.1)",
+                                border: "1px solid rgba(239, 68, 68, 0.4)",
+                                color: "#f87171",
+                                fontSize: 12,
+                                padding: "4px 12px"
+                              }}
+                            >
+                              ↩️ Reject All
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={handleToggleAll}
+                          style={{ background: "rgba(30, 41, 59, 0.5)", border: "1px solid #334155", color: "#94a3b8", fontSize: 12 }}
+                        >
+                          {openRowIds.size === indicators.length ? "▲ Collapse All Rows" : "▼ Expand All Rows"}
+                        </button>
+                      </div>
                     </div>
-                    {/* 🟢 FIXED: Add SortableContext wrapper and sort the map */}
-                    {/* 🟢 FIXED: Add SortableContext wrapper and sort the map */}
                     <SortableContext items={indicators.map(i => i.id)} strategy={verticalListSortingStrategy}>
                       {indicators
-                        .slice() // Copy array before sorting
+                        .slice()
                         .sort((a, b) => ((a as any).sortOrder || 0) - ((b as any).sortOrder || 0))
                         .map((ind, sortedIdx) => {
                           const globalIndex = indicators.findIndex(x => x.id === ind.id);
@@ -2814,7 +2713,6 @@ export const ObservationWorkspaceShell: React.FC<
                             <IndicatorRow
                               key={ind.id}
                               ind={ind}
-                              // 🟢 FIXED: Pass globalIndex so text, buttons, and toggles update the correct row
                               idx={globalIndex}
                               activeRowId={activeRowId}
                               openRowIds={openRowIds}
@@ -2922,12 +2820,12 @@ export const ObservationWorkspaceShell: React.FC<
                       <div
                         style={{
                           display: "flex",
-                          alignItems: "center",      // 👈 Vertical Center axis
+                          alignItems: "center",
                           justifyContent: "flex-start",
                           gap: 12,
                           marginBottom: 10,
                           marginTop: 4,
-                          height: "32px",            // 👈 Hard constraint on container
+                          height: "32px",
                         }}
                       >
                         {/* 1. The Dropdown Group */}
@@ -2948,16 +2846,13 @@ export const ObservationWorkspaceShell: React.FC<
                             value={activeIndex}
                             onChange={(e) => setActiveIndex(Number(e.target.value))}
                             style={{
-                              // Sizing
                               height: "32px",
                               minWidth: "220px",
                               maxWidth: "300px",
-                              boxSizing: "border-box", // Includes padding/border in height
-                              // Reset defaults
+                              boxSizing: "border-box",
                               margin: 0,
-                              padding: "0 24px 0 8px", // Right padding for arrow space
-                              // Visuals
-                              background: "#0f172a", // Dark background to match theme
+                              padding: "0 24px 0 8px",
+                              background: "#0f172a",
                               color: "#e2e8f0",
                               border: "1px solid #334155",
                               borderRadius: "6px",
@@ -2981,16 +2876,13 @@ export const ObservationWorkspaceShell: React.FC<
                             onClick={() => toggleGood(activeIndex)}
                             title="Mark as Good"
                             style={{
-                              // 🛑 STRICT RESET
                               appearance: "none",
                               margin: 0,
                               padding: 0,
-                              // Sizing
                               height: "32px",
                               width: "32px",
                               minWidth: "32px",
                               boxSizing: "border-box",
-                              // Visuals
                               borderRadius: "50%",
                               display: "flex",
                               alignItems: "center",
@@ -3131,7 +3023,6 @@ export const ObservationWorkspaceShell: React.FC<
                         onMouseDown={startCanvasResize}
                         onTouchStart={startCanvasResize}
                         style={{
-                          // 🔒 Visual feedback for locked state
                           cursor: isCanvasLocked ? "default" : "row-resize",
                           opacity: isCanvasLocked ? 0.2 : 1,
                           pointerEvents: isCanvasLocked ? "none" : "auto"
@@ -3367,9 +3258,7 @@ export const ObservationWorkspaceShell: React.FC<
                     }}
                   >
                     {(() => {
-                      // --- HELPERS ---
                       const isEmpty = (text: string | undefined) => !text || text.trim().length === 0;
-                      // 1. CALCULATE WARNINGS
                       const warningMap = indicators.reduce<Record<string, string[]>>((acc, ind) => {
                         const edit = previewEdits[ind.id] || { strengths: "", growths: "" };
                         const issues: string[] = [];
@@ -3382,7 +3271,6 @@ export const ObservationWorkspaceShell: React.FC<
                         if (issues.length > 0) acc[ind.number] = issues;
                         return acc;
                       }, {});
-                      // 2. SCROLL / JUMP HELPERS
                       const handleScrollToRow = (num: string) => {
                         const el = document.getElementById(`preview-row-${num}`);
                         if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -3402,7 +3290,6 @@ export const ObservationWorkspaceShell: React.FC<
                           </button>
                         ));
                       };
-                      // 3. ACTIONS
                       const handleApproveAll = () => {
                         if (!window.confirm("Mark ALL visible text as reviewed?")) return;
                         setIndicators(prev => prev.map(ind => ({
@@ -3417,7 +3304,6 @@ export const ObservationWorkspaceShell: React.FC<
                       const hasPending = Object.values(warningMap).some((list: string[]) => list.includes("pending-review"));
                       const hasEmptyGrowth = Object.values(warningMap).some((list: string[]) => list.includes("growth-empty"));
                       const hasTemplate = Object.values(warningMap).some((list: string[]) => list.includes("good-template"));
-                      // 4. INTERNAL BANNER COMPONENT
                       const Banner = ({ color, bg, icon, label, filter, action }: any) => (
                         <div style={{
                           display: 'flex',
@@ -3497,7 +3383,7 @@ export const ObservationWorkspaceShell: React.FC<
                               <button type="button" className="btn"
                                 style={{
                                   height: 40, minWidth: 140, borderRadius: 20, fontSize: 13, fontWeight: 600, border: "none", color: "white",
-                                  backgroundColor: "#06b6d4", // Teal/Cyan
+                                  backgroundColor: "#06b6d4",
                                   display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer"
                                 }}
                                 onClick={() => handleSavePreview()}
@@ -3579,13 +3465,11 @@ export const ObservationWorkspaceShell: React.FC<
                                             placeholder={ind.good ? "Add strengths..." : "Add text here (Will check 'Good')"}
                                             style={{
                                               width: "100%",
-                                              // 🟢 CHANGED: Increased minHeight to 120px for better iPad touch area
                                               minHeight: 120,
                                               fontSize: 13,
                                               background: "#1e293b", border: "1px solid #334155",
                                               color: "#e2e8f0", lineHeight: 1.5, padding: "10px",
                                               borderRadius: "8px",
-                                              // 🟢 CRITICAL: Enables dragging to resize vertically
                                               resize: "vertical"
                                             }}
                                             value={edit.strengths}
@@ -3639,14 +3523,12 @@ export const ObservationWorkspaceShell: React.FC<
                                             placeholder={ind.growth ? "Add growth areas..." : "Add text here (Will check 'Growth')"}
                                             style={{
                                               width: "100%",
-                                              // 🟢 CHANGED: Increased minHeight to 120px
                                               minHeight: 120,
                                               fontSize: 13,
                                               background: "#1e293b",
                                               border: isEmptyGrowth ? "1px solid #ef4444" : "1px solid #334155",
                                               color: "#e2e8f0", lineHeight: 1.5, padding: "10px",
                                               borderRadius: "8px",
-                                              // 🟢 CRITICAL: Enables dragging to resize vertically
                                               resize: "vertical"
                                             }}
                                             value={edit.growths}
@@ -3912,7 +3794,7 @@ export const ObservationWorkspaceShell: React.FC<
                 className="btn"
                 onClick={() => {
                   setShowBackupModal(false);
-                  onBack(); // Go back without download
+                  onBack();
                 }}
               >
                 Just Go Back
@@ -3926,9 +3808,7 @@ export const ObservationWorkspaceShell: React.FC<
                   border: "none"
                 }}
                 onClick={() => {
-                  // First download the backup
                   handleExportObservation();
-                  // Then go back
                   setShowBackupModal(false);
                   onBack();
                 }}
@@ -3990,7 +3870,6 @@ interface IndicatorRowProps {
   handleSendToTop: (id: string) => void;
   updateIndicator: (index: number, patch: any) => void;
 }
-// 🟢 REFACTORED UNIFIED ROW COMPONENT
 const IndicatorRow = React.memo(({
   ind, idx, isSidebar = false, activeRowId, openRowIds, pinnedRowIds,
   activeIndex, isAiPolishing, isRecording, isTranscribing,
@@ -3999,16 +3878,14 @@ const IndicatorRow = React.memo(({
   handlePolishWithAi, startRecording, stopRecording, handleCommentChange, handleSendToTop, updateIndicator
 }: IndicatorRowProps) => {
   const isExpanded =
-    openRowIds.has(ind.id) ||   // 🟢 Priority: Global Expand/Collapse state
-    activeRowId === ind.id ||   // Individual selection
-    pinnedRowIds.has(ind.id);   // Individual pins
+    openRowIds.has(ind.id) ||
+    activeRowId === ind.id ||
+    pinnedRowIds.has(ind.id);
   const isPinned = pinnedRowIds.has(ind.id);
   const hasInk = ind.strokes?.some(s => s.points && s.points.length > 0);
   const hasText = ind.commentText?.trim().length > 0;
   const [isHovered, setIsHovered] = useState(false);
-  // 🟢 STABILIZER: Ref for the textarea to replace jumpy autoFocus
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // 🟢 WARNING LOGIC: (Identical to your snippet)
   const isMissingComment = (ind.good || ind.growth) && !hasText;
   const needsReview = !!(ind.ocrPendingReview || ind.aiPendingReview);
   const convertInk = !!(hasInk && !ind.ocrUsed);
@@ -4021,13 +3898,11 @@ const IndicatorRow = React.memo(({
     isDragging
   } = useSortable({ id: ind.id });
   const style = {
-    // 🟢 FIXED: Use Translate instead of Transform to prevent text stretching
     transform: CSS.Translate.toString(transform),
     transition,
     zIndex: isDragging ? 100 : 1,
     opacity: isDragging ? 0.5 : 1,
   };
-  // 🟢 STABILIZER: Focus without scrolling when expanding
   useEffect(() => {
     if (isExpanded && !isSidebar && textareaRef.current) {
       textareaRef.current.focus({ preventScroll: true });
@@ -4039,8 +3914,9 @@ const IndicatorRow = React.memo(({
   };
   return (
     <div
-      ref={setNodeRef} /* 🟢 FIXED: Attach DND Ref */
+      ref={setNodeRef}
       key={ind.id}
+      data-indicator-id={ind.id}
       className={`pc-row ${isExpanded ? "active" : ""}`}
       onClick={handleClick}
       onDoubleClick={(e) => {
@@ -4067,7 +3943,7 @@ const IndicatorRow = React.memo(({
           <div
             {...attributes}
             {...listeners}
-            onClick={(e) => e.stopPropagation()} // Stop accordion toggle when grabbing
+            onClick={(e) => e.stopPropagation()}
             style={{ cursor: isDragging ? 'grabbing' : 'grab', padding: '4px', touchAction: 'none', display: 'flex', alignItems: 'center' }}
           >
             <svg width="12" height="18" viewBox="0 0 12 18" fill={isHovered ? "#94a3b8" : "#475569"}>
@@ -4110,7 +3986,7 @@ const IndicatorRow = React.memo(({
               background: "none",
               border: "none",
               cursor: "pointer",
-              color: isPinned ? "#f43f5e" : "#94a3b8", // Rose if pinned, slate if not
+              color: isPinned ? "#f43f5e" : "#94a3b8",
               opacity: isPinned ? 1 : 0.5,
               transition: "all 0.2s",
               display: "flex",
@@ -4141,7 +4017,7 @@ const IndicatorRow = React.memo(({
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.opacity = "1";
-              e.currentTarget.style.color = "#3b82f6"; // Blue highlight on hover
+              e.currentTarget.style.color = "#3b82f6";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.opacity = "0.5";
@@ -4155,96 +4031,98 @@ const IndicatorRow = React.memo(({
             style={{ marginLeft: 4, accentColor: "var(--accent)" }} />
         </div>
       </div>
-      {isExpanded && (
-        <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
-          <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: isSidebar ? 0 : 12 }}>{ind.description}</p>
-          {!isSidebar && (
-            <>
-              {/* 🟢 NEW: Track Changes (Diff) View for PC Mode */}
-              {ind.aiPendingReview && (ind.originalCommentText || ind.originalCommentText === "") && (
-                <div style={{
-                  padding: "12px", background: "#020617", border: "1px solid rgba(168, 85, 247, 0.5)",
-                  borderRadius: "8px", fontSize: "13px", marginBottom: "8px",
-                  whiteSpace: "pre-wrap", lineHeight: "1.5", color: "#e2e8f0"
-                }}>
-                  <div style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", marginBottom: "6px", color: "#c084fc" }}>Track Changes (AI Edits):</div>
-                  {getDiff((ind as IndicatorState & { originalCommentText?: string }).originalCommentText, ind.commentText).map((part, index) => {
-                    if (part.type === 'add') {
-                      return <span key={index} style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', fontWeight: 600, padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
-                    } else if (part.type === 'remove') {
-                      return <span key={index} style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', textDecoration: 'line-through', padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
-                    }
-                    return <span key={index}>{part.value}</span>;
-                  })}
-                </div>
-              )}
-              {ind.aiPendingReview && (
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
-                  background: "rgba(168, 85, 247, 0.1)", padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(168, 85, 247, 0.3)"
-                }}>
-                  <span style={{ fontSize: 12, color: "#c084fc", fontWeight: 600 }}>✨ AI polished this text. Please review.</span>
-                  <div style={{ display: "flex", gap: "6px" }}>
-                    <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)" }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        updateIndicator(idx, {
-                          commentText: ind.originalCommentText || ind.commentText,
-                          aiPendingReview: false,
-                          originalCommentText: null
-                        });
-                      }}>
-                      ↩️ Revert
-                    </button>
-                    <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "#10b981", color: "white", border: "none" }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        updateIndicator(idx, {
-                          aiPendingReview: false,
-                          originalCommentText: null
-                        });
-                      }}>
-                      ✅ Accept
-                    </button>
+      {
+        isExpanded && (
+          <div style={{ marginTop: 16, borderTop: "1px solid #334155", paddingTop: 16 }}>
+            <p style={{ fontSize: 13, color: "#cbd5e1", marginBottom: isSidebar ? 0 : 12 }}>{ind.description}</p>
+            {!isSidebar && (
+              <>
+                {/* 🟢 NEW: Track Changes (Diff) View for PC Mode */}
+                {ind.aiPendingReview && (ind.originalCommentText || ind.originalCommentText === "") && (
+                  <div style={{
+                    padding: "12px", background: "#020617", border: "1px solid rgba(168, 85, 247, 0.5)",
+                    borderRadius: "8px", fontSize: "13px", marginBottom: "8px",
+                    whiteSpace: "pre-wrap", lineHeight: "1.5", color: "#e2e8f0"
+                  }}>
+                    <div style={{ fontSize: "10px", fontWeight: "bold", textTransform: "uppercase", marginBottom: "6px", color: "#c084fc" }}>Track Changes (AI Edits):</div>
+                    {getDiff((ind as IndicatorState & { originalCommentText?: string }).originalCommentText, ind.commentText).map((part, index) => {
+                      if (part.type === 'add') {
+                        return <span key={index} style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', fontWeight: 600, padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                      } else if (part.type === 'remove') {
+                        return <span key={index} style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', textDecoration: 'line-through', padding: '0 2px', borderRadius: '2px' }}>{part.value}</span>;
+                      }
+                      return <span key={index}>{part.value}</span>;
+                    })}
                   </div>
-                </div>
-              )}
-              {/* End of AI Polish UI */}
-              {/* End of AI Polish UI */}
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setActiveIndex(idx); handlePolishWithAi(idx); }} disabled={isAiPolishing || ind.commentText.length < 5}>
-                  {isAiPolishing ? "✨..." : "✨ AI Polish"}
-                </button>
-                <button type="button" className="btn" onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveIndex(idx);
-                  isRecording ? stopRecording('indicator') : startRecording();
-                }}
-                  style={{
-                    background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
-                    border: "1px solid var(--accent)",
-                    color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
-                    padding: "4px 12px", fontSize: 12, borderRadius: 20
+                )}
+                {ind.aiPendingReview && (
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
+                    background: "rgba(168, 85, 247, 0.1)", padding: "8px 12px", borderRadius: "8px", border: "1px solid rgba(168, 85, 247, 0.3)"
+                  }}>
+                    <span style={{ fontSize: 12, color: "#c084fc", fontWeight: 600 }}>✨ AI polished this text. Please review.</span>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateIndicator(idx, {
+                            commentText: ind.originalCommentText || ind.commentText,
+                            aiPendingReview: false,
+                            originalCommentText: null
+                          });
+                        }}>
+                        ↩️ Revert
+                      </button>
+                      <button type="button" className="btn" style={{ padding: "4px 12px", fontSize: 11, background: "#10b981", color: "white", border: "none" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateIndicator(idx, {
+                            aiPendingReview: false,
+                            originalCommentText: null
+                          });
+                        }}>
+                        ✅ Accept
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* End of AI Polish UI */}
+                {/* End of AI Polish UI */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setActiveIndex(idx); handlePolishWithAi(idx); }} disabled={isAiPolishing || ind.commentText.length < 5}>
+                    {isAiPolishing ? "✨..." : "✨ AI Polish"}
+                  </button>
+                  <button type="button" className="btn" onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveIndex(idx);
+                    isRecording ? stopRecording('indicator') : startRecording();
                   }}
-                >
-                  {isTranscribing && activeIndex === idx ? "⌛..." : (isRecording && activeIndex === idx) ? "🛑 Stop" : "🎤 Rec"}
-                </button>
-              </div>
-              <textarea
-                ref={textareaRef} // 🟢 STABILIZER: Controlled focus
-                value={ind.commentText}
-                onChange={(e) => handleCommentChange(idx, e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  width: "100%", minHeight: 120, background: "#020617", color: "white", padding: 12, borderRadius: 8,
-                  border: isMissingComment ? "1px solid #ef4444" : needsReview ? "1px solid #eab308" : "1px solid #475569"
-                }}
-                placeholder="Type your observations here..."
-              />
-            </>
-          )}
-        </div>
-      )}
-    </div>
+                    style={{
+                      background: (isRecording && activeIndex === idx) ? "#ef4444" : "transparent",
+                      border: "1px solid var(--accent)",
+                      color: (isRecording && activeIndex === idx) ? "white" : "var(--accent)",
+                      padding: "4px 12px", fontSize: 12, borderRadius: 20
+                    }}
+                  >
+                    {isTranscribing && activeIndex === idx ? "⌛..." : (isRecording && activeIndex === idx) ? "🛑 Stop" : "🎤 Rec"}
+                  </button>
+                </div>
+                <textarea
+                  ref={textareaRef}
+                  value={ind.commentText}
+                  onChange={(e) => handleCommentChange(idx, e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: "100%", minHeight: 120, background: "#020617", color: "white", padding: 12, borderRadius: 8,
+                    border: isMissingComment ? "1px solid #ef4444" : needsReview ? "1px solid #eab308" : "1px solid #475569"
+                  }}
+                  placeholder="Type your observations here..."
+                />
+              </>
+            )}
+          </div>
+        )
+      }
+    </div >
   );
 });
