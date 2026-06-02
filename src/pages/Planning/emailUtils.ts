@@ -1,30 +1,34 @@
 // src/pages/Planning/emailUtils.ts
-
 export interface EmailBatch {
   id: string;
   schoolName: string;
-  officialCode?: string; 
-  campusId?: string;    // <--- ADD THIS
-  visitationLink?: string;   // <--- ADD THIS
+  officialCode?: string;
+  campusId?: string;
+  visitationLink?: string;
   type: 'LVA' | 'Visit';
-  adminEmail: string;
-  amEmail: string;
-  subject: string;
+  supportSequence?: number;
+  monthName?: string;
+  adminEmail?: string;
+  amEmail?: string;
+  editableTo?: string;
+  editableCc?: string;
+  editableSubject?: string;
+  editableBody?: string;
   meta: {
-    deadline: string; 
+    deadline?: string;
+    visitDate?: string;
   };
   teachers: {
     id: string;
     name: string;
     email: string;
     campus: string;
-    planId: string;
-    meta: {
-      classTime: string; 
+    planId?: string;
+    meta?: {
+      classTime?: string;
     };
   }[];
 }
-
 export const groupSelectedToBatches = (
   selectedIds: Set<string>,
   teachers: any[],
@@ -32,67 +36,53 @@ export const groupSelectedToBatches = (
   schoolMap: Record<string, any>,
   targetMonthKey: string
 ): EmailBatch[] => {
-  
-  const batches: Record<string, EmailBatch> = {};
-
-  selectedIds.forEach((teacherId) => {
+  const batches: EmailBatch[] = [];
+  selectedIds.forEach(teacherId => {
     const teacher = teachers.find(t => t.id === teacherId);
     if (!teacher) return;
-
-    // 1. Find the plan using Teacher ID & Month
-    // REMOVED: p.school_name check (caused the empty list bug)
-    const plan = plans.find(p => 
-      p.teacher_id === teacherId && 
-      p.month_key === targetMonthKey
+    const teacherPlans = plans.filter(
+      p => p.teacher_id === teacherId && p.month_key === targetMonthKey
     );
-    
-    if (!plan) return;
-
-    const type = plan.activity_type as 'LVA' | 'Visit';
-    
-    // 2. Grouping Key
-    // Fallback: If school_id is null, use school_name to ensure we still group
-    const schoolKey = teacher.school_id || teacher.school_name;
-    const batchKey = `${schoolKey}-${type}`; 
-
-    if (!batches[batchKey]) {
-      // 3. Lookup Emails
-      // Try looking up by ID first, fallback to Name if ID lookup fails
+    teacherPlans.forEach(plan => {
       const schoolData = schoolMap[teacher.school_id] || schoolMap[teacher.school_name] || {};
-      
-      batches[batchKey] = {
-        id: batchKey,
+      const monthName = new Date(targetMonthKey + '-01').toLocaleString('default', { month: 'long' });
+      batches.push({
+        id: plan.id,
         schoolName: teacher.school_name,
         officialCode: schoolData.official_code,
         campusId: schoolData.campus_id,
-        type: type,
+        type: plan.activity_type as 'LVA' | 'Visit',
+        supportSequence: plan.support_sequence || 1,
+        monthName,
         adminEmail: schoolData.admin_email || '',
         amEmail: schoolData.am_email || '',
-        subject: generateSubject(type, teacher.school_name, targetMonthKey),
-        meta: { deadline: '' },
-        teachers: []
-      };
-    }
-
-    batches[batchKey].teachers.push({
-      id: teacher.id,
-      name: teacher.name,
-      email: teacher.email || '',
-      campus: teacher.campus,
-      planId: plan.id,
-      meta: { classTime: '' }
+        teachers: [{
+          id: teacher.id,
+          name: teacher.name,
+          email: teacher.email || '',
+          campus: teacher.campus,
+          planId: plan.id,
+          meta: { classTime: plan.meta?.visitTime || '' }
+        }],
+        visitationLink: '',
+        editableTo: teacher.email,
+        editableCc: '',
+        editableSubject: '',
+        editableBody: '',
+        meta: {
+          deadline: plan.meta?.deadline || '',
+          visitDate: plan.meta?.visitDate || ''
+        }
+      });
     });
   });
-
-  return Object.values(batches);
+  return batches;
 };
-
 const generateSubject = (type: 'LVA' | 'Visit', schoolName: string, monthKey: string) => {
   const [year, month] = monthKey.split('-');
   const dateObj = new Date(parseInt(year), parseInt(month) - 1);
   const monthName = dateObj.toLocaleString('default', { month: 'long' });
-
-  return type === 'Visit' 
+  return type === 'Visit'
     ? `[GrapeSEED] - Onsite visit at ${schoolName} in ${monthName}`
     : `[GrapeSEED] - Lesson video analysis support at ${schoolName} in ${monthName}`;
 };

@@ -1,151 +1,156 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AlertCircle, Lock } from 'lucide-react';
-
 interface GridCellProps {
   teacher: any;
   monthKey: string;
   activeTool: 'LVA' | 'Visit' | 'Eraser' | null;
-  existingPlan: any;     
-  pendingUpdate: any;    
-  isPendingDelete: boolean; 
+  plansForCell: any[];
   matchingObs: any;
   allPlans: any[];
-  allPendingUpdates: Record<string, any>; // NEW: Needed for realtime conflicts
+  allPendingUpdates: Record<string, any>;
   onOpenMenu: (x: number, y: number, teacher: any, monthKey: string, plan: any) => void;
-  onQueueChange: (action: 'upsert' | 'delete', key: string, payload?: any, id?: string) => void;
+  onQueueChange: (action: 'upsert' | 'delete', key: string, payload?: any, id?: string, sequence?: number) => void;
 }
-
 const GridCell: React.FC<GridCellProps> = ({
   teacher,
   monthKey,
   activeTool,
-  existingPlan,
-  pendingUpdate,
-  isPendingDelete,
+  plansForCell,          // new prop (array of plans)
   matchingObs,
   allPlans,
-  allPendingUpdates, // NEW
+  allPendingUpdates,
   onOpenMenu,
   onQueueChange
 }) => {
-
-  // 1. Determine Effective Plan
-  const effectivePlan = isPendingDelete ? null : (pendingUpdate || existingPlan);
-
-  // 2. REALTIME CONFLICT DETECTION
-  const hasConflict = useMemo(() => {
-    if (!teacher.grapeseed_id) return false;
-
-    // A. Check Database Plans
-    const conflictInDB = allPlans.some(p => 
-      p.grapeseed_id === teacher.grapeseed_id && 
-      p.month_key === monthKey && 
-      p.teacher_id !== teacher.id
-    );
-
-    // B. Check Pending Drafts (The missing link!)
-    const conflictInDrafts = Object.values(allPendingUpdates).some((p: any) => 
-      p.grapeseed_id === teacher.grapeseed_id && 
-      p.month_key === monthKey && 
-      p.teacher_id !== teacher.id
-    );
-
-    return conflictInDB || conflictInDrafts;
-  }, [teacher.grapeseed_id, monthKey, allPlans, allPendingUpdates, teacher.id]);
-
-  const isComplete = !!matchingObs;
-  const displayType = isComplete ? matchingObs.support_type : effectivePlan?.activity_type;
-  
-// --- HANDLE CLICK (Logic to resurrect deleted plans) ---
+  const [eraserPopover, setEraserPopover] = useState<{ x: number; y: number } | null>(null);
+  const [planSelector, setPlanSelector] = useState<{ x: number; y: number; plans: any[] } | null>(null);
+  // --- status helpers ---
+  const nonCancelled = plansForCell.filter(p => p.status !== 'cancelled');
+  const allCompleted = nonCancelled.length > 0 && nonCancelled.every(p => p.status === 'completed');
+  const someCompleted = nonCancelled.some(p => p.status === 'completed') && !allCompleted;
+  // badge text
+  const summary = useMemo(() => {
+    if (!plansForCell.length) return null;
+    const types = plansForCell.filter(p => p.status !== 'cancelled').map(p => p.activity_type);
+    const lvaCount = types.filter(t => t === 'LVA').length;
+    const visitCount = types.filter(t => t === 'Visit').length;
+    if (lvaCount && visitCount) return `LVA${lvaCount > 1 ? lvaCount : ''}+Visit${visitCount > 1 ? visitCount : ''}`;
+    if (lvaCount) return `LVA${lvaCount > 1 ? ` ×${lvaCount}` : ''}`;
+    if (visitCount) return `Visit${visitCount > 1 ? ` ×${visitCount}` : ''}`;
+    return null;
+  }, [plansForCell]);
   const handleClick = () => {
-    if (!activeTool || isComplete) return;
-
-    const cellKey = `${teacher.id}-${monthKey}`;
-
+    if (!activeTool || allCompleted) return;
     if (activeTool === 'Eraser') {
-      if (effectivePlan) {
-        onQueueChange('delete', cellKey, undefined, effectivePlan.id);
+      const deletable = plansForCell.filter(p => p.status !== 'completed');
+      if (deletable.length === 0) return;
+      if (deletable.length === 1) {
+        const plan = deletable[0];
+        onQueueChange('delete', `${teacher.id}-${monthKey}-${plan.id}`, undefined, plan.id, plan.support_sequence);
+      } else {
+        setEraserPopover({ x: 0, y: 0 }); // will be shown via absolute popup
       }
-    } else {
-      // Prepare Payload
-      // FIX: Use existingPlan.id if effectivePlan is null (because it was pending delete)
-      const planIdToUse = effectivePlan?.id || (isPendingDelete ? existingPlan?.id : undefined);
-
-      const payload = {
-        trainer_id: teacher.trainer_id,
-        teacher_id: teacher.id,
-        grapeseed_id: teacher.grapeseed_id,
-        school_name: teacher.school_name, 
-        month_key: monthKey,
-        activity_type: activeTool,
-        status: 'planned',
-        updated_at: new Date().toISOString(),
-        id: planIdToUse 
-      };
-      
-      onQueueChange('upsert', cellKey, payload, planIdToUse);
+      return;
     }
+    // Add new plan
+    const nextSeq = Math.max(0, ...plansForCell.map(p => p.support_sequence || 0)) + 1;
+    const newPlanId = crypto.randomUUID();
+    const payload = {
+      id: newPlanId,
+      trainer_id: teacher.trainer_id,
+      teacher_id: teacher.id,
+      grapeseed_id: teacher.grapeseed_id,
+      school_name: teacher.school_name,
+      month_key: monthKey,
+      activity_type: activeTool,
+      support_sequence: nextSeq,
+      status: 'planned',
+      updated_at: new Date().toISOString()
+    };
+    onQueueChange('upsert', `${teacher.id}-${monthKey}-${newPlanId}`, payload, newPlanId, nextSeq);
   };
-
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (isComplete) return;
-    onOpenMenu(e.clientX, e.clientY, teacher, monthKey, effectivePlan);
+    if (allCompleted) return;
+    const activePlans = plansForCell.filter(p => p.status !== 'completed' && p.status !== 'cancelled');
+    if (activePlans.length === 0) return;
+    if (activePlans.length === 1) {
+      onOpenMenu(e.clientX, e.clientY, teacher, monthKey, activePlans[0]);
+    } else {
+      setPlanSelector({ x: e.clientX, y: e.clientY, plans: activePlans });
+    }
   };
-
-
+  // … keep the rest of the cell rendering (CSS classes, icons) but adapt them to allCompleted/someCompleted.
+  // Example: cell class
   const getCellClass = () => {
     let base = "grid-cell ";
-    
-    // Status Styles
-    if (isComplete) base += "cell-complete ";
-    else if (effectivePlan?.status === 'cancelled') base += "cell-cancelled ";
-    
-    // INDICATORS
-    if (isPendingDelete) {
-      base += "cell-pending-delete "; // Red Triangle
-    } else if (pendingUpdate) {
-      base += "cell-unsaved ";        // Orange Triangle
+    if (allCompleted) base += "cell-complete ";
+    else if (someCompleted) base += "cell-partial ";
+    else if (nonCancelled.length > 0) {
+      if (nonCancelled[0].activity_type === 'LVA') base += "cell-lva";
+      else if (nonCancelled[0].activity_type === 'Visit') base += "cell-visit";
     }
-
-    // Activity Colors
-    // Note: If deleted, effectivePlan is null, so no color is applied (Empty cell with Red Triangle)
-    if (displayType === 'LVA') base += "cell-lva";
-    else if (displayType === 'Visit') base += "cell-visit";
-    else base += "cell-empty";
-
     return base.trim();
   };
-
   return (
-    <td 
-      className={getCellClass()} 
-      onClick={handleClick}
-      onContextMenu={handleContextMenu}
-    >
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        {displayType && <span className="activity-label">{displayType}</span>}
-        
-        <div className="cell-icons">
-          {isComplete && <Lock className="lock-icon" />}
-          {/* Conflict Warning */}
-          {hasConflict && (
-            <span title="Conflict: Teacher supported at another school this month">
-              <AlertCircle size={10} className="conflict-icon" />
-            </span>
-          )}
-          {effectivePlan?.notes && <div className="notes-indicator" />}
+    <>
+      <td className={getCellClass()} onClick={handleClick} onContextMenu={handleContextMenu}>
+        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+          {summary && <span className="activity-label">{summary}</span>}
+          <div className="cell-icons">
+            {allCompleted && <Lock className="lock-icon" />}
+            {!allCompleted && plansForCell.length > 0 && (
+              <div className="notes-indicator" />
+            )}
+          </div>
         </div>
-
-        {effectivePlan && effectivePlan.trainer_id !== teacher.trainer_id && (
-          <div style={{
-            position: 'absolute', bottom: '2px', right: '2px', fontSize: '8px',
-            color: '#94a3b8', background: '#1e293b', padding: '1px 2px', borderRadius: '2px'
-          }}>O</div>
-        )}
-      </div>
-    </td>
+      </td>
+      {/* Eraser popover */}
+      {eraserPopover && (
+        <div className="menu-overlay" onClick={() => setEraserPopover(null)}>
+          <div className="planning-context-menu" style={{ position: 'fixed', top: '40%', left: '40%' }}>
+            <div className="menu-header" style={{ color: '#f8fafc', marginBottom: '8px' }}>Select plan to delete</div>
+            {plansForCell.filter(p => p.status !== 'completed').map(plan => (
+              <button
+                key={plan.id}
+                className="btn-save"
+                style={{ marginBottom: '4px', display: 'block', width: '100%' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onQueueChange('delete', `${teacher.id}-${monthKey}-${plan.id}`, undefined, plan.id, plan.support_sequence);
+                  setEraserPopover(null);
+                }}
+              >
+                {plan.activity_type} #{plan.support_sequence}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Right-click plan selector */}
+      {planSelector && (
+        <div className="menu-overlay" onClick={() => setPlanSelector(null)}>
+          <div className="planning-context-menu" style={{ position: 'fixed', top: planSelector.y, left: planSelector.x }}>
+            <div className="menu-header" style={{ color: '#f8fafc' }}>Choose support to edit</div>
+            {planSelector.plans.map((plan: any) => (
+              <button
+                key={plan.id}
+                className="btn-save"
+                style={{ marginBottom: '4px', display: 'block', width: '100%' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPlanSelector(null);
+                  onOpenMenu(planSelector.x, planSelector.y, teacher, monthKey, plan);
+                }}
+              >
+                {plan.activity_type} #{plan.support_sequence}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
+  // Also include the eraser popover and plan selector popover rendering.
 };
-
 export default GridCell;
