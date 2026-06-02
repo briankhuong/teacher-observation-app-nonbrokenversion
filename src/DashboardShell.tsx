@@ -930,14 +930,18 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       const importedData = JSON.parse(text);
       // Handle both single observation and array
       const observationsToImport = Array.isArray(importedData) ? importedData : [importedData];
+      // Clear any pending delete flags for the imported observation(s)
+      const pendingDeletes = (await get<string[]>('pending_deletes')) || [];
+      const updatedDeletes = pendingDeletes.filter(id => !observationsToImport.some(o => o.id === id));
+      if (updatedDeletes.length !== pendingDeletes.length) {
+        await set('pending_deletes', updatedDeletes);
+      }
       for (const obs of observationsToImport) {
         if (!obs.id) continue;
-        // Check if already exists (optional prompt)
         const existing = await get(`${STORAGE_PREFIX}${obs.id}`);
         if (existing) {
           if (!confirm(`Observation ${obs.id} already exists. Overwrite?`)) continue;
         }
-        // Save to IndexedDB
         await set(`${STORAGE_PREFIX}${obs.id}`, obs);
       }
       alert(`Imported ${observationsToImport.length} observation(s). Refreshing...`);
@@ -2632,25 +2636,20 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           .delete()
           .eq("id", obs.id)
           .select("id");
+        // Real server error – e.g., network or permissions
         if (error) throw error;
-        if (!deletedRows || deletedRows.length === 0) {
-          // Delete failed on server – revert by removing from pending deletes
-          const updatedPending = (await get<string[]>("pending_deletes")) || [];
-          const filtered = updatedPending.filter((id) => id !== obs.id);
-          await set("pending_deletes", filtered);
-          alert(
-            "Failed to delete observation from server. It may reappear until the issue is resolved.\n\n" +
-            "Please check your permissions and try again."
-          );
-          // Re-add the observation to UI (since server still has it)
-          await refreshDashboard();
-          return;
+        // If the observation existed on the server, it's now deleted.
+        // If it didn't exist (imported locally), that's fine – just clean up locally.
+        if (deletedRows && deletedRows.length > 0) {
+          console.log("✅ Deleted from server.");
+        } else {
+          console.log("ℹ️ Observation not on server – cleaning up locally.");
         }
-        // Delete succeeded – also clean local files
+        // Always remove local files and update the backup list
         await del(`${STORAGE_PREFIX}${obs.id}`).catch(() => { });
         const backup = (await get<any[]>("dashboard_backup_list")) || [];
         await set("dashboard_backup_list", backup.filter((item) => item.id !== obs.id));
-        console.log("✅ Deleted from server and local.");
+        console.log("✅ Local cleanup complete.");
       } catch (err) {
         console.error("Online delete error:", err);
         // Keep ID in pending_deletes so it will be retried on next sync or reload
