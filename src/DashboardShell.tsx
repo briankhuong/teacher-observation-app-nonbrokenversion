@@ -495,14 +495,14 @@ async function enrichObservationsWithDefaults(rawObs: DashboardObservationRow[])
       tDefaultUrl ||
       null;
     const finalAdminUrl =
-      (obs as any).adminWorkbookUrl ||
-      obs.meta?.adminWorkbookUrl ||
-      sDefaults?.adminUrl ||
+      sDefaults?.adminUrl ??                          // 1. school default (current)
+      obs.meta?.adminWorkbookUrl ??                   // 2. stored meta (backup)
+      (obs as any).adminWorkbookUrl ??                // 3. top‑level (also backup)
       null;
     const finalViewUrl =
-      (obs as any).adminViewOnlyUrl ||
-      obs.meta?.adminWorkbookViewUrl ||
-      sDefaults?.viewUrl ||
+      sDefaults?.viewUrl ??
+      obs.meta?.adminWorkbookViewUrl ??
+      (obs as any).adminViewOnlyUrl ??
       null;
     return {
       ...obs,
