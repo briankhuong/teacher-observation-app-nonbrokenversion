@@ -1576,22 +1576,23 @@ router.post("/api/sync-school-status", async (req, res) => {
             return;
           }
           const { adminName, adminEmail, adminPhone } = await enrichCampusAdmin(code, apiCampus);
-          const hasEmptyClass = await checkEmptyClasses(code, apiCampus.id); // 🟢 CHECK EMPTY CLASSES
+          const hasEmptyClass = await checkEmptyClasses(code, apiCampus.id);
           const finalPhone = adminPhone || apiCampus.phone || null;
           const normalized = (s) => (s || "").trim().toLowerCase();
-          if (
+          // 🟢 SMART SPLIT: Admin changes vs. Teacher Status changes
+          const adminChanged =
             normalized(adminName) !== normalized(row.admin_name) ||
             normalized(adminEmail) !== normalized(row.admin_email) ||
-            normalized(finalPhone) !== normalized(row.admin_phone) ||
-            hasEmptyClass !== row.has_empty_class // 🟢 ADDED: Trigger update on missing teacher changes
-          ) {
+            normalized(finalPhone) !== normalized(row.admin_phone);
+          const emptyClassChanged = hasEmptyClass !== row.has_empty_class;
+          if (adminChanged) {
             log(`🔍 Updating admin for ${row.school_name} - ${row.campus_name}: ${row.admin_name} → ${adminName}`);
             const updatePayload = {
               admin_name: adminName,
               admin_email: adminEmail,
               admin_phone: finalPhone,
               address: apiCampus.fullAddress || row.address,
-              has_empty_class: hasEmptyClass, // 🟢 UPDATE
+              has_empty_class: hasEmptyClass, // Ensure accurate teacher status is kept
               needs_review: true,
               // Store as a JSON string to avoid serialization issues
               previous_data: JSON.stringify({
@@ -1599,7 +1600,7 @@ router.post("/api/sync-school-status", async (req, res) => {
                 admin_email: row.admin_email ?? null,
                 admin_phone: row.admin_phone ?? null,
                 address: row.address ?? null,
-                has_empty_class: row.has_empty_class ?? null // 🟢 PRESERVE LOGS
+                has_empty_class: row.has_empty_class ?? null
               }),
               updated_at: new Date(),
             };
@@ -1608,7 +1609,19 @@ router.post("/api/sync-school-status", async (req, res) => {
               .update(updatePayload)
               .eq("id", row.id);
             if (!updErr) adminUpdatedCount++;
-            else log(`❌ Update error: ${updErr.message}`); // 🟢 RESTORED: Error logging
+            else log(`❌ Update error: ${updErr.message}`);
+          }
+          else if (emptyClassChanged) {
+            // 🟢 SILENT UPDATE: Directly sync teacher assignments without triggering "Needs Review"
+            log(`🔍 Silently updating teacher status for ${row.school_name} - ${row.campus_name}: ${row.has_empty_class} → ${hasEmptyClass}`);
+            const { error: silentErr } = await supabase
+              .from("schools")
+              .update({
+                has_empty_class: hasEmptyClass,
+                updated_at: new Date(),
+              })
+              .eq("id", row.id);
+            if (silentErr) log(`❌ Silent update error: ${silentErr.message}`);
           }
         }, { concurrency: 10 });
         // Discover and insert new campuses for this school
