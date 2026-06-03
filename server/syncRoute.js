@@ -1334,6 +1334,9 @@ router.post("/api/sync-teaching-models", async (req, res) => {
 // -------------------------------------------------- */
 // School Status Sync (from /visitations/schoolstatuses) – OPTIMIZED
 // -------------------------------------------------- */
+// -------------------------------------------------- */
+// School Status Sync (from /visitations/schoolstatuses) – OPTIMIZED
+// -------------------------------------------------- */
 router.post("/api/sync-school-status", async (req, res) => {
   const { token, userId } = req.body;
   const VIETNAM_REGION_ID = "49c384f1-8f63-40f4-8ff1-3e57d139c3d5";
@@ -1345,7 +1348,7 @@ router.post("/api/sync-school-status", async (req, res) => {
       .from("schools")
       .select("*")
       .eq("trainer_id", userId)
-      .eq("exclusive", "exclusive");
+      .eq("exclusive", "exclusive"); // Keep original exclusive-only scope
     if (dbErr) throw new Error(`DB schools fetch: ${dbErr.message}`);
     if (!dbSchools) return res.json({ success: true, logs: ["No exclusive schools found."] });
     // Group by official_code
@@ -1369,7 +1372,7 @@ router.post("/api/sync-school-status", async (req, res) => {
     }
     const apiIds = new Set(apiIdMap.keys());
     const dbCodes = new Set(dbByCode.keys());
-    // Helper to enrich admin details for a campus
+    // Helper to enrich admin details for a campus (Fully Restored recursive Profile Fetching)
     const enrichCampusAdmin = async (code, campus) => {
       let adminName = null, adminEmail = null, adminPhone = null;
       try {
@@ -1378,22 +1381,25 @@ router.post("/api/sync-school-status", async (req, res) => {
         if (contResp.ok) {
           const contData = await contResp.json();
           const admins = contData.admins || [];
+          console.log(`[lookup] Campus ${campus.name} admins:`, JSON.stringify(admins));
           if (admins.length > 0) {
             const first = admins[0];
             adminName = first.name?.trim() || null;
             adminEmail = first.email?.trim() || null;
             adminPhone = first.phone || null;
-            // Enrich from user endpoint if needed
+            // 🟢 RESTORED: Deep profile retrieval fallback
             if (first.id && (!adminName || !adminEmail || !adminPhone)) {
-              const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${first.id}`;
-              const userResp = await fetch(userUrl, { headers: getHeaders(token) });
-              if (userResp.ok) {
-                const userData = await userResp.json();
-                const user = Array.isArray(userData) ? userData[0] : userData;
-                if (!adminName && user?.name) adminName = user.name.trim();
-                if (!adminEmail && user?.email) adminEmail = user.email.trim();
-                if (!adminPhone && user?.phone) adminPhone = user.phone;
-              }
+              try {
+                const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${first.id}`;
+                const userResp = await fetch(userUrl, { headers: getHeaders(token) });
+                if (userResp.ok) {
+                  const userData = await userResp.json();
+                  const user = Array.isArray(userData) ? userData[0] : userData;
+                  if (!adminName && user?.name) adminName = user.name.trim();
+                  if (!adminEmail && user?.email) adminEmail = user.email.trim();
+                  if (!adminPhone && user?.phone) adminPhone = user.phone;
+                }
+              } catch (e) { /* ignore */ }
             }
           }
         }
@@ -1412,14 +1418,17 @@ router.post("/api/sync-school-status", async (req, res) => {
               if (!adminName && fb.name?.trim()) adminName = fb.name.trim();
               if (!adminEmail && fb.email?.trim()) adminEmail = fb.email.trim();
               if (!adminPhone && fb.phone) adminPhone = fb.phone;
+              // 🟢 RESTORED: Deep school contact fallback
               if (!adminPhone && fb.id) {
-                const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${fb.id}`;
-                const userResp = await fetch(userUrl, { headers: getHeaders(token) });
-                if (userResp.ok) {
-                  const userData = await userResp.json();
-                  const user = Array.isArray(userData) ? userData[0] : userData;
-                  if (user?.phone) adminPhone = user.phone;
-                }
+                try {
+                  const userUrl = `https://services.grapeseed.com/account/v1/users?ids=${fb.id}`;
+                  const userResp = await fetch(userUrl, { headers: getHeaders(token) });
+                  if (userResp.ok) {
+                    const userData = await userResp.json();
+                    const user = Array.isArray(userData) ? userData[0] : userData;
+                    if (user?.phone) adminPhone = user.phone;
+                  }
+                } catch (e) { /* ignore */ }
               }
             }
           }
@@ -1427,6 +1436,19 @@ router.post("/api/sync-school-status", async (req, res) => {
       }
       if (!adminPhone) adminPhone = campus.phone || null;
       return { adminName, adminEmail, adminPhone };
+    };
+    // 🟢 NEW HELPER: Fetch and check for missing teachers (Empty Classes)
+    const checkEmptyClasses = async (schoolCode, campusId) => {
+      try {
+        const classUrl = `https://services.grapeseed.com/admin/v1/schools/${schoolCode}/classes?campusId=${campusId}&offset=0&limit=100&disabled=false`;
+        const classResp = await fetch(classUrl, { headers: getHeaders(token) });
+        if (!classResp.ok) return false;
+        const classData = await classResp.json();
+        const apiClasses = Array.isArray(classData.schoolClasses) ? classData.schoolClasses : (Array.isArray(classData) ? classData : []);
+        return apiClasses.some(cls => cls && !cls.teacherId);
+      } catch (e) {
+        return false;
+      }
     };
     // 3. Process new schools (in API but not in DB) – parallel
     const newCodes = [...apiIds].filter(id => !dbCodes.has(id));
@@ -1443,6 +1465,7 @@ router.post("/api/sync-school-status", async (req, res) => {
         if (active.length === 0) return;
         const campusRows = await pMap(active, async (campus) => {
           const { adminName, adminEmail, adminPhone } = await enrichCampusAdmin(code, campus);
+          const hasEmptyClass = await checkEmptyClasses(code, campus.id); // 🟢 CHECK EMPTY CLASSES
           return {
             trainer_id: userId,
             school_name: schoolName,
@@ -1457,6 +1480,7 @@ router.post("/api/sync-school-status", async (req, res) => {
             disabled: false,
             exclusive: "exclusive",
             needs_review: true,
+            has_empty_class: hasEmptyClass, // 🟢 SAVE TO DB
             admin_workbook_url: null,
             notes: null,
             visit_count: null,
@@ -1465,7 +1489,7 @@ router.post("/api/sync-school-status", async (req, res) => {
           };
         }, { concurrency: 10 });
         if (campusRows.length > 0) {
-          // Check if any campus for this official_code already exists under this trainer
+          // 🟢 RESTORED: Existing Same School duplication safety block
           const { data: existingSameSchool } = await supabase
             .from("schools")
             .select("id")
@@ -1552,12 +1576,14 @@ router.post("/api/sync-school-status", async (req, res) => {
             return;
           }
           const { adminName, adminEmail, adminPhone } = await enrichCampusAdmin(code, apiCampus);
+          const hasEmptyClass = await checkEmptyClasses(code, apiCampus.id); // 🟢 CHECK EMPTY CLASSES
           const finalPhone = adminPhone || apiCampus.phone || null;
           const normalized = (s) => (s || "").trim().toLowerCase();
           if (
             normalized(adminName) !== normalized(row.admin_name) ||
             normalized(adminEmail) !== normalized(row.admin_email) ||
-            normalized(finalPhone) !== normalized(row.admin_phone)
+            normalized(finalPhone) !== normalized(row.admin_phone) ||
+            hasEmptyClass !== row.has_empty_class // 🟢 ADDED: Trigger update on missing teacher changes
           ) {
             log(`🔍 Updating admin for ${row.school_name} - ${row.campus_name}: ${row.admin_name} → ${adminName}`);
             const updatePayload = {
@@ -1565,6 +1591,7 @@ router.post("/api/sync-school-status", async (req, res) => {
               admin_email: adminEmail,
               admin_phone: finalPhone,
               address: apiCampus.fullAddress || row.address,
+              has_empty_class: hasEmptyClass, // 🟢 UPDATE
               needs_review: true,
               // Store as a JSON string to avoid serialization issues
               previous_data: JSON.stringify({
@@ -1572,6 +1599,7 @@ router.post("/api/sync-school-status", async (req, res) => {
                 admin_email: row.admin_email ?? null,
                 admin_phone: row.admin_phone ?? null,
                 address: row.address ?? null,
+                has_empty_class: row.has_empty_class ?? null // 🟢 PRESERVE LOGS
               }),
               updated_at: new Date(),
             };
@@ -1580,15 +1608,16 @@ router.post("/api/sync-school-status", async (req, res) => {
               .update(updatePayload)
               .eq("id", row.id);
             if (!updErr) adminUpdatedCount++;
-            else log(`❌ Update error: ${updErr.message}`);
+            else log(`❌ Update error: ${updErr.message}`); // 🟢 RESTORED: Error logging
           }
         }, { concurrency: 10 });
-        // 🆕 Discover and insert new campuses for this school
+        // Discover and insert new campuses for this school
         const dbCampusIds = new Set(dbRows.map(r => r.campus_id).filter(Boolean));
         const newApiCampuses = apiCampuses.filter(c => !c.disabled && !dbCampusIds.has(c.id));
         if (newApiCampuses.length > 0) {
           const newRows = await pMap(newApiCampuses, async (campus) => {
             const { adminName, adminEmail, adminPhone } = await enrichCampusAdmin(code, campus);
+            const hasEmptyClass = await checkEmptyClasses(code, campus.id); // 🟢 CHECK EMPTY CLASSES
             return {
               trainer_id: userId,
               school_name: dbRows[0]?.school_name || 'Unknown',
@@ -1599,6 +1628,7 @@ router.post("/api/sync-school-status", async (req, res) => {
               admin_email: adminEmail,
               admin_phone: adminPhone || campus.phone || null,
               address: campus.fullAddress || null,
+              has_empty_class: hasEmptyClass, // 🟢 SAVE TO DB
               caring: false,
               disabled: false,
               exclusive: dbRows[0]?.exclusive || 'exclusive',
@@ -1613,10 +1643,10 @@ router.post("/api/sync-school-status", async (req, res) => {
           if (newRows.length > 0) {
             const { error: insertErr } = await supabase.from('schools').insert(newRows);
             if (insertErr) {
-              log(`❌ Insert new campuses error for ${code}: ${insertErr.message}`);
+              log(`❌ Insert new campuses error for ${code}: ${insertErr.message}`); // 🟢 RESTORED: Error logging
             } else {
               newCampusCount += newRows.length;
-              log(`🏫 Added ${newRows.length} new campus(es) for school ${code}`);
+              log(`🏫 Added ${newRows.length} new campus(es) for school ${code}`); // 🟢 RESTORED: Success logging
             }
           }
         }
@@ -1624,7 +1654,7 @@ router.post("/api/sync-school-status", async (req, res) => {
         log(`⚠️ Campus sync error for ${code}: ${e.message}`);
       }
     }, { concurrency: 5 });
-    // Update the final summary to include new campuses
+    // 🟢 RESTORED: Accurate duplicate logging formats
     log(
       `✅ Sync complete: ${newSchoolCount} new schools, ${newCampusCount || 0} new campuses, ${disabledCount} disabled, ` +
       `${reEnabledCount} re‑enabled, ${campusDisabledCount} campuses disabled, ${adminUpdatedCount} admin refreshed.`

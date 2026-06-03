@@ -1426,70 +1426,95 @@ export const SchoolsScreen: React.FC = () => {
       {
         accessorKey: "school_name",
         header: "School & Campus",
-        cell: (info) => (
-          <>
-            <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              {info.row.original.school_name}
-              {/* ⚡ NEW: No ID Tag (Calculated logic) */}
-              {!info.row.original.campus_id && (
-                <span className="tag-pill tag-pill-warning" title="This campus has no API ID link">
-                  No Campus ID
-                </span>
-              )}
-              {/* Existing No Teacher Tag */}
-              {info.row.original.has_empty_class && (
-                <span className="tag-pill tag-pill-notag" title="This school has classes with no teacher assigned">
-                  No Teacher
-                </span>
-              )}
-              {/* 🟢 NEW: Inactive Tag */}
-              {info.row.original.disabled && (
-                <span
-                  className="tag-pill"
-                  style={{
-                    background: 'rgba(239, 68, 68, 0.15)',
-                    borderColor: '#ef4444',
-                    border: '1px solid',
-                    color: '#ef4444',
-                    fontWeight: 600,
-                    fontSize: '10px',
-                    display: 'inline-block',
-                    padding: '1px 8px',
-                    borderRadius: '12px',
-                  }}
-                >
-                  Inactive
-                </span>
-              )}
-              {/* 🟢 NEW: Exclusive tag (only show if shared or temporary) */}
-              {info.row.original.exclusive && info.row.original.exclusive !== 'exclusive' && (
-                <span
-                  className="tag-pill"
-                  style={{
-                    background:
-                      info.row.original.exclusive === 'temporary' ? 'rgba(234,179,8,0.15)' :
-                        'rgba(59,130,246,0.15)',
-                    borderColor:
-                      info.row.original.exclusive === 'temporary' ? '#eab308' :
-                        '#3b82f6',
-                    border: '1px solid',
-                    color:
-                      info.row.original.exclusive === 'temporary' ? '#eab308' :
-                        '#3b82f6',
-                    fontWeight: 600,
-                    fontSize: '10px',
-                    display: 'inline-block',
-                    padding: '1px 8px',
-                    borderRadius: '12px',
-                  }}
-                >
-                  {info.row.original.exclusive === 'shared' ? 'Shared' : 'Temporary'}
-                </span>
-              )}
-            </div>
-            <div className="entity-cell-sub">{info.row.original.campus_name}</div>
-          </>
-        ),
+        cell: (info) => {
+          // 🟢 NEW: Logic to detect brand new campuses
+          const prev = getPreviousData(info.row.original);
+          const isNewCampus = info.row.original.needs_review && Object.keys(prev).length === 0;
+          return (
+            <>
+              <div className="entity-cell-main" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {info.row.original.school_name}
+                {/* 🟢 NEW: Sparkle Badge for entirely new campuses from the API */}
+                {isNewCampus && (
+                  <span
+                    className="tag-pill"
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.15)', // Emerald/Green background
+                      borderColor: '#10b981',
+                      border: '1px solid',
+                      color: '#10b981',
+                      fontWeight: 600,
+                      fontSize: '10px',
+                      display: 'inline-block',
+                      padding: '1px 8px',
+                      borderRadius: '12px',
+                    }}
+                    title="Newly discovered campus from GrapeSEED"
+                  >
+                    ✨ New Campus
+                  </span>
+                )}
+                {/* ⚡ No ID Tag */}
+                {!info.row.original.campus_id && (
+                  <span className="tag-pill tag-pill-warning" title="This campus has no API ID link">
+                    No Campus ID
+                  </span>
+                )}
+                {/* No Teacher Tag (Now backed by data from the new sync API!) */}
+                {info.row.original.has_empty_class && (
+                  <span className="tag-pill tag-pill-notag" title="This school has classes with no teacher assigned">
+                    No Teacher
+                  </span>
+                )}
+                {/* Inactive Tag */}
+                {info.row.original.disabled && (
+                  <span
+                    className="tag-pill"
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      borderColor: '#ef4444',
+                      border: '1px solid',
+                      color: '#ef4444',
+                      fontWeight: 600,
+                      fontSize: '10px',
+                      display: 'inline-block',
+                      padding: '1px 8px',
+                      borderRadius: '12px',
+                    }}
+                  >
+                    Inactive
+                  </span>
+                )}
+                {/* Exclusive tag (only show if shared or temporary) */}
+                {info.row.original.exclusive && info.row.original.exclusive !== 'exclusive' && (
+                  <span
+                    className="tag-pill"
+                    style={{
+                      background:
+                        info.row.original.exclusive === 'temporary' ? 'rgba(234,179,8,0.15)' :
+                          'rgba(59,130,246,0.15)',
+                      borderColor:
+                        info.row.original.exclusive === 'temporary' ? '#eab308' :
+                          '#3b82f6',
+                      border: '1px solid',
+                      color:
+                        info.row.original.exclusive === 'temporary' ? '#eab308' :
+                          '#3b82f6',
+                      fontWeight: 600,
+                      fontSize: '10px',
+                      display: 'inline-block',
+                      padding: '1px 8px',
+                      borderRadius: '12px',
+                    }}
+                  >
+                    {info.row.original.exclusive === 'shared' ? 'Shared' : 'Temporary'}
+                  </span>
+                )}
+              </div>
+              <div className="entity-cell-sub">{info.row.original.campus_name}</div>
+            </>
+          );
+        },
         id: "school_name",
         minSize: 150,
         size: 250,
