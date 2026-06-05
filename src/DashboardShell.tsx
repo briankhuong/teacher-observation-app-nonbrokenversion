@@ -367,15 +367,26 @@ function getStableMetaForRow(obs: DashboardObservationRow): any {
   // prefer row meta, fallback to localStorage meta (survives reload)
   return (obs as any).meta || readMetaFromLocalStorage(obs.id) || {};
 }
-function loadFullObservation(observationId: string): any | null {
-  const key = `obs-v1-${observationId}`;
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+async function loadFullObservation(observationId: string): Promise<any | null> {
+  const idbKey = `obs-v1-${observationId}`;
+  // 1. IndexedDB – where all current data lives (offline + unsynced)
+  let data = await get(idbKey);
+  if (data) return data;
+  // 2. Fallback to localStorage for legacy records
+  const raw = localStorage.getItem(idbKey);
+  if (raw) {
+    try { return JSON.parse(raw); } catch { }
   }
+  // 3. Online fallback – fetch from Supabase as last resort
+  if (navigator.onLine) {
+    const { data: serverData } = await supabase
+      .from('observations')
+      .select('*')
+      .eq('id', observationId)
+      .single();
+    if (serverData) return serverData;
+  }
+  return null;
 }
 function normalizeIndicators(full: any): any[] {
   const ind = full?.indicators;
@@ -2468,9 +2479,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const handleMergeTeacherWorkbook = async (obs: DashboardObservationRow) => {
     setMergingTeacherId(obs.id);
     setActionModal(null);
-    // 1. Basic Validation
-    // 🔴 REPLACED: const full = loadFullObservation(obs.id);
-    // 🟢 FIXED: Fetch asynchronously from IndexedDB
     const full = await get(`${STORAGE_PREFIX}${obs.id}`);
     if (!full) { alert("Missing data (Check IndexedDB)"); setMergingTeacherId(null); return; }
     const workbookUrl = obs.teacherWorkbookUrl;
