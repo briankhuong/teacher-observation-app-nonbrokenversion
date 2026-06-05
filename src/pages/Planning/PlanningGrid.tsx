@@ -651,13 +651,15 @@ const PlanningGrid: React.FC = () => {
                               {months.map(m => {
                                 const cellKey = `${teacher.id}-${m.key}`;
                                 const plansForCell = (() => {
-                                  return plans
-                                    .filter(p => p.teacher_id === teacher.id && p.month_key === m.key && !pendingDeletes.has(p.id))
-                                    .concat(
-                                      Object.values(pendingUpdates).filter(
-                                        (p: any) => p.teacher_id === teacher.id && p.month_key === m.key
-                                      )
-                                    );
+                                  const dbPlans = plans.filter(p => p.teacher_id === teacher.id && p.month_key === m.key);
+                                  const localUpdates = Object.values(pendingUpdates).filter(
+                                    (p: any) => p.teacher_id === teacher.id && p.month_key === m.key
+                                  );
+                                  // ✅ Deduplicate by plan.id so updates seamlessly overwrite database records in the UI
+                                  const planMap = new Map<string, any>();
+                                  dbPlans.forEach(p => planMap.set(p.id, p));
+                                  localUpdates.forEach(p => planMap.set(p.id, p));
+                                  return Array.from(planMap.values());
                                 })();
                                 return (
                                   <GridCell
@@ -666,6 +668,7 @@ const PlanningGrid: React.FC = () => {
                                     monthKey={m.key}
                                     activeTool={activeTool}
                                     plansForCell={plansForCell}
+                                    pendingDeletes={pendingDeletes} // ✅ Passed down state to trigger local UI updates
                                     matchingObs={obsData.find(o =>
                                       o.grapeseed_id === teacher.grapeseed_id &&
                                       o.school_name === teacher.school_name &&

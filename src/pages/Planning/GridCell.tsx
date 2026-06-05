@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { AlertCircle, Lock } from 'lucide-react';
 interface GridCellProps {
   teacher: any;
   monthKey: string;
   activeTool: 'LVA' | 'Visit' | 'Eraser' | null;
   plansForCell: any[];
+  pendingDeletes: Set<string>; // ✅ Added
   matchingObs: any;
   allPlans: any[];
   allPendingUpdates: Record<string, any>;
@@ -15,7 +17,8 @@ const GridCell: React.FC<GridCellProps> = ({
   teacher,
   monthKey,
   activeTool,
-  plansForCell,          // new prop (array of plans)
+  plansForCell,
+  pendingDeletes, // ✅ Added
   matchingObs,
   allPlans,
   allPendingUpdates,
@@ -24,25 +27,29 @@ const GridCell: React.FC<GridCellProps> = ({
 }) => {
   const [eraserPopover, setEraserPopover] = useState<{ x: number; y: number } | null>(null);
   const [planSelector, setPlanSelector] = useState<{ x: number; y: number; plans: any[] } | null>(null);
+  // ✅ Compute visible plans that exclude pending deletions
+  const visiblePlans = useMemo(() => {
+    return plansForCell.filter(p => !pendingDeletes.has(p.id));
+  }, [plansForCell, pendingDeletes]);
   // --- status helpers ---
-  const nonCancelled = plansForCell.filter(p => p.status !== 'cancelled');
+  const nonCancelled = visiblePlans.filter(p => p.status !== 'cancelled');
   const allCompleted = nonCancelled.length > 0 && nonCancelled.every(p => p.status === 'completed');
   const someCompleted = nonCancelled.some(p => p.status === 'completed') && !allCompleted;
   // badge text
   const summary = useMemo(() => {
-    if (!plansForCell.length) return null;
-    const types = plansForCell.filter(p => p.status !== 'cancelled').map(p => p.activity_type);
+    if (!visiblePlans.length) return null;
+    const types = visiblePlans.filter(p => p.status !== 'cancelled').map(p => p.activity_type);
     const lvaCount = types.filter(t => t === 'LVA').length;
     const visitCount = types.filter(t => t === 'Visit').length;
     if (lvaCount && visitCount) return `LVA${lvaCount > 1 ? lvaCount : ''}+Visit${visitCount > 1 ? visitCount : ''}`;
     if (lvaCount) return `LVA${lvaCount > 1 ? ` ×${lvaCount}` : ''}`;
     if (visitCount) return `Visit${visitCount > 1 ? ` ×${visitCount}` : ''}`;
     return null;
-  }, [plansForCell]);
+  }, [visiblePlans]);
   const handleClick = () => {
     if (!activeTool || allCompleted) return;
     if (activeTool === 'Eraser') {
-      const deletable = plansForCell.filter(p => p.status !== 'completed');
+      const deletable = visiblePlans.filter(p => p.status !== 'completed');
       if (deletable.length === 0) return;
       if (deletable.length === 1) {
         const plan = deletable[0];
@@ -53,7 +60,7 @@ const GridCell: React.FC<GridCellProps> = ({
       return;
     }
     // Add new plan
-    const nextSeq = Math.max(0, ...plansForCell.map(p => p.support_sequence || 0)) + 1;
+    const nextSeq = Math.max(0, ...visiblePlans.map(p => p.support_sequence || 0)) + 1;
     const newPlanId = crypto.randomUUID();
     const payload = {
       id: newPlanId,
@@ -72,7 +79,7 @@ const GridCell: React.FC<GridCellProps> = ({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     if (allCompleted) return;
-    const activePlans = plansForCell.filter(p => p.status !== 'completed' && p.status !== 'cancelled');
+    const activePlans = visiblePlans.filter(p => p.status !== 'completed' && p.status !== 'cancelled');
     if (activePlans.length === 0) return;
     if (activePlans.length === 1) {
       onOpenMenu(e.clientX, e.clientY, teacher, monthKey, activePlans[0]);
@@ -99,18 +106,18 @@ const GridCell: React.FC<GridCellProps> = ({
           {summary && <span className="activity-label">{summary}</span>}
           <div className="cell-icons">
             {allCompleted && <Lock className="lock-icon" />}
-            {!allCompleted && plansForCell.length > 0 && (
+            {!allCompleted && visiblePlans.length > 0 && (
               <div className="notes-indicator" />
             )}
           </div>
         </div>
       </td>
-      {/* Eraser popover */}
-      {eraserPopover && (
+      {/* Eraser popover - PORTAL to body */}
+      {eraserPopover && ReactDOM.createPortal(
         <div className="menu-overlay" onClick={() => setEraserPopover(null)}>
-          <div className="planning-context-menu" style={{ position: 'fixed', top: '40%', left: '40%' }}>
+          <div className="planning-context-menu" style={{ position: 'fixed', top: '40%', left: '40%', zIndex: 9999 }}>
             <div className="menu-header" style={{ color: '#f8fafc', marginBottom: '8px' }}>Select plan to delete</div>
-            {plansForCell.filter(p => p.status !== 'completed').map(plan => (
+            {visiblePlans.filter(p => p.status !== 'completed').map(plan => (
               <button
                 key={plan.id}
                 className="btn-save"
@@ -125,12 +132,13 @@ const GridCell: React.FC<GridCellProps> = ({
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-      {/* Right-click plan selector */}
-      {planSelector && (
+      {/* Right-click plan selector - PORTAL to body */}
+      {planSelector && ReactDOM.createPortal(
         <div className="menu-overlay" onClick={() => setPlanSelector(null)}>
-          <div className="planning-context-menu" style={{ position: 'fixed', top: planSelector.y, left: planSelector.x }}>
+          <div className="planning-context-menu" style={{ position: 'fixed', top: planSelector.y, left: planSelector.x, zIndex: 9999 }}>
             <div className="menu-header" style={{ color: '#f8fafc' }}>Choose support to edit</div>
             {planSelector.plans.map((plan: any) => (
               <button
@@ -147,7 +155,8 @@ const GridCell: React.FC<GridCellProps> = ({
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
