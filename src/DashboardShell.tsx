@@ -971,6 +971,17 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   }, [handleCheckPulseSilent]);
   // Fetch schools & teachers for stats sidebar
   React.useEffect(() => {
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then((persisted) => {
+        if (persisted) {
+          console.log('✅ Persistent storage granted – data is safer');
+        } else {
+          console.warn('⚠️ Persistent storage not granted');
+        }
+      });
+    }
+  }, []);
+  React.useEffect(() => {
     if (!user?.id) return;
     const loadResources = async () => {
       // Schools

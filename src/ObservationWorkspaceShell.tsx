@@ -784,76 +784,48 @@ export const ObservationWorkspaceShell: React.FC<
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      // 1. Always read IndexedDB first – the local master copy
       let localData: SavedObservationPayload | undefined;
       try {
         localData = await get<SavedObservationPayload>(storageKey);
         if (!localData) {
           const rawLegacy = localStorage.getItem(storageKey);
           if (rawLegacy) {
-            console.log("♻️ Migrating data from LocalStorage to IndexedDB...");
-            try {
-              localData = JSON.parse(rawLegacy);
-              if (localData) await set(storageKey, localData);
-            } catch (e) {
-              console.error("Legacy migration failed", e);
-            }
+            console.log('♻️ Migrating data from LocalStorage to IndexedDB...');
+            localData = JSON.parse(rawLegacy);
+            await set(storageKey, localData);
           }
         }
       } catch (err) {
-        console.error("Local read error", err);
+        console.error('Local read error', err);
       }
-      try {
-        const row = await loadObservationFromDb(observationMeta.id);
-        if (cancelled) return;
-        setLastServerVersion(new Date(row.updated_at).getTime());
-        const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-        const lastSyncReceipt = localData?.lastSync || 0;
-        if (serverTime > lastSyncReceipt) {
-          console.log("📡 Server is newer than our last receipt. Potential conflict.");
-          const isDirty = localData && (localData.updatedAt > (localData.lastSync || 0));
-          if (!isDirty) {
-            console.log("Auto-pulling server data (Local is not dirty).");
-          } else {
-            console.warn("Conflict detected: Local and Server both have new changes.");
-          }
+      if (cancelled) return;
+      // 2. If local data exists, normalise and display it immediately
+      if (localData) {
+        const normalisedIndicators = normalizeIndicators(localData.indicators);
+        setIndicators(normalisedIndicators);
+        setObservationStatus(localData.status ?? 'draft');
+        setScratchpadText(localData.scratchpadText ?? '');
+        setAdminSummaryVN(localData.adminSummaryVN ?? null);
+        if (localData.lastSync) setLastServerVersion(localData.lastSync);
+        return; // 🛑 Stop here – never overwrite with server automatically
+      }
+      // 3. No local data? Fall back to server (brand‑new record that was never saved locally)
+      if (navigator.onLine) {
+        try {
+          const row = await loadObservationFromDb(observationMeta.id);
+          if (cancelled) return;
+          const normalised = normalizeIndicators(row.indicators);
+          setIndicators(normalised.length ? normalised : INITIAL_INDICATORS);
+          setObservationStatus(row.status ?? 'draft');
+          setAdminSummaryVN(row.admin_summary_vn ?? null);
+          setLastServerVersion(new Date(row.updated_at).getTime());
+        } catch (err) {
+          console.warn('Server fallback failed – starting fresh');
+          if (!cancelled) setIndicators(INITIAL_INDICATORS);
         }
-        setLastServerVersion(serverTime);
-        if (localData && (localData.updatedAt > (localData.lastSync || 0))) {
-          let localIndicators = localData.indicators;
-          if (!localIndicators || localIndicators.length === 0) {
-            localIndicators = INITIAL_INDICATORS;
-          }
-          if (localData.performance_rating && localIndicators.length > 0) {
-            localIndicators = [...localIndicators];
-            localIndicators[0] = { ...localIndicators[0], performance_rating: localData.performance_rating };
-          }
-          setIndicators(localIndicators);
-          setObservationStatus(localData.status ?? "draft");
-          setScratchpadText(localData.scratchpadText ?? "");
-          setAdminSummaryVN(localData.adminSummaryVN ?? row.admin_summary_vn ?? null);
-          return;
-        }
-        let normalizedFromDb = normalizeIndicators(row.indicators);
-        if (normalizedFromDb.length === 0) normalizedFromDb = INITIAL_INDICATORS;
-        if (row.performance_rating && normalizedFromDb.length > 0) {
-          normalizedFromDb = [...normalizedFromDb];
-          normalizedFromDb[0] = { ...normalizedFromDb[0], performance_rating: row.performance_rating };
-        }
-        setIndicators(normalizedFromDb);
-        setObservationStatus(row.status ?? "draft");
-        setAdminSummaryVN(row.admin_summary_vn ?? null);
-      } catch (err) {
-        console.warn("Offline: Using local backup.");
-        if (localData && !cancelled) {
-          setIndicators(localData.indicators);
-          setObservationStatus(localData.status ?? "draft");
-          setScratchpadText(localData.scratchpadText ?? "");
-          if (localData.lastSync) {
-            setLastServerVersion(localData.lastSync);
-          }
-        } else if (!cancelled) {
-          setIndicators(INITIAL_INDICATORS);
-        }
+      } else {
+        if (!cancelled) setIndicators(INITIAL_INDICATORS);
       }
     }
     load();
