@@ -6,6 +6,7 @@ interface Props {
   onResolve: (mergedData: any) => void;
   localData: any;
   serverData: any;
+  defaultSource?: 'local' | 'server';   // 🆕
 }
 type SourceType = 'local' | 'server' | 'manual';
 // --- LINEAR-INSPIRED STYLES ---
@@ -145,7 +146,7 @@ function getDiff(oldString: string | null | undefined = "", newString: string | 
   }
   return result;
 }
-export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onResolve, localData, serverData }) => {
+export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onResolve, localData, serverData, defaultSource }) => {
   const [resolvedIndicators, setResolvedIndicators] = useState<any[]>([]);
   const [mounted, setMounted] = useState(false);
   const [showTopBtn, setShowTopBtn] = useState(false);
@@ -164,7 +165,7 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
           _localText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
           _serverText: `Teacher: ${sTeacher}\nSchool: ${serverData.school_name}`,
           commentText: `Teacher: ${lTeacher}\nSchool: ${localMeta.schoolName}`,
-          _textMismatch: true, _isConflict: true, _selectedSource: 'local'
+          _textMismatch: true, _isConflict: true, _selectedSource: defaultSource || 'server'
         });
       }
       const mergedInds = (localData.indicators || []).map((lInd: any) => {
@@ -174,14 +175,23 @@ export const ConflictResolutionModal: React.FC<Props> = ({ isOpen, onClose, onRe
         const isConflict = lText !== sText || lInd.good !== sInd?.good || lInd.growth !== sInd?.growth;
         const isTextMismatch = lText !== sText;
         return {
-          ...lInd, _localText: lInd.commentText, _serverText: sInd?.commentText || "",
-          _localGood: lInd.good, _localGrowth: lInd.growth, _serverVersion: sInd,
-          _textMismatch: isTextMismatch, _isConflict: isConflict, _selectedSource: 'local'
+          ...lInd,
+          _localText: lInd.commentText,
+          _serverText: sInd?.commentText || "",
+          _localGood: lInd.good,
+          _localGrowth: lInd.growth,
+          _serverVersion: sInd,
+          _textMismatch: isTextMismatch,
+          _isConflict: isConflict,
+          _selectedSource: defaultSource || 'server',
+          commentText: (defaultSource || 'server') === 'server' ? (sInd?.commentText || lInd.commentText) : lInd.commentText,
+          good: (defaultSource || 'server') === 'server' ? (sInd?.good ?? lInd.good) : lInd.good,
+          growth: (defaultSource || 'server') === 'server' ? (sInd?.growth ?? lInd.growth) : lInd.growth,
         };
       });
       setResolvedIndicators([...allItems, ...mergedInds]);
     }
-  }, [isOpen, localData, serverData]);
+  }, [isOpen, localData, serverData, defaultSource]);
   const handleScroll = () => {
     if (bodyRef.current) setShowTopBtn(bodyRef.current.scrollTop > 300);
   };

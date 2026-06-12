@@ -622,7 +622,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const lastHighlightedRef = useRef<string | null>(null);
   const [pendingObservation, setPendingObservation] = useState<DashboardObservationRow | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
-  // ✅ FULL UPDATE: Unified Resolution Logic with Data Cloning & UI Cleanup
   const handleResolveConflict = async (type: string, data: any) => {
     try {
       if (!user?.id) return;
@@ -910,6 +909,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       return;
     }
     // Local has edits → open conflict modal
+    setConflictDefaultSource('server');
     setConflictLocalData(localData);
     setConflictServerData(serverData);
     setIsConflictModalOpen(true);
@@ -1216,6 +1216,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
   const [isConflictModalOpen, setIsConflictModalOpen] = React.useState(false);
   const [conflictLocalData, setConflictLocalData] = React.useState<any>(null);
   const [conflictServerData, setConflictServerData] = React.useState<any>(null);
+  const [conflictDefaultSource, setConflictDefaultSource] = React.useState<'local' | 'server'>('server');
   // NEW: State for Edit Observation Modal
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingObservation, setEditingObservation] = useState<DashboardObservationRow | null>(null);
@@ -1362,6 +1363,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           const localLastSync = localData.lastSync || 0;
           if (serverTime > localLastSync) {
             console.log("⚔️ Conflict Detected! Server is newer.");
+            setConflictDefaultSource('local');
             setConflictLocalData(localData);
             setConflictServerData(serverRow);
             setIsConflictModalOpen(true);
@@ -4266,6 +4268,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         onResolve={handleConflictResolved}
         localData={conflictLocalData}
         serverData={conflictServerData}
+        defaultSource={conflictDefaultSource}
       />
       {/* Bulk Admin Modal */}
       {showBulkAdminModal && (
