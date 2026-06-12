@@ -225,6 +225,8 @@ interface SavedObservationPayload {
   scratchpadText?: string;
   adminSummaryVN?: string | null;
   lastSync?: number;
+  hasLocalEdits?: boolean;   // true when there are unsaved changes
+  lastBackupTime?: number;   // timestamp of last successful push
 }
 const STORAGE_PREFIX = "obs-v1-";
 async function strokesToPngBase64(strokes: Stroke[]): Promise<string> {
@@ -851,6 +853,7 @@ export const ObservationWorkspaceShell: React.FC<
           updatedAt: Date.now(),
           lastSync: payload.lastSync || existingOnDisk?.lastSync || 0
         };
+        safePayload.hasLocalEdits = true;
         await set(storageKey, safePayload);
         setLastSavedAt(safePayload.updatedAt);
         setSaveStatus("saved");

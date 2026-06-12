@@ -74,6 +74,9 @@ export interface DashboardObservationRow {
   updatedAt?: number;
   lastSync?: number;
   syncStatus?: string;
+  hasLocalEdits?: boolean;
+  lastBackupTime?: number;
+  serverUpdateAvailable?: boolean; // 🆕 true when server has a newer version
 }
 type RecentMergePanel =
   | null
@@ -837,6 +840,80 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       alert("Could not run Pulse Audit. Check console.");
     }
   };
+  const checkForServerUpdates = useCallback(async () => {
+    if (!user?.id || !navigator.onLine) return;
+    // Throttle to once every 5 minutes
+    const LAST_CHECK_KEY = 'lastServerUpdateCheck';
+    const lastCheck = parseInt(localStorage.getItem(LAST_CHECK_KEY) || '0');
+    if (Date.now() - lastCheck < 5 * 60 * 1000) return;
+    localStorage.setItem(LAST_CHECK_KEY, Date.now().toString());
+    const ids = observations.map(o => o.id);
+    if (ids.length === 0) return;
+    // Fetch only id + updated_at from Supabase
+    const { data: rows, error } = await supabase
+      .from('observations')
+      .select('id, updated_at')
+      .in('id', ids);
+    if (error || !rows) return;
+    // Build a lookup of server timestamps
+    const serverTimes: Record<string, number> = {};
+    rows.forEach((r: any) => {
+      serverTimes[r.id] = new Date(r.updated_at).getTime();
+    });
+    // Update each observation's flag
+    setObservations(prev =>
+      prev.map(obs => {
+        const serverTime = serverTimes[obs.id];
+        const localLastSync = obs.lastSync || 0;
+        const updateAvailable = serverTime ? serverTime > localLastSync : false;
+        return { ...obs, serverUpdateAvailable: updateAvailable };
+      })
+    );
+  }, [user?.id, observations]);
+  const handlePullFromServer = async (obsId: string) => {
+    if (!navigator.onLine) {
+      alert('You are offline.');
+      return;
+    }
+    const { data: serverData, error } = await supabase
+      .from('observations')
+      .select('*')
+      .eq('id', obsId)
+      .single();
+    if (error || !serverData) {
+      alert('Failed to fetch server version.');
+      return;
+    }
+    const storageKey = `${STORAGE_PREFIX}${obsId}`;
+    const localData = await get(storageKey);
+    const hasLocalEdits = localData?.hasLocalEdits
+      || (localData && localData.updatedAt > (localData.lastSync || 0));
+    // If local is clean → silent update
+    if (!hasLocalEdits) {
+      const localPayload = {
+        id: serverData.id,
+        teacher_id: serverData.teacher_id,
+        grapeseed_id: serverData.grapeseed_id,
+        meta: serverData.meta || {},
+        indicators: serverData.indicators || [],
+        status: serverData.status || 'draft',
+        performance_rating: serverData.performance_rating,
+        updatedAt: new Date(serverData.updated_at).getTime(),
+        lastSync: new Date(serverData.updated_at).getTime(),
+        hasLocalEdits: false,
+        lastBackupTime: new Date(serverData.updated_at).getTime(),
+        scratchpadText: serverData.scratchpad_text || '',
+        adminSummaryVN: serverData.admin_summary_vn,
+      };
+      await set(storageKey, localPayload);
+      await refreshDashboard();
+      return;
+    }
+    // Local has edits → open conflict modal
+    setConflictLocalData(localData);
+    setConflictServerData(serverData);
+    setIsConflictModalOpen(true);
+  };
   // Save current snapshot to Supabase + localStorage
   const saveSnapshot = async () => {
     if (!user?.id) return;
@@ -981,6 +1058,12 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       });
     }
   }, []);
+  useEffect(() => {
+    if (!user?.id) return;
+    checkForServerUpdates();
+    const interval = setInterval(checkForServerUpdates, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [user?.id, checkForServerUpdates]);
   React.useEffect(() => {
     if (!user?.id) return;
     const loadResources = async () => {
@@ -1444,12 +1527,12 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           // Increased to 10s to absorb Windows PC system clock drift
           const BUFFER = 10000;
           let syncStatus: 'synced' | 'local-changes' | 'server-newer';
-          if (localUpdatedAt > lastSync) {
-            // Local changes always win
-            syncStatus = 'local-changes';
-          } else if (dbUpdatedAt > (lastSync + BUFFER)) {
-            // Server changed AFTER last successful sync + buffer allowance
+          if (dbUpdatedAt > (lastSync + BUFFER)) {
+            // Server is newer → always show “Update” button
             syncStatus = 'server-newer';
+          } else if (localUpdatedAt > lastSync) {
+            // Only local changes, server not newer → show “Sync Now”
+            syncStatus = 'local-changes';
           } else {
             syncStatus = 'synced';
           }
@@ -1490,6 +1573,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
             adminViewOnlyUrl: parsed.meta.adminViewOnlyUrl ?? null,
             admin_summary_vn: dbRow.admin_summary_vn,
             syncStatus,
+            hasLocalEdits: parsed.hasLocalEdits ?? false,
+            lastBackupTime: parsed.lastBackupTime ?? 0,
+            serverUpdateAvailable: false,
             meta: parsed.meta ?? {},
             lastSync: parsed.lastSync || 0,
             updatedAt: parsed.updatedAt || 0,
@@ -1566,6 +1652,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
               adminViewOnlyUrl: localData.meta?.adminViewOnlyUrl || null,
               admin_summary_vn: localData.adminSummaryVN || null,
               syncStatus: isLocalSynced ? 'synced' : 'local-changes', // 🟢 Dynamic Status
+              hasLocalEdits: localData.hasLocalEdits ?? false,
+              lastBackupTime: localData.lastBackupTime ?? 0,
+              serverUpdateAvailable: false,
               meta: localData.meta || {},
               lastSync: localData.lastSync || 0,
               updatedAt: localData.updatedAt || 0,
@@ -1680,16 +1769,16 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
         lastSync: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
       };
-      // Calc Sync Status (Standardized with processAndDisplay)
+      // Calc Sync Status (server‑newer first, so Update button always appears when server is ahead)
       const localTime = finalData.updatedAt || 0;
       const lastSync = finalData.lastSync || 0;
       const serverTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
-      const BUFFER = 10000; // 10s buffer for Windows clock drift
+      const BUFFER = 10000;
       let syncStatus = 'synced';
-      if (localTime > lastSync) {
-        syncStatus = 'local-changes';
-      } else if (serverTime > (lastSync + BUFFER)) {
+      if (serverTime > (lastSync + BUFFER)) {
         syncStatus = 'server-newer';
+      } else if (localTime > lastSync) {
+        syncStatus = 'local-changes';
       }
       // Stats Calculation
       const inds = Array.isArray(finalData.indicators) ? finalData.indicators : [];
@@ -1729,7 +1818,10 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         meta: finalData.meta,
         lastSync: finalData.lastSync,
         updatedAt: finalData.updatedAt,
-        syncStatus
+        syncStatus,
+        hasLocalEdits: finalData.hasLocalEdits ?? false,
+        lastBackupTime: finalData.lastBackupTime ?? 0,
+        serverUpdateAvailable: false
       });
     }
     // Step B: Ghost Loop (Find Local-Only items)
@@ -1759,7 +1851,10 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           adminViewOnlyUrl: null, admin_summary_vn: null,
           meta: local.meta,
           lastSync: 0, updatedAt: local.updatedAt,
-          syncStatus: 'local-changes' // Force Blue Cloud
+          syncStatus: 'local-changes', // Force Blue Cloud
+          hasLocalEdits: local.hasLocalEdits ?? false,
+          lastBackupTime: local.lastBackupTime ?? 0,
+          serverUpdateAvailable: false
         });
       }
     } catch (e) { }
@@ -2839,8 +2934,30 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           <span>✓ Synced</span>
         </div>
       );
+    } else if (obs.syncStatus === 'server-newer') {
+      // ⬇️ CASE B: Server has a newer version – show Update
+      actionButton = (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handlePullFromServer(obs.id);
+          }}
+          title="A newer version is available on the server. Click to pull."
+          style={{
+            display: "flex", alignItems: "center", gap: "4px",
+            fontSize: "11px", fontWeight: "bold",
+            color: "#92400e",
+            background: "#fef3c7",
+            border: "1px solid #f59e0b",
+            padding: "4px 10px", borderRadius: "4px",
+            cursor: "pointer", whiteSpace: "nowrap"
+          }}
+        >
+          <span>⬇️ Update</span>
+        </button>
+      );
     } else {
-      // ☁️ CASE B: Not Synced (Blue Button)
+      // ☁️ CASE C: Local changes only – show Sync Now
       actionButton = (
         <button
           onClick={(e) => {
@@ -2896,6 +3013,30 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           }}>
             <div className="obs-teacher">{obs.teacherName}</div>
             {actionButton}
+            {/* 🟢 Update available from server */}
+            {obs.serverUpdateAvailable && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlePullFromServer(obs.id);
+                }}
+                title="A newer version is available on the server. Click to pull."
+                style={{
+                  marginLeft: 8,
+                  background: '#fef3c7',
+                  border: '1px solid #f59e0b',
+                  color: '#92400e',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                ⬇️ Update
+              </button>
+            )}
           </div>
           <div className="obs-meta">
             {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
