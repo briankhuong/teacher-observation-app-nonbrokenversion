@@ -3013,30 +3013,6 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           }}>
             <div className="obs-teacher">{obs.teacherName}</div>
             {actionButton}
-            {/* 🟢 Update available from server */}
-            {obs.serverUpdateAvailable && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handlePullFromServer(obs.id);
-                }}
-                title="A newer version is available on the server. Click to pull."
-                style={{
-                  marginLeft: 8,
-                  background: '#fef3c7',
-                  border: '1px solid #f59e0b',
-                  color: '#92400e',
-                  padding: '2px 8px',
-                  borderRadius: 4,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                ⬇️ Update
-              </button>
-            )}
           </div>
           <div className="obs-meta">
             {obs.schoolName} – {obs.campus} • Unit {obs.unit} – Lesson{" "}
