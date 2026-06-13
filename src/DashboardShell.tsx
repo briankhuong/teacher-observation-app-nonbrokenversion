@@ -397,6 +397,11 @@ function normalizeIndicators(full: any): any[] {
   if (Array.isArray(ind?.indicators)) return ind.indicators;
   return [];
 }
+function extractIndicatorsArray(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.indicators)) return data.indicators;
+  return [];
+}
 function toMetaForExport(
   full: any,
   obs: DashboardObservationRow
@@ -864,8 +869,13 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       prev.map(obs => {
         const serverTime = serverTimes[obs.id];
         const localLastSync = obs.lastSync || 0;
-        const updateAvailable = serverTime ? serverTime > localLastSync : false;
-        return { ...obs, serverUpdateAvailable: updateAvailable };
+        // Only consider server‑newer if the observation has been synced at least once
+        const updateAvailable = serverTime && localLastSync > 0 ? serverTime > localLastSync : false;
+        return {
+          ...obs,
+          serverUpdateAvailable: updateAvailable,
+          syncStatus: updateAvailable ? 'server-newer' : obs.syncStatus
+        };
       })
     );
   }, [user?.id, observations]);
@@ -1529,17 +1539,15 @@ export const DashboardShell: React.FC<DashboardProps> = ({
           // Increased to 10s to absorb Windows PC system clock drift
           const BUFFER = 10000;
           let syncStatus: 'synced' | 'local-changes' | 'server-newer';
-          if (dbUpdatedAt > (lastSync + BUFFER)) {
-            // Server is newer → always show “Update” button
+          if (lastSync > 0 && dbUpdatedAt > (lastSync + BUFFER)) {
             syncStatus = 'server-newer';
           } else if (localUpdatedAt > lastSync) {
-            // Only local changes, server not newer → show “Sync Now”
             syncStatus = 'local-changes';
           } else {
             syncStatus = 'synced';
           }
           // Stats
-          const indicatorsArray = Array.isArray(parsed.indicators) ? parsed.indicators : [];
+          const indicatorsArray = extractIndicatorsArray(parsed.indicators);
           const total = indicatorsArray.length;
           let good = 0, growth = 0, progress = 0;
           indicatorsArray.forEach((ind: any) => {
@@ -1783,7 +1791,7 @@ export const DashboardShell: React.FC<DashboardProps> = ({
         syncStatus = 'local-changes';
       }
       // Stats Calculation
-      const inds = Array.isArray(finalData.indicators) ? finalData.indicators : [];
+      const inds = extractIndicatorsArray(finalData.indicators);
       let good = 0, growth = 0, progress = 0;
       inds.forEach((i: any) => {
         if (i.good) good++;
