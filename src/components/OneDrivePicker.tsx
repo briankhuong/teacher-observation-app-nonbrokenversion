@@ -118,22 +118,69 @@ export const OneDrivePicker: React.FC<OneDrivePickerProps> = ({
           <button onClick={onCancel} className="btn">×</button>
         </div>
         {/* BREADCRUMBS */}
-        <div style={{ padding: "10px 20px", borderBottom: "1px solid #eee", background: "#f9fafb", fontSize: "14px" }}>
-          {breadcrumbs.map((b, i) => (
-            <span key={b.id}>
-              {i > 0 && " / "}
-              <span
-                style={{
-                  cursor: "pointer",
-                  color: i === breadcrumbs.length - 1 ? "black" : "#2563eb",
-                  fontWeight: i === breadcrumbs.length - 1 ? "600" : "400"
-                }}
-                onClick={() => handleBreadcrumbClick(i)}
-              >
-                {b.name}
+        <div style={{ padding: "10px 20px", borderBottom: "1px solid #eee", background: "#f9fafb", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+          {/* 🔼 Navigate to parent folder */}
+          <button
+            type="button"
+            title="Go up to parent folder"
+            disabled={breadcrumbs.length <= 1}
+            onClick={async () => {
+              if (breadcrumbs.length <= 1) return;
+              // Fetch the parent of the current folder
+              try {
+                const resp = await fetch(
+                  `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}`,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (!resp.ok) throw new Error("Failed to get parent");
+                const item = await resp.json();
+                const parentRef = item.parentReference;
+                if (parentRef && parentRef.id) {
+                  setFolderId(parentRef.id);
+                  // Remove the last breadcrumb
+                  setBreadcrumbs((currentBreadcrumbs) => {
+                    const newCrumbs = currentBreadcrumbs.slice(0, -1);
+                    // If we're going back to just one breadcrumb and parent has a name, update it
+                    if (currentBreadcrumbs.length === 2 && parentRef.name) {
+                      return [{ id: parentRef.id, name: parentRef.name || "OneDrive" }];
+                    }
+                    return newCrumbs;
+                  });
+                }
+              } catch (err) {
+                console.error("Failed to navigate up:", err);
+              }
+            }}
+            style={{
+              background: "none",
+              border: "1px solid #d1d5db",
+              borderRadius: "4px",
+              cursor: breadcrumbs.length <= 1 ? "default" : "pointer",
+              opacity: breadcrumbs.length <= 1 ? 0.4 : 1,
+              padding: "2px 8px",
+              fontSize: "14px",
+              flexShrink: 0,
+            }}
+          >
+            ⬆ Up
+          </button>
+          <div style={{ flex: 1 }}>
+            {breadcrumbs.map((b, i) => (
+              <span key={b.id}>
+                {i > 0 && " / "}
+                <span
+                  style={{
+                    cursor: "pointer",
+                    color: i === breadcrumbs.length - 1 ? "black" : "#2563eb",
+                    fontWeight: i === breadcrumbs.length - 1 ? "600" : "400"
+                  }}
+                  onClick={() => handleBreadcrumbClick(i)}
+                >
+                  {b.name}
+                </span>
               </span>
-            </span>
-          ))}
+            ))}
+          </div>
         </div>
         {/* SEARCH */}
         <div style={{ padding: "10px 20px 0 20px" }}>

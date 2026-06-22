@@ -2088,6 +2088,9 @@ export const DashboardShell: React.FC<DashboardProps> = ({
       unit: updatedMeta.unit ?? currentData.unit ?? currentData.meta.unit,
       lesson: updatedMeta.lesson ?? currentData.lesson ?? currentData.meta.lesson,
       supportType: updatedMeta.supportType ?? currentData.supportType ?? currentData.meta.supportType,
+      // 🟢 NEW: Also update admin URLs at top level so renderRow picks them up
+      adminWorkbookUrl: updatedMeta.adminWorkbookUrl ?? currentData.meta?.adminWorkbookUrl ?? currentData.adminWorkbookUrl ?? null,
+      adminViewOnlyUrl: updatedMeta.adminWorkbookViewUrl ?? currentData.meta?.adminWorkbookViewUrl ?? currentData.adminViewOnlyUrl ?? null,
       // 🟢 CRITICAL: This triggers the "Sync Now" button
       updatedAt: now,
       // Do NOT update lastSync yet! (lastSync < updatedAt = Blue Button)
