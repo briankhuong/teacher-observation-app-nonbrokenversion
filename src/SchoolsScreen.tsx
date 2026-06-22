@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { useAuth } from "./auth/AuthContext";
 import ImportSchoolsBtn from "./components/ImportSchoolsBtn";
-import { getGraphAccessToken } from "./msal/getGraphToken";
 import {
   useReactTable,
   getCoreRowModel,
@@ -19,6 +18,8 @@ import type {
   FilterFn, // 🟢 Added FilterFn
 } from "@tanstack/react-table";
 import { Search, Plus, RefreshCw, Pencil } from "lucide-react";
+import { getGraphAccessToken } from "./msal/getGraphToken";
+import { OneDrivePicker } from "./components/OneDrivePicker";
 import { isGrapeSeedTokenValid } from "./utils/authHelpers";
 import { GrapeSeedLoginModal } from "./components/GrapeSeedLoginModal";
 import { flattenText } from "./utils/textUtils";
@@ -293,6 +294,12 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
   const [selectedCampusIds, setSelectedCampusIds] = useState<Set<string>>(new Set());
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  // --- Admin URL propagation & OneDrive ---
+  const [applyUrlToAllCampuses, setApplyUrlToAllCampuses] = useState(false);
+  const [showAdminOneDrivePicker, setShowAdminOneDrivePicker] = useState(false);
+  const [oneDriveAdminFolder, setOneDriveAdminFolder] = useState<{ driveId: string; folderId: string; folderName: string } | null>(null);
+  const [adminLookupStatus, setAdminLookupStatus] = useState<"idle" | "searching" | "no_match" | "found">("idle");
+  const [adminLookupResults, setAdminLookupResults] = useState<{ school_name: string; campus_name: string; admin_workbook_url: string }[]>([]);
   // Clean name helper for matching logic in Phase B
   const cleanName = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
   useEffect(() => {
@@ -303,8 +310,86 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       setLookupResult(null);
       setSelectedCampusIds(new Set());
       setHasSearched(false);
+      setApplyUrlToAllCampuses(false);
+      setAdminLookupStatus("idle");
+      setAdminLookupResults([]);
     }
   }, [open, initial]);
+  // Load OneDrive admin folder settings
+  useEffect(() => {
+    if (!open || !user) return;
+    (async () => {
+      const { data } = await supabase
+        .from("trainer_settings")
+        .select("admin_folder_drive_id, admin_folder_item_id, teacher_folder_drive_id, teacher_folder_item_id")
+        .eq("trainer_id", user.id)
+        .single();
+      if (data) {
+        if (data.admin_folder_drive_id && data.admin_folder_item_id) {
+          setOneDriveAdminFolder({
+            driveId: data.admin_folder_drive_id,
+            folderId: data.admin_folder_item_id,
+            folderName: "Admin Workbooks",
+          });
+        } else if (data.teacher_folder_drive_id && data.teacher_folder_item_id) {
+          // Fallback to teacher folder
+          setOneDriveAdminFolder({
+            driveId: data.teacher_folder_drive_id,
+            folderId: data.teacher_folder_item_id,
+            folderName: "Teacher Workbooks",
+          });
+        }
+      }
+    })();
+  }, [open, user]);
+  // Admin workbook DB lookup
+  const handleAdminWorkbookLookup = async () => {
+    if (!form.school_name.trim()) return;
+    setAdminLookupStatus("searching");
+    setAdminLookupResults([]);
+    const { data, error } = await supabase
+      .from("schools")
+      .select("school_name, campus_name, admin_workbook_url")
+      .eq("trainer_id", user?.id)
+      .ilike("school_name", `%${form.school_name.trim()}%`)
+      .not("admin_workbook_url", "is", null);
+    if (error) {
+      console.error("Admin lookup failed", error);
+      setAdminLookupStatus("idle");
+      return;
+    }
+    if (!data || data.length === 0) {
+      setAdminLookupStatus("no_match");
+    } else {
+      const uniqueResults = data.filter((v, i, a) => a.findIndex(t => t.admin_workbook_url === v.admin_workbook_url) === i);
+      setAdminLookupResults(uniqueResults);
+      setAdminLookupStatus("found");
+    }
+  };
+  // OneDrive file selected for admin workbook
+  const handleAdminOneDriveFileSelected = async (item: { name: string; driveId: string; itemId: string }) => {
+    setShowAdminOneDrivePicker(false);
+    try {
+      const token = await getGraphAccessToken();
+      const resp = await fetch(
+        `https://graph.microsoft.com/v1.0/drives/${item.driveId}/items/${item.itemId}/createLink`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ type: "edit", scope: "anonymous" }),
+        }
+      );
+      if (!resp.ok) throw new Error("Failed to create sharing link");
+      const data = await resp.json();
+      setForm(prev => ({ ...prev, admin_workbook_url: data.link.webUrl }));
+      setAdminLookupStatus("idle");
+    } catch (err: any) {
+      alert("Could not create sharing link: " + err.message);
+    }
+  };
   if (!open) return null;
   const handleChange =
     (field: keyof SchoolFormState) =>
@@ -420,6 +505,21 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
       }
       try {
         await onSubmit(form, token);
+        // 🟢 NEW: Propagate admin URL to all campuses of the same school
+        if (applyUrlToAllCampuses && form.admin_workbook_url.trim()) {
+          const { error: updateError } = await supabase
+            .from("schools")
+            .update({ admin_workbook_url: form.admin_workbook_url.trim() })
+            .eq("school_name", form.school_name.trim())
+            .eq("trainer_id", user!.id);
+          if (updateError) {
+            console.error("Failed to propagate admin URL:", updateError);
+          } else {
+            console.log(`✅ Admin URL propagated to all campuses of "${form.school_name}"`);
+          }
+        }
+        // 🟢 Refresh the schools list so UI shows updated URLs immediately
+        if (onRefresh) onRefresh();
       } finally {
         setSubmitting(false);
       }
@@ -510,6 +610,19 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           return;
         }
         if (data) insertedRows.push(data as SchoolRow);
+      }
+      // 🟢 NEW: Propagate admin URL to all existing campuses of the same school
+      if (applyUrlToAllCampuses && form.admin_workbook_url.trim() && lookupResult) {
+        const { error: updateError } = await supabase
+          .from("schools")
+          .update({ admin_workbook_url: form.admin_workbook_url.trim() })
+          .eq("school_name", lookupResult.schoolName)
+          .eq("trainer_id", user!.id);
+        if (updateError) {
+          console.error("Failed to propagate admin URL to existing campuses:", updateError);
+        } else {
+          console.log(`✅ Admin URL propagated to all existing campuses of "${lookupResult.schoolName}"`);
+        }
       }
       // Auto‑create workbooks if requested
       if (autoCreate && token && insertedRows.length > 0) {
@@ -761,10 +874,89 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
           </div>
           {/* Admin & Address fields – hidden when multiple campuses are shown */}
           {lookupResult && lookupResult.campuses.length > 1 ? (
-            <div className="form-row" style={{ color: '#fcd34d', fontSize: '12px', padding: '8px', background: 'rgba(251,191,36,0.1)', borderRadius: '6px', border: '1px solid #fcd34d' }}>
-              ℹ️ Each selected campus will be created with its own admin details shown in the checklist above.
-              You can edit the details individually after creation.
-            </div>
+            <>
+              <div className="form-row" style={{ color: '#fcd34d', fontSize: '12px', padding: '8px', background: 'rgba(251,191,36,0.1)', borderRadius: '6px', border: '1px solid #fcd34d', marginBottom: '8px' }}>
+                ℹ️ Each selected campus will be created with its own admin details shown in the checklist above.
+                You can edit the details individually after creation.
+              </div>
+              {/* 🟢 NEW: Admin Workbook URL for multi-campus */}
+              <div className="form-row">
+                <label>Admin Workbook URL (for all selected campuses)</label>
+                <div style={{ position: 'relative' }}>
+                  <div className="input-group" style={{ display: 'flex' }}>
+                    <input
+                      className="input"
+                      type="url"
+                      value={form.admin_workbook_url}
+                      onChange={handleChange("admin_workbook_url")}
+                      placeholder="Paste URL, search by school name, or browse OneDrive..."
+                      style={{ flexGrow: 1 }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-append"
+                      title="Search for existing admin workbook by school name"
+                      disabled={!form.school_name.trim() || adminLookupStatus === "searching"}
+                      onClick={handleAdminWorkbookLookup}
+                      style={{ padding: '0 12px', background: '#334155', color: 'white', border: '1px solid #475569', borderLeft: 'none', cursor: 'pointer' }}
+                    >
+                      {adminLookupStatus === "searching" ? "..." : "🔍"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-append"
+                      title="Browse OneDrive for admin workbook"
+                      onClick={() => setShowAdminOneDrivePicker(true)}
+                      style={{ padding: '0 12px', background: '#2563eb', color: 'white', border: '1px solid #1d4ed8', borderLeft: 'none', borderRadius: '0 6px 6px 0', cursor: 'pointer' }}
+                    >
+                      ☁️
+                    </button>
+                  </div>
+                  {adminLookupStatus === "no_match" && (
+                    <div style={{ fontSize: '12px', color: '#fca5a5', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                      <span>No admin workbook found for this school in database.</span>
+                      <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setAdminLookupStatus("idle")}>×</span>
+                    </div>
+                  )}
+                  {adminLookupStatus === "found" && (
+                    <div className="lookup-picker" style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', marginTop: '4px', padding: '8px', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', padding: '0 4px' }}>
+                        <strong style={{ fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>Matches Found (click to use)</strong>
+                        <span style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => setAdminLookupStatus("idle")}>×</span>
+                      </div>
+                      {adminLookupResults.map((res, i) => (
+                        <div
+                          key={i}
+                          className="lookup-item"
+                          style={{ padding: '6px', cursor: 'pointer', borderBottom: i < adminLookupResults.length - 1 ? '1px solid #334155' : 'none' }}
+                          onClick={() => {
+                            setForm(prev => ({ ...prev, admin_workbook_url: res.admin_workbook_url }));
+                            setAdminLookupStatus("idle");
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#334155'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        >
+                          <div style={{ fontWeight: 600, fontSize: '13px', color: '#f8fafc' }}>{res.school_name}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>{res.campus_name}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    id="chk-apply-all-campuses"
+                    checked={applyUrlToAllCampuses}
+                    onChange={(e) => setApplyUrlToAllCampuses(e.target.checked)}
+                    style={{ width: 'auto', margin: 0 }}
+                  />
+                  <label htmlFor="chk-apply-all-campuses" style={{ margin: 0, cursor: 'pointer', fontSize: '12px', color: '#93c5fd' }}>
+                    Also apply to ALL existing campuses of "{lookupResult.schoolName}"
+                  </label>
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <div className="form-row">
@@ -938,15 +1130,96 @@ const SchoolFormModal: React.FC<SchoolFormModalProps> = ({
               </div>
             )}
             {!autoCreate && (
-              <input
-                className="input"
-                type="url"
-                value={form.admin_workbook_url}
-                onChange={handleChange("admin_workbook_url")}
-                placeholder="Paste Admin workbook URL (e.g., OneDrive/SharePoint link)…"
-              />
+              <div style={{ position: 'relative' }}>
+                <div className="input-group" style={{ display: 'flex' }}>
+                  <input
+                    className="input"
+                    type="url"
+                    value={form.admin_workbook_url}
+                    onChange={handleChange("admin_workbook_url")}
+                    placeholder="Paste URL, search by school name, or browse OneDrive..."
+                    style={{ flexGrow: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-append"
+                    title="Search for existing admin workbook by school name"
+                    disabled={!form.school_name.trim() || adminLookupStatus === "searching"}
+                    onClick={handleAdminWorkbookLookup}
+                    style={{ padding: '0 12px', background: '#334155', color: 'white', border: '1px solid #475569', borderLeft: 'none', cursor: 'pointer' }}
+                  >
+                    {adminLookupStatus === "searching" ? "..." : "🔍"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-append"
+                    title="Browse OneDrive for admin workbook"
+                    onClick={() => setShowAdminOneDrivePicker(true)}
+                    style={{ padding: '0 12px', background: '#2563eb', color: 'white', border: '1px solid #1d4ed8', borderLeft: 'none', borderRadius: '0 6px 6px 0', cursor: 'pointer' }}
+                  >
+                    ☁️
+                  </button>
+                </div>
+                {adminLookupStatus === "no_match" && (
+                  <div style={{ fontSize: '12px', color: '#fca5a5', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                    <span>No admin workbook found for this school in database.</span>
+                    <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setAdminLookupStatus("idle")}>×</span>
+                  </div>
+                )}
+                {adminLookupStatus === "found" && (
+                  <div className="lookup-picker" style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', marginTop: '4px', padding: '8px', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', padding: '0 4px' }}>
+                      <strong style={{ fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>Matches Found (click to use)</strong>
+                      <span style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => setAdminLookupStatus("idle")}>×</span>
+                    </div>
+                    {adminLookupResults.map((res, i) => (
+                      <div
+                        key={i}
+                        className="lookup-item"
+                        style={{ padding: '6px', cursor: 'pointer', borderBottom: i < adminLookupResults.length - 1 ? '1px solid #334155' : 'none' }}
+                        onClick={() => {
+                          setForm(prev => ({ ...prev, admin_workbook_url: res.admin_workbook_url }));
+                          setAdminLookupStatus("idle");
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#334155'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                      >
+                        <div style={{ fontWeight: 600, fontSize: '13px', color: '#f8fafc' }}>{res.school_name}</div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>{res.campus_name}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* 🟢 NEW: "Apply to all campuses" checkbox for single-campus create AND edit mode */}
+                {form.school_name.trim() && (
+                  <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="checkbox"
+                      id="chk-apply-all-campuses-single"
+                      checked={applyUrlToAllCampuses}
+                      onChange={(e) => setApplyUrlToAllCampuses(e.target.checked)}
+                      style={{ width: 'auto', margin: 0 }}
+                    />
+                    <label htmlFor="chk-apply-all-campuses-single" style={{ margin: 0, cursor: 'pointer', fontSize: '12px', color: '#93c5fd' }}>
+                      Apply to ALL campuses of "{form.school_name}"
+                    </label>
+                  </div>
+                )}
+              </div>
             )}
           </div>
+          {/* Admin OneDrive Picker */}
+          {showAdminOneDrivePicker && (
+            <OneDrivePicker
+              mode="file"
+              title="Select Admin Workbook"
+              initialDriveId={oneDriveAdminFolder?.driveId}
+              initialFolderId={oneDriveAdminFolder?.folderId}
+              initialFolderName={oneDriveAdminFolder?.folderName}
+              onSelect={handleAdminOneDriveFileSelected}
+              onCancel={() => setShowAdminOneDrivePicker(false)}
+            />
+          )}
           {(() => {
             const allAlreadyExist = !!(
               lookupResult &&
