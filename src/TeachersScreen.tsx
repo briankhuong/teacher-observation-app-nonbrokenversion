@@ -401,7 +401,7 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ type: "edit", scope: "organization" }),
+          body: JSON.stringify({ type: "edit", scope: "anonymous" }),
         }
       );
       if (!resp.ok) throw new Error("Failed to create sharing link");
@@ -639,14 +639,15 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
             )}
             {!autoCreate && (
               <div style={{ position: 'relative' }}>
-                {/* 🟢 FIXED: Joined Magnifier Layout */}
-                <div className="input-group">
+                {/* 🟢 FIXED: Joined Magnifier Layout + OneDrive always visible */}
+                <div className="input-group" style={{ display: 'flex' }}>
                   <input
                     className="input"
                     type="url"
                     value={form.worksheet_url}
                     onChange={handleChange("worksheet_url")}
-                    placeholder="Paste URL or search by email..."
+                    placeholder="Paste URL, search by email, or browse OneDrive..."
+                    style={{ flexGrow: 1 }}
                   />
                   <button
                     type="button"
@@ -654,47 +655,50 @@ const TeacherFormModal: React.FC<TeacherFormModalProps> = ({
                     title="Search for existing workbook by email"
                     disabled={!form.email.trim() || lookupStatus === "searching"}
                     onClick={handleWorkbookLookup}
+                    style={{ padding: '0 12px', background: '#334155', color: 'white', border: '1px solid #475569', borderLeft: 'none', cursor: 'pointer' }}
                   >
                     {lookupStatus === "searching" ? "..." : "🔍"}
                   </button>
+                  <button
+                    type="button"
+                    className="btn-append"
+                    title="Browse OneDrive for teacher workbook"
+                    onClick={() => setShowOneDrivePicker(true)}
+                    style={{ padding: '0 12px', background: '#2563eb', color: 'white', border: '1px solid #1d4ed8', borderLeft: 'none', borderRadius: '0 6px 6px 0', cursor: 'pointer' }}
+                  >
+                    ☁️
+                  </button>
                 </div>
-                {/* 🟢 FIXED: Dark Themed No Match Message */}
+                {/* 🟢 Dark Themed No Match Message */}
                 {lookupStatus === "no_match" && (
                   <div style={{ fontSize: '12px', color: '#fca5a5', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 10px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                    <span>No workbook found for this email.</span>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'underline' }}
-                        onClick={() => setShowOneDrivePicker(true)}
-                      >
-                        Browse OneDrive
-                      </button>
-                      <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setLookupStatus("idle")}>×</span>
-                    </div>
+                    <span>No workbook found for this email in database.</span>
+                    <span style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '18px' }} onClick={() => setLookupStatus("idle")}>×</span>
                   </div>
                 )}
-                {/* 🟢 FIXED: Dark Themed Result Picker */}
+                {/* 🟢 Dark Themed Result Picker */}
                 {lookupStatus === "found" && (
-                  <div className="lookup-picker">
+                  <div className="lookup-picker" style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', marginTop: '4px', padding: '8px', zIndex: 10, boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', padding: '0 4px' }}>
-                      <strong style={{ fontSize: '10px', textTransform: 'uppercase', color: '#64748b', letterSpacing: '0.05em' }}>
-                        Matches Found
+                      <strong style={{ fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em' }}>
+                        Matches Found (click to use)
                       </strong>
-                      <span style={{ cursor: 'pointer', color: '#64748b' }} onClick={() => setLookupStatus("idle")}>×</span>
+                      <span style={{ cursor: 'pointer', color: '#94a3b8' }} onClick={() => setLookupStatus("idle")}>×</span>
                     </div>
                     {lookupResults.map((res, i) => (
                       <div
                         key={i}
                         className="lookup-item"
+                        style={{ padding: '6px', cursor: 'pointer', borderBottom: i < lookupResults.length - 1 ? '1px solid #334155' : 'none' }}
                         onClick={() => {
                           setForm(prev => ({ ...prev, worksheet_url: res.worksheet_url }));
                           setLookupStatus("idle");
                         }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#334155'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                       >
-                        <div style={{ fontWeight: 600, fontSize: '13px' }}>{res.school_name}</div>
-                        <div style={{ fontSize: '11px', opacity: 0.6 }}>{res.campus}</div>
+                        <div style={{ fontWeight: 600, fontSize: '13px', color: '#f8fafc' }}>{res.school_name}</div>
+                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>{res.campus}</div>
                       </div>
                     ))}
                   </div>
