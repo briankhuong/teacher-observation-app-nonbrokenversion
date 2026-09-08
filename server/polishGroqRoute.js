@@ -82,12 +82,18 @@ router.post("/api/polish-text", async (req, res) => {
           4. PRESERVE STRUCTURE:
              - Keep "(GA)" tags, hyphens "-", and bullet points exactly as they are.
              - Do NOT use markdown bolding (**).
+          5. PRESERVE LINE BREAKS (CRITICAL):
+             - The input may contain multiple separate lines divided by newline characters.
+             - You MUST return the exact same number of lines, in the same order, with the same line breaks.
+             - NEVER merge two lines into one, even if it reads more naturally as a single sentence.
+             - NEVER split one line into two.
+             - Treat every line break as untouchable structure, just like the [brackets] rule above.
           OUTPUT RULES:
           - Return ONLY the refined text.`
         },
         { role: "user", content: text }
       ],
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-120b",
       temperature: 0.1,
     });
     const polished = chatCompletion.choices[0]?.message?.content?.trim() || text;
@@ -127,6 +133,12 @@ OPERATIONAL GUIDE:
 4. PRESERVE STRUCTURE:
    - Keep "(GA)" tags, hyphens "-", and bullet points exactly as they are.
    - Do NOT use markdown bolding (**).
+5. PRESERVE LINE BREAKS (CRITICAL):
+   - Each indicator's text may contain multiple separate lines divided by newline characters.
+   - You MUST return the exact same number of lines, in the same order, with the same line breaks.
+   - NEVER merge two lines into one, even if it reads more naturally as a single sentence.
+   - NEVER split one line into two.
+   - Treat every line break as untouchable structure, just like the [brackets] rule above.
 OUTPUT RULES:
 - Return ONLY the refined text for each indicator in the JSON object.
 - No additional keys, no explanations.`;
@@ -136,7 +148,7 @@ OUTPUT RULES:
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-120b",
       response_format: { type: "json_object" },
       temperature: 0.1,
     });
