@@ -1,7 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabaseClient';
 
-export const usePlanningData = (trainerId: string) => {
+
+// Default to whichever academic year "today" falls in (Sept–Aug)
+const getDefaultAcademicYearStart = () => {
+  const now = new Date();
+  const month = now.getMonth(); // 0-indexed; 8 = September
+  return month >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+};
+export const usePlanningData = (trainerId: string, academicYearStart?: number) => {
   const [teachers, setTeachers] = useState<any[]>([]);
   const [plans, setPlans] = useState<any[]>([]);
   const [obsData, setObsData] = useState<any[]>([]);
@@ -12,9 +19,10 @@ export const usePlanningData = (trainerId: string) => {
   const [loading, setLoading] = useState(true);
 
   // 1. Define the Academic Year (Sept - Aug)
+  const startYear = academicYearStart ?? getDefaultAcademicYearStart();
+
   const months = useMemo(() => {
     const monthsArray = [];
-    const startYear = 2025;
     const startMonthIndex = 8; // Sept (Index 8)
 
     for (let i = 0; i < 12; i++) {
@@ -29,7 +37,7 @@ export const usePlanningData = (trainerId: string) => {
       });
     }
     return monthsArray;
-  }, []);
+  }, [startYear]);
 
 const loadAllData = async () => {
     setLoading(true);
@@ -87,7 +95,7 @@ const { data: schoolData, error: schoolError } = await supabase
     setLoading(false);
   };
 
-  useEffect(() => { if (trainerId) loadAllData(); }, [trainerId]);
+  useEffect(() => { if (trainerId) loadAllData(); }, [trainerId, startYear]);
 
   const groupedData = useMemo(() => {
     const groups: any = {};
@@ -99,15 +107,16 @@ const { data: schoolData, error: schoolError } = await supabase
     return groups;
   }, [teachers]);
 
-  return { 
-    teachers, 
-    groupedData, 
-    plans, 
-    obsData, 
-    months, 
+  return {
+    teachers,
+    groupedData,
+    plans,
+    obsData,
+    months,
     schools,    // Raw array (optional use)
     schoolMap,  // The MVP for the emailer
-    loading, 
-    refresh: loadAllData 
+    loading,
+    refresh: loadAllData,
+    academicYearStart: startYear
   };
 };

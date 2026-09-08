@@ -34,9 +34,16 @@ const isSameMonth = (obsDate: string, monthKey: string) => {
   const kCoordinate = (kYear * 100) + kMonth; // Results in 202509
   return oCoordinate === kCoordinate;
 };
+// Determine which academic year (Sept–Aug) "today" falls in
+const getDefaultAcademicYearStart = () => {
+  const now = new Date();
+  return now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+};
 const PlanningGrid: React.FC = () => {
   const { user } = useAuth();
-  const { teachers, groupedData, plans, obsData, months, loading, refresh, schoolMap } = usePlanningData(user?.id || '');
+  const [academicYearStart, setAcademicYearStart] = useState(getDefaultAcademicYearStart());
+  const { teachers, groupedData, plans, obsData, months, loading, refresh, schoolMap } =
+    usePlanningData(user?.id || '', academicYearStart);
   const [emailDrafts, setEmailDrafts] = useState<EmailBatch[]>([]);
   const [activeTool, setActiveTool] = useState<'LVA' | 'Visit' | 'Eraser' | null>(null);
   const [expandedSchools, setExpandedSchools] = useState<Record<string, boolean>>({});
@@ -67,6 +74,15 @@ const PlanningGrid: React.FC = () => {
     );
   }, [searchQuery]); // Only re-calculates when the query changes
   const tableRef = useRef<HTMLTableElement | null>(null);
+  // Reset pending edits/selections and re-anchor email target month whenever the year changes
+  useEffect(() => {
+    setPendingUpdates({});
+    setPendingDeletes(new Set());
+    setSelectedIds(new Set());
+    setExcludedIds(new Set());
+    setEmailFilters(prev => ({ ...prev, month: months[0]?.key || '' }));
+    setHasInitializedExpand(false);
+  }, [academicYearStart]);
   // Helper to check if a teacher matches the current email filters
   const matchesEmailFilter = (teacher: any) => {
     if (!isEmailMode) return true; // Show everyone in planning mode
@@ -380,6 +396,20 @@ const PlanningGrid: React.FC = () => {
             Planning Board
           </div>
         </div>
+        {/* ACADEMIC YEAR SWITCHER */}
+        <select
+          value={academicYearStart}
+          onChange={(e) => setAcademicYearStart(Number(e.target.value))}
+          title="Academic Year"
+          style={{
+            background: '#0f172a', border: '1px solid #334155', borderRadius: '4px',
+            color: '#e2e8f0', padding: '4px 8px', fontSize: '12px', marginLeft: '12px'
+          }}
+        >
+          {[academicYearStart - 1, academicYearStart, academicYearStart + 1].map(y => (
+            <option key={y} value={y}>{y}–{y + 1}</option>
+          ))}
+        </select>
         {/* --- NEW SEARCH BAR --- */}
         <div style={{ position: 'relative', marginLeft: '16px' }}>
           <Search size={14} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
