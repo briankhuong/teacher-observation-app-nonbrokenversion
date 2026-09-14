@@ -4,6 +4,8 @@ import { useAuth } from '../../auth/AuthContext';
 import { supabase } from '../../supabaseClient';
 import GridCell from './GridCell';
 import PlanningContextMenu from './PlanningContextMenu';
+import SchoolViewPopover from './SchoolViewPopover';
+import type { SchoolViewPopoverRow } from './SchoolViewPopover';
 import {
   Brush,
   Eraser,
@@ -60,19 +62,53 @@ const PlanningGrid: React.FC = () => {
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
-  // --- NEW SEARCH STATE & HELPER ---
+  // --- SCHOOL VIEW TOGGLE ---
+  const [isSchoolView, setIsSchoolView] = useState(false);
+  // --- MULTI-CHIP SEARCH STATE (Excel-style filter) ---
   const [searchQuery, setSearchQuery] = useState('');
-  // --- UPGRADED SEARCH HELPER ---
+  const [searchChips, setSearchChips] = useState<string[]>([]);
+  // Suggestions shown in the dropdown while typing, drawn from teacher/school/campus names
+  const searchSuggestions = React.useMemo(() => {
+    const q = flattenText(searchQuery);
+    if (!q) return [];
+    const seen = new Set<string>();
+    const results: { label: string; type: string }[] = [];
+    teachers.forEach((t: any) => {
+      if (t.name && flattenText(t.name).includes(q) && !searchChips.includes(t.name) && !seen.has(`teacher:${t.name}`)) {
+        seen.add(`teacher:${t.name}`);
+        results.push({ label: t.name, type: 'Teacher' });
+      }
+      if (t.school_name && flattenText(t.school_name).includes(q) && !searchChips.includes(t.school_name) && !seen.has(`school:${t.school_name}`)) {
+        seen.add(`school:${t.school_name}`);
+        results.push({ label: t.school_name, type: 'School' });
+      }
+      if (t.campus && flattenText(t.campus).includes(q) && !searchChips.includes(t.campus) && !seen.has(`campus:${t.campus}`)) {
+        seen.add(`campus:${t.campus}`);
+        results.push({ label: t.campus, type: 'Campus' });
+      }
+    });
+    return results.slice(0, 8);
+  }, [searchQuery, teachers, searchChips]);
+  const addSearchChip = (label: string) => {
+    setSearchChips(prev => (prev.includes(label) ? prev : [...prev, label]));
+    setSearchQuery('');
+  };
+  const removeSearchChip = (label: string) => {
+    setSearchChips(prev => prev.filter(c => c !== label));
+  };
+  // --- UPGRADED SEARCH HELPER: OR-matches across all selected chips ---
   const matchesSearch = React.useCallback((teacher: any, schoolName: string, campusName: string) => {
-    const query = flattenText(searchQuery);
-    if (!query) return true;
-    return (
-      flattenText(teacher.name).includes(query) ||
-      flattenText(teacher.email).includes(query) ||
-      flattenText(schoolName).includes(query) ||
-      flattenText(campusName).includes(query)
-    );
-  }, [searchQuery]); // Only re-calculates when the query changes
+    if (searchChips.length === 0) return true;
+    return searchChips.some(chip => {
+      const q = flattenText(chip);
+      return (
+        flattenText(teacher.name).includes(q) ||
+        flattenText(teacher.email).includes(q) ||
+        flattenText(schoolName).includes(q) ||
+        flattenText(campusName).includes(q)
+      );
+    });
+  }, [searchChips]);
   const tableRef = useRef<HTMLTableElement | null>(null);
   // Reset pending edits/selections and re-anchor email target month whenever the year changes
   useEffect(() => {
@@ -80,6 +116,8 @@ const PlanningGrid: React.FC = () => {
     setPendingDeletes(new Set());
     setSelectedIds(new Set());
     setExcludedIds(new Set());
+    setSearchChips([]);
+    setSearchQuery('');
     setEmailFilters(prev => ({ ...prev, month: months[0]?.key || '' }));
     setHasInitializedExpand(false);
   }, [academicYearStart]);
@@ -107,6 +145,12 @@ const PlanningGrid: React.FC = () => {
   const [hasInitializedExpand, setHasInitializedExpand] = useState(false);
   const [menuConfig, setMenuConfig] = useState<{
     x: number, y: number, teacher: any, monthKey: string, plan: any
+  } | null>(null);
+  // --- SCHOOL VIEW BULK-EDIT POPOVER ---
+  const [schoolViewPopover, setSchoolViewPopover] = useState<{
+    x: number; y: number; mode: 'apply' | 'erase';
+    school: string; campus: string; monthKey: string; monthLabel: string;
+    teacherList: any[]; rows: SchoolViewPopoverRow[];
   } | null>(null);
   const hasChanges = Object.keys(pendingUpdates).length > 0 || pendingDeletes.size > 0;
   useEffect(() => {
@@ -378,6 +422,117 @@ const PlanningGrid: React.FC = () => {
     });
     return { lva: lvaCount, visit: visitCount };
   };
+  // --- HELPER: Did ANY teacher at this campus have a Visit this month? (1/month, not per-teacher) ---
+  const campusHasVisit = (teacherList: any[], school: string, campus: string, monthKey: string): boolean => {
+    return teacherList.some((t: any) => {
+      if (!matchesEmailFilter(t) || !matchesSearch(t, school, campus)) return false;
+      const status = getTeacherVisitStatus(t, monthKey);
+      return status.activity_type === 'Visit';
+    });
+  };
+  // --- HELPER: Year-total = number of distinct months this campus had a Visit (not teacher headcount) ---
+  const getCampusYearTotal = (teacherList: any[], school: string, campus: string) => {
+    return months.reduce((sum, m) => sum + (campusHasVisit(teacherList, school, campus, m.key) ? 1 : 0), 0);
+  };
+  // --- HELPER: Resolve a single teacher's Visit-relevant status for a month ---
+  type TeacherVisitStatus =
+    | { kind: 'obs'; activity_type: string; planId?: undefined }
+    | { kind: 'draft'; activity_type: string; planId?: string }
+    | { kind: 'plan'; activity_type: string; planId: string }
+    | { kind: 'none'; activity_type?: undefined; planId?: undefined };
+  const getTeacherVisitStatus = (teacher: any, monthKey: string): TeacherVisitStatus => {
+    const obs = obsData.find((o: any) =>
+      o.grapeseed_id === teacher.grapeseed_id &&
+      o.school_name === teacher.school_name &&
+      o.observation_date &&
+      isSameMonth(o.observation_date, monthKey)
+    );
+    if (obs) return { kind: 'obs', activity_type: obs.support_type };
+    const cellKey = `${teacher.id}-${monthKey}`;
+    const draft = pendingUpdates[cellKey];
+    if (draft) return { kind: 'draft', activity_type: draft.activity_type, planId: draft.id };
+    const plan = plans.find((p: any) => p.teacher_id === teacher.id && p.month_key === monthKey);
+    if (plan && !pendingDeletes.has(plan.id) && plan.status !== 'cancelled') {
+      return { kind: 'plan', activity_type: plan.activity_type, planId: plan.id };
+    }
+    return { kind: 'none' };
+  };
+  // --- SCHOOL VIEW: open the "Apply Visit" popover for a campus/month ---
+  const openApplyVisitPopover = (
+    e: React.MouseEvent, school: string, campus: string,
+    teacherList: any[], monthKey: string, monthLabel: string
+  ) => {
+    e.stopPropagation();
+    const visible = teacherList.filter((t: any) => matchesEmailFilter(t) && matchesSearch(t, school, campus));
+    const rows: SchoolViewPopoverRow[] = visible.map((t: any) => {
+      const status = getTeacherVisitStatus(t, monthKey);
+      let statusLabel = 'No plan';
+      if (status.kind === 'obs') statusLabel = `Completed: ${status.activity_type}`;
+      else if (status.kind === 'draft' || status.kind === 'plan') statusLabel = `Has ${status.activity_type}`;
+      return {
+        teacherId: t.id,
+        name: t.name,
+        statusLabel,
+        defaultChecked: status.kind !== 'obs', // don't silently overwrite a completed observation
+      };
+    });
+    setSchoolViewPopover({
+      x: e.clientX, y: e.clientY, mode: 'apply',
+      school, campus, monthKey, monthLabel, teacherList: visible, rows
+    });
+  };
+  // --- SCHOOL VIEW: open the "Erase Visit" popover for a campus/month ---
+  const openEraseVisitPopover = (
+    e: React.MouseEvent, school: string, campus: string,
+    teacherList: any[], monthKey: string, monthLabel: string
+  ) => {
+    e.stopPropagation();
+    const visible = teacherList.filter((t: any) => matchesEmailFilter(t) && matchesSearch(t, school, campus));
+    const eraseable = visible.filter((t: any) => {
+      const status = getTeacherVisitStatus(t, monthKey);
+      return (status.kind === 'draft' || status.kind === 'plan') && status.activity_type === 'Visit';
+    });
+    const rows: SchoolViewPopoverRow[] = eraseable.map((t: any) => ({
+      teacherId: t.id,
+      name: t.name,
+      statusLabel: 'Has Visit',
+      defaultChecked: true,
+    }));
+    setSchoolViewPopover({
+      x: e.clientX, y: e.clientY, mode: 'erase',
+      school, campus, monthKey, monthLabel, teacherList: eraseable, rows
+    });
+  };
+  // --- SCHOOL VIEW: confirm handlers, reuse the existing queue pipeline ---
+  const handleApplyVisitConfirm = (checkedIds: Set<string>, teacherList: any[], monthKey: string) => {
+    teacherList.forEach((t: any) => {
+      if (!checkedIds.has(t.id)) return;
+      const status = getTeacherVisitStatus(t, monthKey);
+      const existingId = (status.kind === 'plan' || status.kind === 'draft') ? status.planId : undefined;
+      const cellKey = `${t.id}-${monthKey}`;
+      const payload = {
+        id: existingId,
+        trainer_id: t.trainer_id,
+        teacher_id: t.id,
+        grapeseed_id: t.grapeseed_id,
+        school_name: t.school_name,
+        month_key: monthKey,
+        activity_type: 'Visit',
+        status: 'planned',
+        updated_at: new Date().toISOString()
+      };
+      handleQueueChange('upsert', cellKey, payload, existingId);
+    });
+  };
+  const handleEraseVisitConfirm = (checkedIds: Set<string>, teacherList: any[], monthKey: string) => {
+    teacherList.forEach((t: any) => {
+      if (!checkedIds.has(t.id)) return;
+      const status = getTeacherVisitStatus(t, monthKey);
+      if ((status.kind !== 'plan' && status.kind !== 'draft') || status.activity_type !== 'Visit') return;
+      const cellKey = `${t.id}-${monthKey}`;
+      handleQueueChange('delete', cellKey, undefined, status.planId);
+    });
+  };
   if (loading) {
     return (
       <div className="planning-loader" style={{ padding: '40px', color: '#94a3b8', textAlign: 'center' }}>
@@ -410,19 +565,59 @@ const PlanningGrid: React.FC = () => {
             <option key={y} value={y}>{y}–{y + 1}</option>
           ))}
         </select>
-        {/* --- NEW SEARCH BAR --- */}
-        <div style={{ position: 'relative', marginLeft: '16px' }}>
-          <Search size={14} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-          <input
-            type="text"
-            placeholder="Search teacher, school, campus..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              background: '#0f172a', border: '1px solid #334155', borderRadius: '4px',
-              color: '#e2e8f0', padding: '4px 8px 4px 28px', fontSize: '12px', width: '220px', outline: 'none'
-            }}
-          />
+        {/* --- MULTI-CHIP SEARCH BAR (Excel-style filter) --- */}
+        <div style={{ position: 'relative', marginLeft: '16px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={14} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+            <input
+              type="text"
+              placeholder="Search teacher, school, campus..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchSuggestions.length > 0) {
+                  addSearchChip(searchSuggestions[0].label);
+                }
+              }}
+              style={{
+                background: '#0f172a', border: '1px solid #334155', borderRadius: '4px',
+                color: '#e2e8f0', padding: '4px 8px 4px 28px', fontSize: '12px', width: '220px', outline: 'none'
+              }}
+            />
+            {searchQuery && searchSuggestions.length > 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, marginTop: '4px', width: '220px',
+                background: '#0f172a', border: '1px solid #334155', borderRadius: '4px',
+                zIndex: 500, maxHeight: '180px', overflowY: 'auto',
+                boxShadow: '0 8px 16px rgba(0,0,0,0.4)'
+              }}>
+                {searchSuggestions.map((s) => (
+                  <div
+                    key={`${s.type}-${s.label}`}
+                    onMouseDown={(e) => e.preventDefault()} // keep input focus so click registers before blur
+                    onClick={() => addSearchChip(s.label)}
+                    style={{
+                      padding: '6px 8px', fontSize: '12px', cursor: 'pointer',
+                      color: '#e2e8f0', display: 'flex', justifyContent: 'space-between'
+                    }}
+                  >
+                    <span>{s.label}</span>
+                    <span style={{ color: '#64748b', fontSize: '10px' }}>{s.type}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {searchChips.map(chip => (
+            <span key={chip} style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              background: '#1e293b', border: '1px solid #334155', borderRadius: '4px',
+              padding: '2px 6px', fontSize: '11px', color: '#e2e8f0'
+            }}>
+              {chip}
+              <X size={10} style={{ cursor: 'pointer' }} onClick={() => removeSearchChip(chip)} />
+            </span>
+          ))}
         </div>
         {/* EMAIL OUTREACH TOGGLE BUTTON */}
         <button
@@ -432,6 +627,15 @@ const PlanningGrid: React.FC = () => {
         >
           <Calendar size={14} style={{ marginRight: '6px' }} />
           {isEmailMode ? 'Close Outreach' : 'Email Outreach'}
+        </button>
+        <button
+          className={`tool-btn ${isSchoolView ? 'active-visit' : ''}`}
+          onClick={() => setIsSchoolView(!isSchoolView)}
+          style={{ marginRight: '12px' }}
+          title="Toggle School Summary View"
+        >
+          <Calendar size={14} style={{ marginRight: '6px' }} />
+          {isSchoolView ? 'Exit School View' : 'School View'}
         </button>
         <div className="tool-group" style={{ display: 'flex', gap: '4px', marginRight: '12px' }}>
           <button className="tool-btn" onClick={expandAll} title="Expand All Schools">
@@ -615,13 +819,45 @@ const PlanningGrid: React.FC = () => {
                       matchesEmailFilter(t) && matchesSearch(t, school, campus)
                     );
                     if (!hasVisibleTeacherInCampus) return null; // Hides empty campuses entirely
+                    const filteredCampusTeachers = teacherList.filter((t: any) =>
+                      matchesEmailFilter(t) && matchesSearch(t, school, campus)
+                    );
                     return (
                       <React.Fragment key={campus}>
                         <tr className="campus-row">
-                          <td className="sticky-col campus-header-cell">— {campus}</td>
-                          {months.map(m => <td key={m.key} className="header-fill"></td>)}
+                          <td className="sticky-col campus-header-cell">
+                            — {campus}
+                            {isSchoolView && (
+                              <span className="campus-year-badge">
+                                {' '}· Visit: {getCampusYearTotal(teacherList, school, campus)}
+                              </span>
+                            )}
+                          </td>
+                          {isSchoolView
+                            ? months.map(m => {
+                              const hasVisit = campusHasVisit(teacherList, school, campus, m.key);
+                              const isLvaActive = activeTool === 'LVA';
+                              const monthLabel = `${m.label} ${m.year}`;
+                              return (
+                                <td
+                                  key={m.key}
+                                  className={`header-fill school-view-cell ${hasVisit ? 'cell-visit' : ''} ${isLvaActive ? 'cell-disabled' : ''}`}
+                                  onClick={(e) => {
+                                    if (isLvaActive) return;
+                                    if (activeTool === 'Visit') {
+                                      openApplyVisitPopover(e, school, campus, filteredCampusTeachers, m.key, monthLabel);
+                                    } else if (activeTool === 'Eraser') {
+                                      openEraseVisitPopover(e, school, campus, filteredCampusTeachers, m.key, monthLabel);
+                                    }
+                                  }}
+                                >
+                                  {hasVisit && <div className="activity-label">Visit</div>}
+                                </td>
+                              );
+                            })
+                            : months.map(m => <td key={m.key} className="header-fill"></td>)}
                         </tr>
-                        {teacherList.map((teacher: any) => {
+                        {!isSchoolView && teacherList.map((teacher: any) => {
                           // Filter Teacher
                           if (!matchesEmailFilter(teacher) || !matchesSearch(teacher, school, campus)) return null;
                           const isSelected = selectedIds.has(teacher.id);
@@ -730,6 +966,25 @@ const PlanningGrid: React.FC = () => {
           onClose={() => setMenuConfig(null)}
           onRefresh={refresh}
           onQueueChange={handleQueueChange}
+        />
+      )}
+      {schoolViewPopover && (
+        <SchoolViewPopover
+          x={schoolViewPopover.x}
+          y={schoolViewPopover.y}
+          mode={schoolViewPopover.mode}
+          school={schoolViewPopover.school}
+          campus={schoolViewPopover.campus}
+          monthLabel={schoolViewPopover.monthLabel}
+          rows={schoolViewPopover.rows}
+          onClose={() => setSchoolViewPopover(null)}
+          onConfirm={(checkedIds) => {
+            if (schoolViewPopover.mode === 'apply') {
+              handleApplyVisitConfirm(checkedIds, schoolViewPopover.teacherList, schoolViewPopover.monthKey);
+            } else {
+              handleEraseVisitConfirm(checkedIds, schoolViewPopover.teacherList, schoolViewPopover.monthKey);
+            }
+          }}
         />
       )}
       {emailDrafts.length > 0 && (
