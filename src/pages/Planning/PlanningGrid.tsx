@@ -67,6 +67,8 @@ const PlanningGrid: React.FC = () => {
   // --- MULTI-CHIP SEARCH STATE (Excel-style filter) ---
   const [searchQuery, setSearchQuery] = useState('');
   const [searchChips, setSearchChips] = useState<string[]>([]);
+  // --- MONTH HEADER FILTER (click a month to show only schools/campuses/teachers active that month) ---
+  const [monthFilter, setMonthFilter] = useState<string | null>(null);
   // Suggestions shown in the dropdown while typing, drawn from teacher/school/campus names
   const searchSuggestions = React.useMemo(() => {
     const q = flattenText(searchQuery);
@@ -118,6 +120,7 @@ const PlanningGrid: React.FC = () => {
     setExcludedIds(new Set());
     setSearchChips([]);
     setSearchQuery('');
+    setMonthFilter(null);
     setEmailFilters(prev => ({ ...prev, month: months[0]?.key || '' }));
     setHasInitializedExpand(false);
   }, [academicYearStart]);
@@ -467,6 +470,15 @@ const PlanningGrid: React.FC = () => {
     }
     return { kind: 'none' };
   };
+  // --- MONTH HEADER FILTER: does this teacher have relevant activity in the filtered month? ---
+  // School View only cares about Visit (it's Visit-only); normal view counts LVA or Visit.
+  const matchesMonthFilter = (teacher: any): boolean => {
+    if (!monthFilter) return true;
+    const status = getTeacherVisitStatus(teacher, monthFilter);
+    if (!status.activity_type) return false;
+    if (isSchoolView) return status.activity_type === 'Visit';
+    return true; // any activity type (LVA or Visit) counts in normal view
+  };
   // --- SCHOOL VIEW: open the "Apply Visit" popover for a campus/month ---
   const openApplyVisitPopover = (
     e: React.MouseEvent, school: string, campus: string,
@@ -781,8 +793,15 @@ const PlanningGrid: React.FC = () => {
               {months.map(m => {
                 const counts = getMonthCounts(m.key);
                 const schoolViewVisit = isSchoolView ? getSchoolViewMonthVisitCount(m.key) : counts.visit;
+                const isActiveFilter = monthFilter === m.key;
                 return (
-                  <th key={m.key} className="month-header">
+                  <th
+                    key={m.key}
+                    className={`month-header ${isActiveFilter ? 'month-filter-active' : ''}`}
+                    onClick={() => setMonthFilter(prev => (prev === m.key ? null : m.key))}
+                    title="Click to show only schools with activity this month"
+                    style={{ cursor: 'pointer' }}
+                  >
                     <div className="month-label">{m.label}</div>
                     <div className="month-year">{m.year}</div>
                     <div className="month-total" style={{
@@ -804,7 +823,7 @@ const PlanningGrid: React.FC = () => {
               // Deep Filter Logic: Check email mode AND search query
               const hasVisibleTeacherInSchool = Object.values(campuses).some((teacherList: any) =>
                 teacherList.some((t: any) =>
-                  matchesEmailFilter(t) && matchesSearch(t, school, Object.keys(campuses)[0] || '')
+                  matchesEmailFilter(t) && matchesSearch(t, school, Object.keys(campuses)[0] || '') && matchesMonthFilter(t)
                 )
               );
               if (!hasVisibleTeacherInSchool) return null; // Hides empty schools entirely
@@ -829,11 +848,11 @@ const PlanningGrid: React.FC = () => {
                   {isExpanded && Object.entries(campuses).map(([campus, teacherList]: any) => {
                     // Filter Campus: Check email mode AND search query
                     const hasVisibleTeacherInCampus = teacherList.some((t: any) =>
-                      matchesEmailFilter(t) && matchesSearch(t, school, campus)
+                      matchesEmailFilter(t) && matchesSearch(t, school, campus) && matchesMonthFilter(t)
                     );
                     if (!hasVisibleTeacherInCampus) return null; // Hides empty campuses entirely
                     const filteredCampusTeachers = teacherList.filter((t: any) =>
-                      matchesEmailFilter(t) && matchesSearch(t, school, campus)
+                      matchesEmailFilter(t) && matchesSearch(t, school, campus) && matchesMonthFilter(t)
                     );
                     return (
                       <React.Fragment key={campus}>
@@ -872,7 +891,7 @@ const PlanningGrid: React.FC = () => {
                         </tr>
                         {!isSchoolView && teacherList.map((teacher: any) => {
                           // Filter Teacher
-                          if (!matchesEmailFilter(teacher) || !matchesSearch(teacher, school, campus)) return null;
+                          if (!matchesEmailFilter(teacher) || !matchesSearch(teacher, school, campus) || !matchesMonthFilter(teacher)) return null;
                           const isSelected = selectedIds.has(teacher.id);
                           return (
                             <tr key={teacher.id} className={`teacher-row ${isSelected ? 'row-selected' : ''}`}>
