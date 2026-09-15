@@ -434,6 +434,16 @@ const PlanningGrid: React.FC = () => {
   const getCampusYearTotal = (teacherList: any[], school: string, campus: string) => {
     return months.reduce((sum, m) => sum + (campusHasVisit(teacherList, school, campus, m.key) ? 1 : 0), 0);
   };
+  // --- HELPER: Month header count for School View = number of campuses with a Visit that month ---
+  const getSchoolViewMonthVisitCount = (monthKey: string) => {
+    let visitCount = 0;
+    Object.entries(groupedData).forEach(([school, campuses]: any) => {
+      Object.entries(campuses).forEach(([campus, teacherList]: any) => {
+        if (campusHasVisit(teacherList, school, campus, monthKey)) visitCount++;
+      });
+    });
+    return visitCount;
+  };
   // --- HELPER: Resolve a single teacher's Visit-relevant status for a month ---
   type TeacherVisitStatus =
     | { kind: 'obs'; activity_type: string; planId?: undefined }
@@ -770,6 +780,7 @@ const PlanningGrid: React.FC = () => {
               </th>
               {months.map(m => {
                 const counts = getMonthCounts(m.key);
+                const schoolViewVisit = isSchoolView ? getSchoolViewMonthVisitCount(m.key) : counts.visit;
                 return (
                   <th key={m.key} className="month-header">
                     <div className="month-label">{m.label}</div>
@@ -778,8 +789,10 @@ const PlanningGrid: React.FC = () => {
                       display: 'flex', justifyContent: 'center', gap: '8px',
                       fontSize: '9px', opacity: 0.8, marginTop: '2px', fontWeight: 500
                     }}>
-                      <span style={{ color: counts.lva > 0 ? '#60a5fa' : 'inherit' }}>LVA: {counts.lva}</span>
-                      <span style={{ color: counts.visit > 0 ? '#a78bfa' : 'inherit' }}>Visit: {counts.visit}</span>
+                      {!isSchoolView && (
+                        <span style={{ color: counts.lva > 0 ? '#60a5fa' : 'inherit' }}>LVA: {counts.lva}</span>
+                      )}
+                      <span style={{ color: schoolViewVisit > 0 ? '#a78bfa' : 'inherit' }}>Visit: {schoolViewVisit}</span>
                     </div>
                   </th>
                 );
