@@ -161,6 +161,95 @@ OUTPUT RULES:
   }
 });
 // ---------------------------------------------------------
+// SHARED PROMPT: TONE / HUMBLE INQUIRY REPHRASING
+// ---------------------------------------------------------
+const toneSystemPrompt = `You are a specialized tone-review engine for English Phonics Teacher feedback notes.
+INPUT: The text you receive is ALREADY grammar-polished. Do NOT fix grammar, expand shorthand, or change phrasing for clarity — that has already been done.
+YOUR ONLY JOB: Review the text for tone, and rephrase ONLY where needed, using these two rules:
+1. DIRECT STATEMENTS (not questions):
+   - If a sentence sounds too blunt, direct, or confrontational, soften the wording.
+   - Keep it a STATEMENT. Do NOT turn it into a question.
+   - Example: "You didn't use the Big Book today" -> "The Big Book wasn't used during today's session."
+2. LEADING OR CLOSED QUESTIONS (sentences ending in "?"):
+   - If a question sounds leading, closed, or judgmental rather than genuinely curious, reframe it into an open, "humble inquiry" style question (genuinely curious, non-leading, inviting reflection).
+   - Example: "Why didn't you use the Big Book?" -> "What led to the Big Book not being used today?"
+   - If a question is already open and non-leading, leave it exactly as-is.
+DO NOT OVER-OPTIMIZE (CRITICAL):
+- If the text ALREADY reads as open, non-leading, and respectfully phrased, return { "changed": false }. Do not suggest further softening of phrasing that is already gentle.
+- A statement that is already neutral, factual, or matter-of-fact (not blunt or confrontational) does NOT need softening. Leave it as-is.
+- A question that already starts with "What", "How", or similar open framing, and does not presuppose fault, is ALREADY a humble inquiry. Do NOT rephrase it again just to reword it differently — only fix questions that are genuinely closed, accusatory, or presuppose blame.
+- When in doubt about whether a further tweak is actually an improvement or just a stylistic rewording, choose NOT to change it. A false "changed: false" is preferable to repeatedly re-editing text that is already acceptable.
+ABSOLUTE RULES (DO NOT VIOLATE):
+- NEVER touch or rephrase anything inside square brackets [...]. Leave bracket content EXACTLY as it is.
+- NEVER touch phonetic markers like /t/, /d/, (H), or 'schwa'.
+- Keep "(GA)" tags, hyphens "-", and bullet points exactly as they are.
+- Do NOT use markdown bolding (**).
+- PRESERVE LINE BREAKS: return the exact same number of lines, in the same order. NEVER merge two lines into one. NEVER split one line into two.
+- If NOTHING in the text needs softening or reframing, do not invent a change.
+OUTPUT FORMAT:
+Return ONLY a valid JSON object: { "changed": boolean, "revised": "string or omit if changed is false" }
+No explanations, no markdown fences, no extra keys.`;
+// ---------------------------------------------------------
+// 3. TONE / HUMBLE INQUIRY REPHRASE (SINGLE)
+// ---------------------------------------------------------
+router.post("/api/rephrase-tone", async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "No text provided" });
+    const response = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: toneSystemPrompt },
+        { role: "user", content: text }
+      ],
+      model: "openai/gpt-oss-120b",
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+    });
+    const raw = response.choices[0]?.message?.content || '{"changed":false}';
+    let result;
+    try {
+      result = JSON.parse(raw);
+    } catch (e) {
+      console.error("JSON Parse Error on Tone Output:", raw);
+      result = { changed: false };
+    }
+    res.json(result);
+  } catch (error) {
+    console.error("Groq Tone Rephrase Error:", error);
+    res.status(500).json({ error: "Failed to rephrase tone" });
+  }
+});
+// ---------------------------------------------------------
+// 4. TONE / HUMBLE INQUIRY REPHRASE (BATCH)
+// ---------------------------------------------------------
+router.post("/api/rephrase-tone-batch", async (req, res) => {
+  try {
+    const { items } = req.body; // Expects array of { id, text } — text should be already-polished
+    if (!items || items.length === 0) return res.json({});
+    const batchToneSystemPrompt = `${toneSystemPrompt}
+BATCH MODE: You will receive a JSON array of { "id": "...", "text": "..." } objects.
+Return ONLY a valid JSON object mapping each id to its own result:
+{ "indicator_id": { "changed": boolean, "revised": "string or omit if changed is false" } }
+No additional keys, no explanations.`;
+    const userPrompt = `Data to process: ${JSON.stringify(items)}`;
+    const response = await groq.chat.completions.create({
+      messages: [
+        { role: "system", content: batchToneSystemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      model: "openai/gpt-oss-120b",
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+    });
+    const content = response.choices[0]?.message?.content;
+    const parsed = content ? JSON.parse(content) : {};
+    res.json(parsed);
+  } catch (error) {
+    console.error("Groq Tone Batch Error:", error);
+    res.status(500).json({ error: "Failed to process tone batch" });
+  }
+});
+// ---------------------------------------------------------
 // STEP 1: AGENTIC LOGIC COMPILER (Detective -> Writer Pipeline)
 // ---------------------------------------------------------
 router.post("/api/generate-next-steps", async (req, res) => {

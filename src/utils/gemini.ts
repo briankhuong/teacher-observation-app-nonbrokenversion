@@ -140,12 +140,45 @@ export async function polishBatchWithGroq(items: { id: string; text: string }[])
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items }),
     });
-    return await res.json(); 
+    return await res.json();
   } catch (error) {
     console.error("Batch Error:", error);
     return {};
   }
 }
+
+// 🟢 TONE / HUMBLE INQUIRY REPHRASE (background suggestion, never blocks polish)
+export async function rephraseToneWithGroq(text: string): Promise<{ changed: boolean; revised?: string }> {
+  try {
+    const res = await fetch(`${API_BASE}/api/rephrase-tone`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    return { changed: !!data.changed, revised: data.revised };
+  } catch (error) {
+    console.error("Tone Rephrase Error:", error);
+    return { changed: false };
+  }
+}
+
+export async function rephraseToneBatchWithGroq(
+  items: { id: string; text: string }[]
+): Promise<Record<string, { changed: boolean; revised?: string }>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/rephrase-tone-batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    return await res.json();
+  } catch (error) {
+    console.error("Tone Rephrase Batch Error:", error);
+    return {};
+  }
+}
+
 
 // 🟢 HELPER: Naturalize Text
 async function naturalizeTextWithGroq(text: string): Promise<string> {

@@ -173,7 +173,7 @@ import type {
 import { buildTeacherExportModel } from "./exportTeacherModel";
 import { buildAdminExportModel } from "./exportAdminModel";
 import type { AdminExportModel } from "./exportAdminModel";
-import { polishTextWithGroq, polishBatchWithGroq } from "./utils/gemini";
+import { polishTextWithGroq, polishBatchWithGroq, rephraseToneWithGroq, rephraseToneBatchWithGroq } from "./utils/gemini";
 import { useAuth } from "./auth/AuthContext";
 interface ObservationWorkspaceProps {
   observationMeta: {
@@ -420,6 +420,9 @@ export const ObservationWorkspaceShell: React.FC<
   } | null>(null);
   const [batchCandidates, setBatchCandidates] = useState<{ id: string, number: string, title: string, text: string }[]>([]);
   const [isAiPolishing, setIsAiPolishing] = useState(false);
+  // 🆕 Tone / Humble-Inquiry suggestions: { [indicatorId]: { changed, revised } }
+  const [toneSuggestions, setToneSuggestions] = useState<Record<string, { changed: boolean; revised?: string }>>({});
+  const [toneModalTarget, setToneModalTarget] = useState<{ id: string; index: number } | null>(null);
   const storageKey = `${STORAGE_PREFIX}${observationMeta.id}`;
   const [isCanvasVisible, setIsCanvasVisible] = useState(true);
   const [isDesktopMode, setIsDesktopMode] = useState(() => window.innerWidth >= 768);
@@ -928,6 +931,17 @@ export const ObservationWorkspaceShell: React.FC<
         }
       }));
       isDirtyRef.current = true;
+      // 🆕 Fire tone/humble-inquiry check for the whole batch, all at once, in the background.
+      const toneCandidates = changed.map(c => ({ id: c.id, text: results[c.id] }));
+      if (toneCandidates.length > 0) {
+        rephraseToneBatchWithGroq(toneCandidates)
+          .then(toneResults => {
+            setToneSuggestions(prev => ({ ...prev, ...toneResults }));
+          })
+          .catch(err => {
+            console.warn("Batch tone rephrase check failed (non-blocking):", err);
+          });
+      }
       setBatchResult({ changed, unchanged });
       setShowBatchResultModal(true);
     } catch (err: any) {
@@ -1599,6 +1613,7 @@ export const ObservationWorkspaceShell: React.FC<
     if (isAiPolishing) return;
     const currentText = indicators[targetIndex]?.commentText;
     if (!currentText || !currentText.trim()) return;
+    const indicatorId = indicators[targetIndex]?.id;
     setIsAiPolishing(true);
     try {
       const polished = await polishTextWithGroq(currentText);
@@ -1619,6 +1634,16 @@ export const ObservationWorkspaceShell: React.FC<
         }
       }));
       isDirtyRef.current = true;
+      // 🆕 Background tone/humble-inquiry check — never blocks the textbox render.
+      if (indicatorId) {
+        rephraseToneWithGroq(polished)
+          .then(result => {
+            setToneSuggestions(prev => ({ ...prev, [indicatorId]: result }));
+          })
+          .catch(err => {
+            console.warn("Tone rephrase check failed (non-blocking):", err);
+          });
+      }
     } catch (err: any) {
       console.error("Groq Single Polish failed", err);
       const errorMsg = err?.status === 429
@@ -2710,6 +2735,8 @@ export const ObservationWorkspaceShell: React.FC<
                               handleCommentChange={handleCommentChange}
                               handleSendToTop={handleSendToTop}
                               updateIndicator={updateIndicator}
+                              toneSuggestion={toneSuggestions[ind.id]}
+                              onOpenToneSuggestion={(id, i) => setToneModalTarget({ id, index: i })}
                             />
                           );
                         })}
@@ -3062,6 +3089,23 @@ export const ObservationWorkspaceShell: React.FC<
                           >
                             {isAiPolishing ? "✨ Polishing..." : "✨ AI Polish"}
                           </button>
+                          {/* 🆕 "i" icon: shows once a gentler/less-leading version is ready */}
+                          {toneSuggestions[active.id]?.changed && (
+                            <button
+                              type="button"
+                              onClick={() => setToneModalTarget({ id: active.id, index: activeIndex })}
+                              title="A gentler/less-leading version is available for review"
+                              style={{
+                                width: 22, height: 22, minWidth: 22, borderRadius: "50%",
+                                border: "1px solid #38bdf8", background: "rgba(56, 189, 248, 0.15)",
+                                color: "#38bdf8", fontSize: 12, fontWeight: 700, fontStyle: "italic",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                cursor: "pointer", marginLeft: 4, padding: 0
+                              }}
+                            >
+                              i
+                            </button>
+                          )}
                           {active.ocrPendingReview && (
                             <span className="ocr-pill ocr-pill-pending">Needs review</span>
                           )}
@@ -3794,6 +3838,88 @@ export const ObservationWorkspaceShell: React.FC<
           </div>
         </div>
       )}
+      {/* 🆕 Tone / Humble-Inquiry Suggestion Review Modal */}
+      {toneModalTarget && (() => {
+        const targetIndicator = indicators.find(ind => ind.id === toneModalTarget.id);
+        const suggestion = toneSuggestions[toneModalTarget.id];
+        if (!targetIndicator || !suggestion?.revised) return null;
+        return (
+          <div className="scratchpad-backdrop">
+            <div className="scratchpad-modal" style={{ maxWidth: 560, display: "flex", flexDirection: "column", maxHeight: "85vh" }}>
+              <div className="scratchpad-header">
+                <div>
+                  <div className="scratchpad-title">💬 Tone Suggestion</div>
+                  <div className="scratchpad-sub">
+                    {targetIndicator.number} — {targetIndicator.title}
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: 16, overflowY: "auto", flexGrow: 1 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#94a3b8", marginBottom: 6 }}>
+                    Current
+                  </div>
+                  <div style={{
+                    whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.5, color: "#cbd5e1",
+                    background: "#0f172a", border: "1px solid #334155", borderRadius: 8, padding: 10
+                  }}>
+                    {targetIndicator.commentText}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#38bdf8", marginBottom: 6 }}>
+                    Suggested (less leading / softer tone)
+                  </div>
+                  <div style={{
+                    whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.5, color: "#e2e8f0",
+                    background: "#0c1e2e", border: "1px solid rgba(56, 189, 248, 0.5)", borderRadius: 8, padding: 10
+                  }}>
+                    {suggestion.revised}
+                  </div>
+                </div>
+              </div>
+              <div style={{
+                padding: 16,
+                borderTop: "1px solid rgba(51,65,85,0.5)",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8
+              }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setToneSuggestions(prev => {
+                      const next = { ...prev };
+                      delete next[toneModalTarget.id];
+                      return next;
+                    });
+                    setToneModalTarget(null);
+                  }}
+                >
+                  Dismiss
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ background: "#38bdf8", color: "white", border: "none" }}
+                  onClick={() => {
+                    updateIndicator(toneModalTarget.index, { commentText: suggestion.revised });
+                    setToneSuggestions(prev => {
+                      const next = { ...prev };
+                      delete next[toneModalTarget.id];
+                      return next;
+                    });
+                    setToneModalTarget(null);
+                  }}
+                >
+                  ✅ Use this version
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
@@ -3844,13 +3970,16 @@ interface IndicatorRowProps {
   handleCommentChange: (idx: number, val: string) => void;
   handleSendToTop: (id: string) => void;
   updateIndicator: (index: number, patch: any) => void;
+  toneSuggestion?: { changed: boolean; revised?: string };
+  onOpenToneSuggestion: (id: string, idx: number) => void;
 }
 const IndicatorRow = React.memo(({
   ind, idx, isSidebar = false, activeRowId, openRowIds, pinnedRowIds,
   activeIndex, isAiPolishing, isRecording, isTranscribing,
   setActiveIndex, handleRowToggle, setActiveRowId, togglePin,
   insertPreComment, toggleGood, toggleGrowth, toggleIncludeInTrainerSummary,
-  handlePolishWithAi, startRecording, stopRecording, handleCommentChange, handleSendToTop, updateIndicator
+  handlePolishWithAi, startRecording, stopRecording, handleCommentChange, handleSendToTop, updateIndicator,
+  toneSuggestion, onOpenToneSuggestion
 }: IndicatorRowProps) => {
   const isExpanded =
     openRowIds.has(ind.id) ||
@@ -4063,10 +4192,27 @@ const IndicatorRow = React.memo(({
                 )}
                 {/* End of AI Polish UI */}
                 {/* End of AI Polish UI */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
                   <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setActiveIndex(idx); handlePolishWithAi(idx); }} disabled={isAiPolishing || ind.commentText.length < 5}>
                     {isAiPolishing ? "✨..." : "✨ AI Polish"}
                   </button>
+                  {/* 🆕 "i" icon: a gentler/less-leading version is ready for review */}
+                  {toneSuggestion?.changed && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onOpenToneSuggestion(ind.id, idx); }}
+                      title="A gentler/less-leading version is available for review"
+                      style={{
+                        width: 22, height: 22, minWidth: 22, borderRadius: "50%",
+                        border: "1px solid #38bdf8", background: "rgba(56, 189, 248, 0.15)",
+                        color: "#38bdf8", fontSize: 12, fontWeight: 700, fontStyle: "italic",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer", padding: 0
+                      }}
+                    >
+                      i
+                    </button>
+                  )}
                   <button type="button" className="btn" onClick={(e) => {
                     e.stopPropagation();
                     setActiveIndex(idx);
