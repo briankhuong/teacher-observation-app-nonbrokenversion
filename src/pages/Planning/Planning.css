@@ -140,6 +140,7 @@ border: 0.1px solid #3d4756;
 .cell-lva .activity-label { background: rgba(59, 130, 246, 0.15); color: #ffffff; }
 .cell-visit .activity-label { background: rgba(139, 92, 246, 0.15); color: #ffffff; }
 .cell-complete .activity-label { background: rgba(34, 197, 94, 0.15); border: 0.5px solid #33c76ade !important; color: #4ade80; }
+.cell-partial .activity-label { background: rgba(245, 158, 11, 0.15); border: 0.5px solid #f59e0bde !important; color: #fbbf24; }
 .cell-cancelled .activity-label { text-decoration: line-through; color: #64748b; }
 /* Update your CSS with these specific indicators */
 /* Orange Triangle: New/Modified Draft */
@@ -159,6 +160,7 @@ border: 0.1px solid #3d4756;
 }
 .conflict-icon { color: #ef4444; }
 .lock-icon { color: #4ade80; opacity: 0.8; width: 8px; height: 8px; }
+.partial-check-icon { color: #fbbf24; opacity: 0.85; width: 8px; height: 8px; }
 .notes-indicator {
   position: absolute; top: 2px; left: 2px; width: 3px; height: 3px;
   background: #f59e0b; border-radius: 50%;
@@ -178,7 +180,7 @@ border: 0.1px solid #3d4756;
   border: 1px solid #334155; border-radius: 8px; width: 220px; padding: 12px;
 }
 .menu-header { display: flex; justify-content: space-between; color: #94a3b8; font-size: 11px; margin-bottom: 12px; }
-.status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+.status-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 12px; }
 .status-grid button { background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 4px; font-size: 11px; border-radius: 4px; cursor: pointer; }
 .status-grid button.active { background: #3b82f6; border-color: #3b82f6; }
 .planning-context-menu textarea {

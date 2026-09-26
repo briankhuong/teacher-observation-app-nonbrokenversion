@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Trash2, AlertCircle } from 'lucide-react';
+import { X, Save, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
 // import { supabase } from '../../supabaseClient'; // No longer needed for delete!
 
 interface PlanningContextMenuProps {
@@ -25,7 +25,7 @@ const PlanningContextMenu: React.FC<PlanningContextMenuProps> = ({
   const { x, y, teacher, monthKey, plan } = config;
   
   // Local state for the form inputs
-  const [status, setStatus] = useState<'planned' | 'cancelled'>(plan?.status || 'planned');
+  const [status, setStatus] = useState<'planned' | 'completed' | 'cancelled'>(plan?.status || 'planned');
   const [notes, setNotes] = useState(plan?.notes || '');
   
   // Calculate position to keep menu on screen
@@ -86,18 +86,25 @@ const PlanningContextMenu: React.FC<PlanningContextMenuProps> = ({
         <div className="menu-section">
           <label>Status</label>
           <div className="status-grid">
-            <button 
-              className={status === 'planned' ? 'active' : ''} 
+            <button
+              className={status === 'planned' ? 'active' : ''}
               onClick={() => setStatus('planned')}
             >
               Planned
             </button>
-            <button 
-              className={status === 'cancelled' ? 'active' : ''} 
+            <button
+              className={status === 'completed' ? 'active' : ''}
+              onClick={() => setStatus('completed')}
+              style={{ color: status === 'completed' ? '#4ade80' : 'inherit' }}
+            >
+              <CheckCircle size={10} style={{ marginRight: 4 }} /> Complete
+            </button>
+            <button
+              className={status === 'cancelled' ? 'active' : ''}
               onClick={() => setStatus('cancelled')}
               style={{ color: status === 'cancelled' ? '#f87171' : 'inherit' }}
             >
-              <AlertCircle size={10} style={{ marginRight: 4 }}/> Cancel
+              <AlertCircle size={10} style={{ marginRight: 4 }} /> Cancel
             </button>
           </div>
         </div>

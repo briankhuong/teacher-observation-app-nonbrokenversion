@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { AlertCircle, Lock } from 'lucide-react';
+import { AlertCircle, Lock, CheckCircle } from 'lucide-react';
 interface GridCellProps {
   teacher: any;
   monthKey: string;
@@ -106,6 +106,7 @@ const GridCell: React.FC<GridCellProps> = ({
           {summary && <span className="activity-label">{summary}</span>}
           <div className="cell-icons">
             {allCompleted && <Lock className="lock-icon" />}
+            {someCompleted && <CheckCircle className="partial-check-icon" />}
             {!allCompleted && visiblePlans.length > 0 && (
               <div className="notes-indicator" />
             )}
